@@ -1,0 +1,10 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+serialport = "4.7.1"
+iced = { version = "0.13.1", features = ["canvas", "debug", "lazy", "tokio"] }
+artnet_protocol = "0.4.3"
+rand = "0.9.1"
