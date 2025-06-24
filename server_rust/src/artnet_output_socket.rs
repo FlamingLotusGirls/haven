@@ -20,12 +20,7 @@ impl ArtnetOutputSocket {
         for elder in elders {
             let command = ArtCommand::Output(Output {
                 data: {
-                    let pixels = [
-                        elder.crane_light,
-                        elder.crane_light,
-                        elder.crane_light,
-                        elder.crane_light,
-                    ];
+                    let pixels = [elder.crane_light; 170];
                     pixels
                         .iter()
                         .flat_map(|pixel| {

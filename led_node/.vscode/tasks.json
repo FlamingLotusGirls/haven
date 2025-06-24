@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "player_ethernet: cargo run: Neopixel",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "--features", "neopixel"],
+      "problemMatcher": ["$rustc"],
+      "group": "build",
+      "presentation": {
+        "clear": true
+      }
+    },
+    {
+      "label": "player_ethernet: cargo run: Dotstar",
+      "type": "shell",
+      "command": "cargo",
+      "args": ["run", "--features", "dotstar"],
+      "problemMatcher": ["$rustc"],
+      "group": "build",
+      "presentation": {
+        "clear": true
+      }
+    }
+  ]
+}
