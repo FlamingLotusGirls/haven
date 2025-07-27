@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "preLaunchTask": "rust: cargo build",
+            "type": "probe-rs-debug",
+            "request": "launch",
+            "name": "probe-rs-debug",
+            "cwd": "${workspaceFolder}",
+            "chip": "rp2040",
+            "connectUnderReset": false,
+            "speed": 4000,
+            "runtimeExecutable": "probe-rs",
+            "runtimeArgs": [
+                "dap-server"
+            ],
+            "flashingConfig": {
+                "flashingEnabled": true,
+                "haltAfterReset": false
+            },
+            "coreConfigs": [
+                {
+                    "coreIndex": 0,
+                    "programBinary": "target/thumbv6m-none-eabi/debug/led_node",
+                    "rttEnabled": true,
+                    "svdFile": "./.vscode/rp2040.svd",
+                }
+            ],
+            "consoleLogLevel": "Info",
+            "wireProtocol": "Swd"
+        }
+    ]
+}
