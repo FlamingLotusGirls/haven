@@ -138,4 +138,15 @@ impl<'d, P: Instance, const S: usize, const N: usize, const NBYTES: usize>
 
         Timer::after_micros(55).await;
     }
+
+    /// Write a buffer of [u32] to the ws2812 string
+    pub async fn write_uints(&mut self, color_uints: &[u32; N]) {
+        // DMA transfer
+        self.sm
+            .tx()
+            .dma_push(self.dma.reborrow(), color_uints, false)
+            .await;
+
+        Timer::after_micros(55).await;
+    }
 }
