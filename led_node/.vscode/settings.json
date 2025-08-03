@@ -3,6 +3,6 @@
   "rust-analyzer.check.allTargets": false,
   "rust-analyzer.checkOnSave": true,
   "rust-analyzer.rustfmt.extraArgs": ["--config=imports_granularity=Crate"],
-  "rust-analyzer.cargo.features": ["neopixel"],
+  "rust-analyzer.cargo.features": [],
   "editor.formatOnSave": true
 }
