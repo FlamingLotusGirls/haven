@@ -59,14 +59,14 @@ pub async fn receive_artnet<P: pio::Instance>(
     // DEBUG
     let mut last_sequence: u8 = 0;
 
-    // let mut pixels_0 = [RGB8::default(); PIXEL_COUNT];
-    // let mut pixels_1 = [RGB8::default(); PIXEL_COUNT];
-    // let mut pixels_2 = [RGB8::default(); PIXEL_COUNT];
-    // let mut pixels_3 = [RGB8::default(); PIXEL_COUNT];
-    let mut pixels_0_uints = [0u32; PIXEL_COUNT];
-    let mut pixels_1_uints = [0u32; PIXEL_COUNT];
-    let mut pixels_2_uints = [0u32; PIXEL_COUNT];
-    let mut pixels_3_uints = [0u32; PIXEL_COUNT];
+    let mut pixels_0 = [RGB8::default(); PIXEL_COUNT];
+    let mut pixels_1 = [RGB8::default(); PIXEL_COUNT];
+    let mut pixels_2 = [RGB8::default(); PIXEL_COUNT];
+    let mut pixels_3 = [RGB8::default(); PIXEL_COUNT];
+    // let mut pixels_0_uints = [0u32; PIXEL_COUNT];
+    // let mut pixels_1_uints = [0u32; PIXEL_COUNT];
+    // let mut pixels_2_uints = [0u32; PIXEL_COUNT];
+    // let mut pixels_3_uints = [0u32; PIXEL_COUNT];
     loop {
         let (packet_length, metadata) = socket.recv_from(&mut buf).await.unwrap();
 
@@ -114,7 +114,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                 }
 
                 let start_of_universe_in_pixel_array = (port_address % 10) * pixels_per_universe;
-                let byte_write_start = start_of_universe_in_pixel_array * 3;
+                // let byte_write_start = start_of_universe_in_pixel_array * 3;
                 // let byte_write_end = byte_write_start + dmx.data.len();
                 let data_iter = dmx
                     .data
@@ -122,92 +122,96 @@ pub async fn receive_artnet<P: pio::Instance>(
                     .take((PIXEL_COUNT - start_of_universe_in_pixel_array).max(0));
                 // .enumerate();
                 if port_address < 10 {
+                    // data_iter
+                    //     .zip(
+                    //         pixels_0_uints
+                    //             .iter_mut()
+                    //             .skip(start_of_universe_in_pixel_array),
+                    //     )
+                    //     .for_each(|(dmx_pixel, pixel_uint)| {
+                    //         *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
+                    //             | (u32::from(dmx_pixel[1]) << 16)
+                    //             | (u32::from(dmx_pixel[2]) << 8);
+                    //     });
                     data_iter
-                        .zip(
-                            pixels_0_uints
-                                .iter_mut()
-                                .skip(start_of_universe_in_pixel_array),
-                        )
-                        .for_each(|(dmx_pixel, pixel_uint)| {
-                            *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
-                                | (u32::from(dmx_pixel[1]) << 16)
-                                | (u32::from(dmx_pixel[2]) << 8);
+                        .zip(pixels_0.iter_mut().skip(start_of_universe_in_pixel_array))
+                        .for_each(|(dmx_pixel, pixel)| {
+                            pixel.r = dmx_pixel[0];
+                            pixel.g = dmx_pixel[1];
+                            pixel.b = dmx_pixel[2];
                         });
-                    // data_iter.for_each(|(i, pixel)| {
-                    //     // pixels_0[start_of_universe_in_pixel_array + i] =
-                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     pixels_0_uints[start_of_universe_in_pixel_array + i] = *pixel;
-                    // });
-                    // pixels_0_uints[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
-                        // strip0.write(&pixels_0).await;
-                        strip0.write_uints(&pixels_0_uints).await;
+                        strip0.write(&pixels_0).await;
+                        // strip0.write_uints(&pixels_0_uints).await;
                     }
                 } else if port_address < 20 {
+                    // data_iter
+                    //     .zip(
+                    //         pixels_1_uints
+                    //             .iter_mut()
+                    //             .skip(start_of_universe_in_pixel_array),
+                    //     )
+                    //     .for_each(|(dmx_pixel, pixel_uint)| {
+                    //         *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
+                    //             | (u32::from(dmx_pixel[1]) << 16)
+                    //             | (u32::from(dmx_pixel[2]) << 8);
+                    //     });
                     data_iter
-                        .zip(
-                            pixels_1_uints
-                                .iter_mut()
-                                .skip(start_of_universe_in_pixel_array),
-                        )
-                        .for_each(|(dmx_pixel, pixel_uint)| {
-                            *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
-                                | (u32::from(dmx_pixel[1]) << 16)
-                                | (u32::from(dmx_pixel[2]) << 8);
+                        .zip(pixels_1.iter_mut().skip(start_of_universe_in_pixel_array))
+                        .for_each(|(dmx_pixel, pixel)| {
+                            pixel.r = dmx_pixel[0];
+                            pixel.g = dmx_pixel[1];
+                            pixel.b = dmx_pixel[2];
                         });
-                    // data_iter.for_each(|(i, pixel)| {
-                    //     // pixels_1[start_of_universe_in_pixel_array + i] =
-                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     pixels_1_uints[start_of_universe_in_pixel_array + i] = *pixel;
-                    // });
-                    // pixels_1_uints[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
-                        // strip1.write(&pixels_1).await;
-                        strip1.write_uints(&pixels_1_uints).await;
+                        strip1.write(&pixels_1).await;
+                        // strip1.write_uints(&pixels_1_uints).await;
                     }
                 } else if port_address < 30 {
+                    // data_iter
+                    //     .zip(
+                    //         pixels_2_uints
+                    //             .iter_mut()
+                    //             .skip(start_of_universe_in_pixel_array),
+                    //     )
+                    //     .for_each(|(dmx_pixel, pixel_uint)| {
+                    //         *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
+                    //             | (u32::from(dmx_pixel[1]) << 16)
+                    //             | (u32::from(dmx_pixel[2]) << 8);
+                    //     });
                     data_iter
-                        .zip(
-                            pixels_2_uints
-                                .iter_mut()
-                                .skip(start_of_universe_in_pixel_array),
-                        )
-                        .for_each(|(dmx_pixel, pixel_uint)| {
-                            *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
-                                | (u32::from(dmx_pixel[1]) << 16)
-                                | (u32::from(dmx_pixel[2]) << 8);
+                        .zip(pixels_2.iter_mut().skip(start_of_universe_in_pixel_array))
+                        .for_each(|(dmx_pixel, pixel)| {
+                            pixel.r = dmx_pixel[0];
+                            pixel.g = dmx_pixel[1];
+                            pixel.b = dmx_pixel[2];
                         });
-                    // data_iter.for_each(|(i, pixel)| {
-                    //     // pixels_2[start_of_universe_in_pixel_array + i] =
-                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     pixels_2_uints[start_of_universe_in_pixel_array + i] = *pixel;
-                    // });
-                    // pixels_2_uints[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
-                        // strip2.write(&pixels_2).await;
-                        strip2.write_uints(&pixels_2_uints).await;
+                        strip2.write(&pixels_2).await;
+                        // strip2.write_uints(&pixels_2_uints).await;
                     }
                 } else if port_address < 40 {
+                    // data_iter
+                    //     .zip(
+                    //         pixels_3_uints
+                    //             .iter_mut()
+                    //             .skip(start_of_universe_in_pixel_array),
+                    //     )
+                    //     .for_each(|(dmx_pixel, pixel_uint)| {
+                    //         *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
+                    //             | (u32::from(dmx_pixel[1]) << 16)
+                    //             | (u32::from(dmx_pixel[2]) << 8);
+                    //     });
                     data_iter
-                        .zip(
-                            pixels_3_uints
-                                .iter_mut()
-                                .skip(start_of_universe_in_pixel_array),
-                        )
-                        .for_each(|(dmx_pixel, pixel_uint)| {
-                            *pixel_uint = (u32::from(dmx_pixel[0]) << 24)
-                                | (u32::from(dmx_pixel[1]) << 16)
-                                | (u32::from(dmx_pixel[2]) << 8);
+                        .zip(pixels_3.iter_mut().skip(start_of_universe_in_pixel_array))
+                        .for_each(|(dmx_pixel, pixel)| {
+                            pixel.r = dmx_pixel[0];
+                            pixel.g = dmx_pixel[1];
+                            pixel.b = dmx_pixel[2];
                         });
-                    // data_iter.for_each(|(i, pixel)| {
-                    //     // pixels_3[start_of_universe_in_pixel_array + i] =
-                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     pixels_3_uints[start_of_universe_in_pixel_array + i] = *pixel;
-                    // });
-                    // pixels_3_uints[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
-                        // strip3.write(&pixels_3).await;
-                        strip3.write_uints(&pixels_3_uints).await;
+                        strip3.write(&pixels_3).await;
+                        // strip3.write_uints(&pixels_3_uints).await;
                     }
                 }
             }

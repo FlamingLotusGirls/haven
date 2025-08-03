@@ -113,8 +113,8 @@ impl<'d, P: Instance, const S: usize, const N: usize, const NBYTES: usize>
         // Precompute the word bytes from the colors
         let mut words = [0u32; N];
         for i in 0..N {
-            let word = (u32::from(colors[i].g) << 24)
-                | (u32::from(colors[i].r) << 16)
+            let word = (u32::from(colors[i].r) << 24)
+                | (u32::from(colors[i].g) << 16)
                 | (u32::from(colors[i].b) << 8);
             words[i] = word;
         }
