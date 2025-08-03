@@ -18,7 +18,7 @@ use embassy_rp::{
     spi::{Async, Config as SpiConfig, Spi},
     uart,
 };
-use embassy_time::{Delay, Timer};
+use embassy_time::{Delay, Duration, Timer};
 use embedded_hal_bus::spi::ExclusiveDevice;
 use panic_probe as _;
 use smart_leds::RGB8;
@@ -104,13 +104,23 @@ async fn main(spawner: Spawner) {
     // Set up serial printing
     static SERIAL: StaticCell<UartWriter<'_, UART0>> = StaticCell::new();
     let s = SERIAL.init_with(|| {
-        UartWriter(uart::Uart::new_blocking(
-            p.UART0,
-            p.PIN_0,
-            p.PIN_1,
-            uart::Config::default(),
-        ))
+        UartWriter(uart::Uart::new_blocking(p.UART0, p.PIN_0, p.PIN_1, {
+            let mut config = uart::Config::default();
+            config.baudrate = 9600;
+            config
+        }))
     });
+
+    let delay = Duration::from_secs(1);
+    loop {
+        s.println(f!("led on!"));
+        // cyw43_control.gpio_set(0, true).await;
+        Timer::after(delay).await;
+
+        s.println(f!("led off!"));
+        // cyw43_control.gpio_set(0, false).await;
+        Timer::after(delay).await;
+    }
 
     // Set up pixel control
     let mut pio_neopixel_0 = Pio::new(p.PIO1, Irqs);
