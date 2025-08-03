@@ -116,28 +116,28 @@ async fn main(spawner: Spawner) {
     let mut pio_neopixel_0 = Pio::new(p.PIO1, Irqs);
 
     let program = PioWs2812Program::new(&mut pio_neopixel_0.common);
-    let mut pc0: PioWs2812<'_, _, 0, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip0: PioWs2812<'_, _, 0, PIXEL_COUNT> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm0,
         p.DMA_CH4,
         p.PIN_6,
         &program,
     );
-    let mut pc1: PioWs2812<'_, _, 1, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip1: PioWs2812<'_, _, 1, PIXEL_COUNT> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm1,
         p.DMA_CH5,
         p.PIN_7,
         &program,
     );
-    let mut pc2: PioWs2812<'_, _, 2, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip2: PioWs2812<'_, _, 2, PIXEL_COUNT> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm2,
         p.DMA_CH6,
         p.PIN_8,
         &program,
     );
-    let mut pc3: PioWs2812<'_, _, 3, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip3: PioWs2812<'_, _, 3, PIXEL_COUNT> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm3,
         p.DMA_CH7,
@@ -146,32 +146,32 @@ async fn main(spawner: Spawner) {
     );
 
     let mut pixels = [RGB8::default(); PIXEL_COUNT];
-    loop {
-        for i in &mut pixels {
-            i.r = 128;
-            i.g = 0;
-            i.b = 0;
-        }
-        pc0.write(&pixels).await;
-        for i in &mut pixels {
-            i.r = 128;
-            i.g = 128;
-            i.b = 0;
-        }
-        pc1.write(&pixels).await;
-        for i in &mut pixels {
-            i.r = 0;
-            i.g = 128;
-            i.b = 0;
-        }
-        pc2.write(&pixels).await;
-        for i in &mut pixels {
-            i.r = 0;
-            i.g = 0;
-            i.b = 128;
-        }
-        pc3.write(&pixels).await;
-    }
+    // loop {
+    //     for i in &mut pixels {
+    //         i.r = 128;
+    //         i.g = 0;
+    //         i.b = 0;
+    //     }
+    //     strip0.write(&pixels).await;
+    //     for i in &mut pixels {
+    //         i.r = 128;
+    //         i.g = 128;
+    //         i.b = 0;
+    //     }
+    //     strip1.write(&pixels).await;
+    //     for i in &mut pixels {
+    //         i.r = 0;
+    //         i.g = 128;
+    //         i.b = 0;
+    //     }
+    //     strip2.write(&pixels).await;
+    //     for i in &mut pixels {
+    //         i.r = 0;
+    //         i.g = 0;
+    //         i.b = 128;
+    //     }
+    //     strip3.write(&pixels).await;
+    // }
 
     // Connct to w5500 peripheral
     let mut spi_cfg = SpiConfig::default();
@@ -201,7 +201,7 @@ async fn main(spawner: Spawner) {
         i.r = 0;
         i.g = 128;
     }
-    pc0.write(&pixels).await;
+    strip0.write(&pixels).await;
 
     // Set up network stack
     let static_ip_net_config = NetConfig::ipv4_static(embassy_net::StaticConfigV4 {
@@ -235,7 +235,7 @@ async fn main(spawner: Spawner) {
         i.g = 0;
         i.b = 128;
     }
-    pc0.write(&pixels).await;
+    strip0.write(&pixels).await;
 
     async fn wait_for_config(stack: Stack<'static>) -> embassy_net::StaticConfigV4 {
         use embassy_futures::yield_now;
@@ -256,9 +256,9 @@ async fn main(spawner: Spawner) {
         i.g = 64;
         i.b = 255;
     }
-    pc0.write(&pixels).await;
+    strip0.write(&pixels).await;
 
-    artnet::receive_artnet(s, stack, pc0).await;
+    artnet::receive_artnet(s, stack, strip0, strip1, strip2, strip3).await;
 
     // let delay = Duration::from_secs(1);
     // loop {

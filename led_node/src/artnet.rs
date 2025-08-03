@@ -8,7 +8,10 @@ use crate::{UartWriter, PIXEL_COUNT};
 pub async fn receive_artnet<P: pio::Instance>(
     s: &mut UartWriter<'_, UART0>,
     stack: embassy_net::Stack<'static>,
-    mut strip: PioWs2812<'_, P, 0, PIXEL_COUNT>,
+    mut strip0: PioWs2812<'_, P, 0, PIXEL_COUNT>,
+    mut strip1: PioWs2812<'_, P, 1, PIXEL_COUNT>,
+    mut strip2: PioWs2812<'_, P, 2, PIXEL_COUNT>,
+    mut strip3: PioWs2812<'_, P, 3, PIXEL_COUNT>,
 ) {
     use embassy_net::udp::{PacketMetadata, UdpSocket};
 
@@ -52,7 +55,7 @@ pub async fn receive_artnet<P: pio::Instance>(
     s.println(f!("Artnet port bound"));
 
     // pixels_0[0] = RGB8::new(255, 0, 255);
-    // strip.write(pixels_0).await;
+    // strip0.write(pixels_0).await;
 
     // let mut last_sequence: u8 = 0; // DEBUG
     loop {
@@ -81,8 +84,6 @@ pub async fn receive_artnet<P: pio::Instance>(
         // let mut pixels_1 = [0u32; PIXEL_COUNT];
         // let mut pixels_2 = [0u32; PIXEL_COUNT];
         // let mut pixels_3 = [0u32; PIXEL_COUNT];
-        // let mut pixels_4 = [0u32; PIXEL_COUNT];
-        // let mut pixels_5 = [0u32; PIXEL_COUNT];
         match tiny_artnet::from_slice(&buf[..packet_length]) {
             Ok(tiny_artnet::Art::Dmx(dmx)) => {
                 // s.println(f!("received artnet: dmx"));
@@ -136,7 +137,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                         // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
                     });
                     if start_of_universe_in_pixel_array == 0 {
-                        strip.write(&pixels_0).await;
+                        strip0.write(&pixels_0).await;
                     }
 
                     // data_iter.for_each(|(i, pixel)| {
@@ -145,7 +146,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                     //         (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
                     // });
                     // if start_of_universe_in_pixel_array == 0 {
-                    //     strip.write_direct(&pixels_0).await;
+                    //     strip0.write_direct(&pixels_0).await;
                     // }
 
                     // } else if port_address < 30 {
@@ -155,7 +156,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                     //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
                     //     });
                     //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip_1.write_direct(&pixels_1).await;
+                    //         strip1.write_direct(&pixels_1).await;
                     //     }
                     // } else if port_address < 40 {
                     //     data_iter.for_each(|(i, pixel)| {
@@ -164,7 +165,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                     //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
                     //     });
                     //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip_2.write_direct(&pixels_2).await;
+                    //         strip2.write_direct(&pixels_2).await;
                     //     }
                     // } else if port_address < 50 {
                     //     data_iter.for_each(|(i, pixel)| {
@@ -173,25 +174,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                     //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
                     //     });
                     //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip_3.write_direct(&pixels_3).await;
-                    //     }
-                    // } else if port_address < 60 {
-                    //     data_iter.for_each(|(i, pixel)| {
-                    //         pixels_4[start_of_universe_in_pixel_array + i] =
-                    //             // RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
-                    //     });
-                    //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip_4.write_direct(&pixels_4).await;
-                    //     }
-                    // } else if port_address < 70 {
-                    //     data_iter.for_each(|(i, pixel)| {
-                    //         pixels_5[start_of_universe_in_pixel_array + i] =
-                    //             // RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
-                    //     });
-                    //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip_5.write_direct(&pixels_5).await;
+                    //         strip3.write_direct(&pixels_3).await;
                     //     }
                 }
             }
