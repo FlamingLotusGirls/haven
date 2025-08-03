@@ -129,7 +129,7 @@ impl<'d, P: Instance, const S: usize, const N: usize, const NBYTES: usize>
     }
 
     /// Write a buffer of [u8] to the ws2812 string
-    pub async fn write_bytes(&mut self, color_bytes: &[u8]) {
+    pub async fn write_bytes(&mut self, color_bytes: &[u8; NBYTES]) {
         // DMA transfer
         self.sm
             .tx()

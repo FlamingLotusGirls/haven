@@ -115,52 +115,73 @@ pub async fn receive_artnet<P: pio::Instance>(
 
                 let start_of_universe_in_pixel_array = (port_address % 10) * pixels_per_universe;
                 let byte_write_start = start_of_universe_in_pixel_array * 3;
-                let byte_write_end = byte_write_start + dmx.data.len();
-                // let data_iter = dmx
-                //     .data
-                //     .chunks_exact(3)
-                //     .take((PIXEL_COUNT - start_of_universe_in_pixel_array).max(0))
-                //     .enumerate();
+                // let byte_write_end = byte_write_start + dmx.data.len();
+                let data_iter = dmx
+                    .data
+                    .iter()
+                    // .chunks_exact(3)
+                    .take((PIXEL_BYTE_SIZE - byte_write_start).max(0));
+                // .enumerate();
                 if port_address < 10 {
+                    data_iter
+                        .zip(pixels_0_bytes.iter_mut().skip(byte_write_start))
+                        .for_each(|(dmx_byte, pixel_byte)| {
+                            *pixel_byte = *dmx_byte;
+                        });
                     // data_iter.for_each(|(i, pixel)| {
-                    //     pixels_0[start_of_universe_in_pixel_array + i] =
-                    //         RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    //     // pixels_0[start_of_universe_in_pixel_array + i] =
+                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
+                    //     pixels_0_bytes[start_of_universe_in_pixel_array + i] = *pixel;
                     // });
-                    pixels_0_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
+                    // pixels_0_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
                         // strip0.write(&pixels_0).await;
                         strip0.write_bytes(&pixels_0_bytes).await;
                     }
                 } else if port_address < 20 {
+                    data_iter
+                        .zip(pixels_1_bytes.iter_mut().skip(byte_write_start))
+                        .for_each(|(dmx_byte, pixel_byte)| {
+                            *pixel_byte = *dmx_byte;
+                        });
                     // data_iter.for_each(|(i, pixel)| {
-                    //     pixels_1[start_of_universe_in_pixel_array + i] =
-                    //         RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    //     // pixels_1[start_of_universe_in_pixel_array + i] =
+                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
+                    //     pixels_1_bytes[start_of_universe_in_pixel_array + i] = *pixel;
                     // });
-                    pixels_1_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
+                    // pixels_1_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
                         // strip1.write(&pixels_1).await;
                         strip1.write_bytes(&pixels_1_bytes).await;
                     }
                 } else if port_address < 30 {
+                    data_iter
+                        .zip(pixels_2_bytes.iter_mut().skip(byte_write_start))
+                        .for_each(|(dmx_byte, pixel_byte)| {
+                            *pixel_byte = *dmx_byte;
+                        });
                     // data_iter.for_each(|(i, pixel)| {
-                    //     pixels_2[start_of_universe_in_pixel_array + i] =
-                    //         RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    //     // pixels_2[start_of_universe_in_pixel_array + i] =
+                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
+                    //     pixels_2_bytes[start_of_universe_in_pixel_array + i] = *pixel;
                     // });
-                    pixels_2_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
+                    // pixels_2_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
                         // strip2.write(&pixels_2).await;
                         strip2.write_bytes(&pixels_2_bytes).await;
                     }
                 } else if port_address < 40 {
+                    data_iter
+                        .zip(pixels_3_bytes.iter_mut().skip(byte_write_start))
+                        .for_each(|(dmx_byte, pixel_byte)| {
+                            *pixel_byte = *dmx_byte;
+                        });
                     // data_iter.for_each(|(i, pixel)| {
-                    //     pixels_3[start_of_universe_in_pixel_array + i] =
-                    //         RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //     // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    //     // pixels_3[start_of_universe_in_pixel_array + i] =
+                    //     //     RGB8::new(pixel[0], pixel[1], pixel[2]);
+                    //     pixels_3_bytes[start_of_universe_in_pixel_array + i] = *pixel;
                     // });
-                    pixels_3_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
+                    // pixels_3_bytes[byte_write_start..byte_write_end].copy_from_slice(dmx.data);
                     if start_of_universe_in_pixel_array == 0 {
                         // strip3.write(&pixels_3).await;
                         strip3.write_bytes(&pixels_3_bytes).await;
