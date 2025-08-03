@@ -5,8 +5,8 @@
 // Copy example_wifi_secrets.h to wifi_secrets.h to define WIFI_SSID and WIFI_PASS.
 #include "wifi_secrets.h"
 
-IPAddress MY_IP(192, 168, 1, 20);
-IPAddress SERVER_IP(192, 168, 1, 15);
+IPAddress MY_IP(192, 168, 7, 198);
+IPAddress SERVER_IP(192, 168, 7, 207);
 unsigned int SERVER_PORT = 5204;
 IPAddress GATEWAY(192, 168, 1, 1);
 IPAddress SUBNET(255, 255, 255, 0);
@@ -119,7 +119,7 @@ void sendButtonStatus() {
 
 void setup()
 {
-  Serial.begin(9600);
+  // Serial.begin(9600);
   pinMode(INDICATOR_LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
   buttonStatus = digitalRead(BUTTON_PIN);
