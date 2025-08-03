@@ -26,8 +26,8 @@ use static_cell::StaticCell;
 
 // CONFIG
 const PIXEL_COUNT: usize = 170;
-const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 5;
-const IP_ADDRESS_LAST_NUMBER: u8 = 51;
+const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 3;
+const IP_ADDRESS_LAST_NUMBER: u8 = 10;
 // 169.254.9.91-99
 // 169.254.5.51
 
