@@ -81,9 +81,9 @@ pub async fn receive_artnet<P: pio::Instance>(
         // let data_size: usize = 512;
         let pixels_per_universe: usize = 512 / 3;
         let mut pixels_0 = [RGB8::default(); PIXEL_COUNT];
-        // let mut pixels_1 = [0u32; PIXEL_COUNT];
-        // let mut pixels_2 = [0u32; PIXEL_COUNT];
-        // let mut pixels_3 = [0u32; PIXEL_COUNT];
+        let mut pixels_1 = [RGB8::default(); PIXEL_COUNT];
+        let mut pixels_2 = [RGB8::default(); PIXEL_COUNT];
+        let mut pixels_3 = [RGB8::default(); PIXEL_COUNT];
         match tiny_artnet::from_slice(&buf[..packet_length]) {
             Ok(tiny_artnet::Art::Dmx(dmx)) => {
                 // s.println(f!("received artnet: dmx"));
@@ -93,6 +93,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                 let port_address = ((dmx.port_address.net as usize) << 8)
                     + ((dmx.port_address.sub_net as usize) << 4)
                     + (dmx.port_address.universe as usize);
+                s.println(f!("port_address: {port_address:?}"));
 
                 // DEBUG
                 // let sequence = dmx.sequence;
@@ -130,7 +131,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                     .chunks_exact(3)
                     .take((PIXEL_COUNT - start_of_universe_in_pixel_array).max(0))
                     .enumerate();
-                if port_address < 20 {
+                if port_address < 10 {
                     data_iter.for_each(|(i, pixel)| {
                         pixels_0[start_of_universe_in_pixel_array + i] =
                             RGB8::new(pixel[0], pixel[1], pixel[2]);
@@ -138,44 +139,38 @@ pub async fn receive_artnet<P: pio::Instance>(
                     });
                     if start_of_universe_in_pixel_array == 0 {
                         strip0.write(&pixels_0).await;
+                        // strip0.write_direct(&pixels_0).await;
                     }
-
-                    // data_iter.for_each(|(i, pixel)| {
-                    //     pixels_0[start_of_universe_in_pixel_array + i] =
-                    //         // RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //         (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
-                    // });
-                    // if start_of_universe_in_pixel_array == 0 {
-                    //     strip0.write_direct(&pixels_0).await;
-                    // }
-
-                    // } else if port_address < 30 {
-                    //     data_iter.for_each(|(i, pixel)| {
-                    //         pixels_1[start_of_universe_in_pixel_array + i] =
-                    //             // RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
-                    //     });
-                    //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip1.write_direct(&pixels_1).await;
-                    //     }
-                    // } else if port_address < 40 {
-                    //     data_iter.for_each(|(i, pixel)| {
-                    //         pixels_2[start_of_universe_in_pixel_array + i] =
-                    //             // RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
-                    //     });
-                    //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip2.write_direct(&pixels_2).await;
-                    //     }
-                    // } else if port_address < 50 {
-                    //     data_iter.for_each(|(i, pixel)| {
-                    //         pixels_3[start_of_universe_in_pixel_array + i] =
-                    //             // RGB8::new(pixel[0], pixel[1], pixel[2]);
-                    //             (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
-                    //     });
-                    //     if start_of_universe_in_pixel_array == 0 {
-                    //         strip3.write_direct(&pixels_3).await;
-                    //     }
+                } else if port_address < 20 {
+                    data_iter.for_each(|(i, pixel)| {
+                        pixels_1[start_of_universe_in_pixel_array + i] =
+                            RGB8::new(pixel[0], pixel[1], pixel[2]);
+                        // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    });
+                    if start_of_universe_in_pixel_array == 0 {
+                        strip1.write(&pixels_1).await;
+                        // strip1.write_direct(&pixels_1).await;
+                    }
+                } else if port_address < 30 {
+                    data_iter.for_each(|(i, pixel)| {
+                        pixels_2[start_of_universe_in_pixel_array + i] =
+                            RGB8::new(pixel[0], pixel[1], pixel[2]);
+                        // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    });
+                    if start_of_universe_in_pixel_array == 0 {
+                        strip2.write(&pixels_2).await;
+                        // strip2.write_direct(&pixels_2).await;
+                    }
+                } else if port_address < 40 {
+                    data_iter.for_each(|(i, pixel)| {
+                        pixels_3[start_of_universe_in_pixel_array + i] =
+                            RGB8::new(pixel[0], pixel[1], pixel[2]);
+                        // (u32::from(pixel[0]) << 16) | (u32::from(pixel[1]) << 24) | (u32::from(pixel[2]) << 8);
+                    });
+                    if start_of_universe_in_pixel_array == 0 {
+                        strip3.write(&pixels_3).await;
+                        // strip3.write_direct(&pixels_3).await;
+                    }
                 }
             }
             Ok(tiny_artnet::Art::Poll(_poll)) => {

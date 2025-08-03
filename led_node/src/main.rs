@@ -146,32 +146,30 @@ async fn main(spawner: Spawner) {
     );
 
     let mut pixels = [RGB8::default(); PIXEL_COUNT];
-    // loop {
-    //     for i in &mut pixels {
-    //         i.r = 128;
-    //         i.g = 0;
-    //         i.b = 0;
-    //     }
-    //     strip0.write(&pixels).await;
-    //     for i in &mut pixels {
-    //         i.r = 128;
-    //         i.g = 128;
-    //         i.b = 0;
-    //     }
-    //     strip1.write(&pixels).await;
-    //     for i in &mut pixels {
-    //         i.r = 0;
-    //         i.g = 128;
-    //         i.b = 0;
-    //     }
-    //     strip2.write(&pixels).await;
-    //     for i in &mut pixels {
-    //         i.r = 0;
-    //         i.g = 0;
-    //         i.b = 128;
-    //     }
-    //     strip3.write(&pixels).await;
-    // }
+    for i in &mut pixels {
+        i.r = 128;
+        i.g = 0;
+        i.b = 0;
+    }
+    strip0.write(&pixels).await;
+    for i in &mut pixels {
+        i.r = 128;
+        i.g = 128;
+        i.b = 0;
+    }
+    strip1.write(&pixels).await;
+    for i in &mut pixels {
+        i.r = 0;
+        i.g = 128;
+        i.b = 0;
+    }
+    strip2.write(&pixels).await;
+    for i in &mut pixels {
+        i.r = 0;
+        i.g = 0;
+        i.b = 128;
+    }
+    strip3.write(&pixels).await;
 
     // Connct to w5500 peripheral
     let mut spi_cfg = SpiConfig::default();
@@ -198,8 +196,9 @@ async fn main(spawner: Spawner) {
     spawner.spawn(ethernet_task(ethernet_task_runner)).unwrap();
 
     for i in &mut pixels {
-        i.r = 0;
-        i.g = 128;
+        i.r = 128;
+        i.g = 0;
+        i.b = 0;
     }
     strip0.write(&pixels).await;
 
@@ -232,8 +231,9 @@ async fn main(spawner: Spawner) {
     spawner.spawn(net_task(net_task_runner)).unwrap();
 
     for i in &mut pixels {
-        i.g = 0;
-        i.b = 128;
+        i.r = 0;
+        i.g = 128;
+        i.b = 0;
     }
     strip0.write(&pixels).await;
 
