@@ -3,6 +3,7 @@
 
 mod artnet;
 mod pixel_control;
+mod ws2812_control;
 
 use core::format_args as f;
 use defmt_serial as _;
@@ -14,7 +15,6 @@ use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     peripherals::{BOOTSEL, PIO0, PIO1, SPI0, UART0},
     pio::{self, Pio},
-    pio_programs::ws2812::{PioWs2812, PioWs2812Program},
     spi::{Async, Config as SpiConfig, Spi},
     uart,
 };
@@ -23,6 +23,8 @@ use embedded_hal_bus::spi::ExclusiveDevice;
 use panic_probe as _;
 use smart_leds::RGB8;
 use static_cell::StaticCell;
+
+use ws2812_control::{PioWs2812, PioWs2812Program};
 
 // CONFIG
 const PIXEL_COUNT: usize = 340;

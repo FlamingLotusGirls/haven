@@ -1,9 +1,9 @@
 use core::format_args as f;
 use embassy_net::IpAddress;
-use embassy_rp::{peripherals::UART0, pio, pio_programs::ws2812::PioWs2812};
+use embassy_rp::{peripherals::UART0, pio};
 use smart_leds::RGB8;
 
-use crate::{UartWriter, PIXEL_COUNT};
+use crate::{ws2812_control::PioWs2812, UartWriter, PIXEL_COUNT};
 
 pub async fn receive_artnet<P: pio::Instance>(
     s: &mut UartWriter<'_, UART0>,
@@ -56,11 +56,17 @@ pub async fn receive_artnet<P: pio::Instance>(
     // pixels_0[0] = RGB8::new(255, 0, 255);
     // strip0.write(pixels_0).await;
 
-    let mut last_sequence: u8 = 0; // DEBUG
+    // DEBUG
+    let mut last_sequence: u8 = 0;
+
     let mut pixels_0 = [RGB8::default(); PIXEL_COUNT];
     let mut pixels_1 = [RGB8::default(); PIXEL_COUNT];
     let mut pixels_2 = [RGB8::default(); PIXEL_COUNT];
     let mut pixels_3 = [RGB8::default(); PIXEL_COUNT];
+    // let mut pixels_0 = [0u32; PIXEL_COUNT];
+    // let mut pixels_1 = [0u32; PIXEL_COUNT];
+    // let mut pixels_2 = [0u32; PIXEL_COUNT];
+    // let mut pixels_3 = [0u32; PIXEL_COUNT];
     loop {
         let (packet_length, metadata) = socket.recv_from(&mut buf).await.unwrap();
 
@@ -95,7 +101,7 @@ pub async fn receive_artnet<P: pio::Instance>(
                 // s.println(f!("port_address: {port_address:?}"));
 
                 // DEBUG
-                if (port_address == 31) {
+                if port_address == 31 {
                     let sequence = dmx.sequence;
                     if sequence != last_sequence.wrapping_add(1) {
                         s.println(f!(
