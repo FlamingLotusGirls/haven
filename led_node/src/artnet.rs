@@ -37,8 +37,7 @@ pub async fn receive_artnet<P: pio::Instance>(
     ));
 
     let mut rx_meta = [PacketMetadata::EMPTY; 16];
-    // let mut rx_buffer = [0; 120000];
-    let mut rx_buffer = [0; 1024];
+    let mut rx_buffer = [0; 16384];
     let mut tx_meta = [PacketMetadata::EMPTY; 16];
     let mut tx_buffer = [0; 1024];
     // let mut buf = [0; 65507];
@@ -57,7 +56,11 @@ pub async fn receive_artnet<P: pio::Instance>(
     // pixels_0[0] = RGB8::new(255, 0, 255);
     // strip0.write(pixels_0).await;
 
-    // let mut last_sequence: u8 = 0; // DEBUG
+    let mut last_sequence: u8 = 0; // DEBUG
+    let mut pixels_0 = [RGB8::default(); PIXEL_COUNT];
+    let mut pixels_1 = [RGB8::default(); PIXEL_COUNT];
+    let mut pixels_2 = [RGB8::default(); PIXEL_COUNT];
+    let mut pixels_3 = [RGB8::default(); PIXEL_COUNT];
     loop {
         let (packet_length, metadata) = socket.recv_from(&mut buf).await.unwrap();
 
@@ -80,10 +83,6 @@ pub async fn receive_artnet<P: pio::Instance>(
 
         // let data_size: usize = 512;
         let pixels_per_universe: usize = 512 / 3;
-        let mut pixels_0 = [RGB8::default(); PIXEL_COUNT];
-        let mut pixels_1 = [RGB8::default(); PIXEL_COUNT];
-        let mut pixels_2 = [RGB8::default(); PIXEL_COUNT];
-        let mut pixels_3 = [RGB8::default(); PIXEL_COUNT];
         match tiny_artnet::from_slice(&buf[..packet_length]) {
             Ok(tiny_artnet::Art::Dmx(dmx)) => {
                 // s.println(f!("received artnet: dmx"));
@@ -93,39 +92,22 @@ pub async fn receive_artnet<P: pio::Instance>(
                 let port_address = ((dmx.port_address.net as usize) << 8)
                     + ((dmx.port_address.sub_net as usize) << 4)
                     + (dmx.port_address.universe as usize);
-                s.println(f!("port_address: {port_address:?}"));
+                // s.println(f!("port_address: {port_address:?}"));
 
                 // DEBUG
-                // let sequence = dmx.sequence;
-                // if sequence != last_sequence.wrapping_add(1) {
-                //     let mut str: heapless::String<24> = heapless::String::new();
-                //     core::write!(
-                //         &mut str,
-                //         "seq: {} ; skipped: {}\r\n",
-                //         sequence,
-                //         sequence - last_sequence + 1
-                //     )
-                //     .unwrap();
-                //     s.print(f!(str.as_str()));
-                // }
-                // last_sequence = sequence;
-
-                // s.print(f!("port address: "));
-                // let mut port_address_string: heapless::String<24> = heapless::String::new();
-                // core::write!(
-                //     &mut port_address_string,
-                //     "{} ({}, {}, {})",
-                //     port_address,
-                //     dmx.port_address.net,
-                //     dmx.port_address.sub_net,
-                //     dmx.port_address.universe
-                // )
-                // .unwrap();
-                // s.print(f!(&port_address_string.as_str()));
-                // s.print(f!("\r\n"));
+                if (port_address == 31) {
+                    let sequence = dmx.sequence;
+                    if sequence != last_sequence.wrapping_add(1) {
+                        s.println(f!(
+                            "seq: {} ; skipped: {}",
+                            sequence,
+                            sequence - last_sequence + 1
+                        ));
+                    }
+                    last_sequence = sequence;
+                }
 
                 let start_of_universe_in_pixel_array = (port_address % 10) * pixels_per_universe;
-                // s.print(f!("3\r\n"));
                 let data_iter = dmx
                     .data
                     .chunks_exact(3)
