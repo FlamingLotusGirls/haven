@@ -2,10 +2,10 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "player_ethernet: cargo run: Neopixel",
+      "label": "led_node: cargo run (debug)",
       "type": "shell",
       "command": "cargo",
-      "args": ["run", "--features", "neopixel"],
+      "args": ["run"],
       "problemMatcher": ["$rustc"],
       "group": "build",
       "presentation": {
@@ -13,10 +13,10 @@
       }
     },
     {
-      "label": "player_ethernet: cargo run: Dotstar",
+      "label": "led_node: cargo run (release)",
       "type": "shell",
       "command": "cargo",
-      "args": ["run", "--features", "dotstar"],
+      "args": ["run", "--release"],
       "problemMatcher": ["$rustc"],
       "group": "build",
       "presentation": {
