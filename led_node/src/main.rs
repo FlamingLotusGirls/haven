@@ -28,6 +28,7 @@ use ws2812_control::{PioWs2812, PioWs2812Program};
 
 // CONFIG
 const PIXEL_COUNT: usize = 340;
+const PIXEL_BYTE_SIZE: usize = PIXEL_COUNT * 3;
 const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 3;
 const IP_ADDRESS_LAST_NUMBER: u8 = 10;
 // 169.254.9.91-99
@@ -118,28 +119,28 @@ async fn main(spawner: Spawner) {
     let mut pio_neopixel_0 = Pio::new(p.PIO1, Irqs);
 
     let program = PioWs2812Program::new(&mut pio_neopixel_0.common);
-    let mut strip0: PioWs2812<'_, _, 0, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip0: PioWs2812<'_, _, 0, PIXEL_COUNT, PIXEL_BYTE_SIZE> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm0,
         p.DMA_CH4,
         p.PIN_6,
         &program,
     );
-    let mut strip1: PioWs2812<'_, _, 1, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip1: PioWs2812<'_, _, 1, PIXEL_COUNT, PIXEL_BYTE_SIZE> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm1,
         p.DMA_CH5,
         p.PIN_7,
         &program,
     );
-    let mut strip2: PioWs2812<'_, _, 2, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip2: PioWs2812<'_, _, 2, PIXEL_COUNT, PIXEL_BYTE_SIZE> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm2,
         p.DMA_CH6,
         p.PIN_8,
         &program,
     );
-    let mut strip3: PioWs2812<'_, _, 3, PIXEL_COUNT> = PioWs2812::new(
+    let mut strip3: PioWs2812<'_, _, 3, PIXEL_COUNT, PIXEL_BYTE_SIZE> = PioWs2812::new(
         &mut pio_neopixel_0.common,
         pio_neopixel_0.sm3,
         p.DMA_CH7,

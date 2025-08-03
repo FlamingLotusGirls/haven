@@ -57,12 +57,14 @@ impl<'a, PIO: Instance> PioWs2812Program<'a, PIO> {
 
 /// Pio backed ws2812 driver
 /// Const N is the number of ws2812 leds attached to this pin
-pub struct PioWs2812<'d, P: Instance, const S: usize, const N: usize> {
+pub struct PioWs2812<'d, P: Instance, const S: usize, const N: usize, const NBYTES: usize> {
     dma: PeripheralRef<'d, AnyChannel>,
     sm: StateMachine<'d, P, S>,
 }
 
-impl<'d, P: Instance, const S: usize, const N: usize> PioWs2812<'d, P, S, N> {
+impl<'d, P: Instance, const S: usize, const N: usize, const NBYTES: usize>
+    PioWs2812<'d, P, S, N, NBYTES>
+{
     /// Configure a pio state machine to use the loaded ws2812 program.
     pub fn new(
         pio: &mut Common<'d, P>,
@@ -121,6 +123,17 @@ impl<'d, P: Instance, const S: usize, const N: usize> PioWs2812<'d, P, S, N> {
         self.sm
             .tx()
             .dma_push(self.dma.reborrow(), &words, false)
+            .await;
+
+        Timer::after_micros(55).await;
+    }
+
+    /// Write a buffer of [u8] to the ws2812 string
+    pub async fn write_bytes(&mut self, color_bytes: &[u8]) {
+        // DMA transfer
+        self.sm
+            .tx()
+            .dma_push(self.dma.reborrow(), color_bytes, false)
             .await;
 
         Timer::after_micros(55).await;
