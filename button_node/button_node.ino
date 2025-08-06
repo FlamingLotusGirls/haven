@@ -5,14 +5,16 @@
 // Copy example_wifi_secrets.h to wifi_secrets.h to define WIFI_SSID and WIFI_PASS.
 #include "wifi_secrets.h"
 
-IPAddress MY_IP(192, 168, 7, 198);
+IPAddress MY_IP(192, 168, 7, 197);
 IPAddress SERVER_IP(192, 168, 7, 207);
+// IPAddress SERVER_IP(192, 168, 7, 226);
 unsigned int SERVER_PORT = 5204;
-IPAddress GATEWAY(192, 168, 1, 1);
+IPAddress GATEWAY(192, 168, 7, 1);
 IPAddress SUBNET(255, 255, 255, 0);
 
 const int BUTTON_PIN = 23;
 const int INDICATOR_LED_PIN = 2;
+const int INPUT_NODE_ID = 1;
 
 enum WifiState
 {
@@ -50,7 +52,9 @@ void tryWifiLoop()
       Serial.print("RSSI Strength: ");
       Serial.println(WiFi.RSSI());
     }
-  } else {
+  }
+  else
+  {
     if (wifiState == WifiState_TRY_WIFI)
     {
       Serial.print("Wifi Status: ");
@@ -83,7 +87,9 @@ void tryWifiLoop()
       }
       beginWifi();
       delay(1000);
-    } else {
+    }
+    else
+    {
       Serial.println("Lost wifi connection, reconnecting.");
       wifiState = WifiState_TRY_WIFI;
       beginWifi();
@@ -96,19 +102,25 @@ int buttonStatus = 0;
 
 WiFiClient tcpClient;
 
-void connectToTcpServer() {
+void connectToTcpServer()
+{
   Serial.println("Connecting to TCP server...");
-  if (tcpClient.connect(SERVER_IP, SERVER_PORT)) {
+  if (tcpClient.connect(SERVER_IP, SERVER_PORT))
+  {
     Serial.println("Connected to TCP server");
-  } else {
+  }
+  else
+  {
     Serial.println("TCP connection failed");
   }
 }
 
-void sendButtonStatus() {
+void sendButtonStatus()
+{
   StaticJsonDocument<100> jsonDoc;
   jsonDoc["method"] = "inputEvent";
   JsonObject params = jsonDoc.createNestedObject("params");
+  params["inputNodeId"] = INPUT_NODE_ID;
   params["buttonStatus"] = buttonStatus;
   String jsonString;
   serializeJson(jsonDoc, jsonString);
@@ -119,7 +131,7 @@ void sendButtonStatus() {
 
 void setup()
 {
-  // Serial.begin(9600);
+  Serial.begin(115200);
   pinMode(INDICATOR_LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT);
   buttonStatus = digitalRead(BUTTON_PIN);
@@ -129,7 +141,8 @@ void loop()
 {
   tryWifiLoop();
 
-  if (!tcpClient.connected()) {
+  if (!tcpClient.connected())
+  {
     connectToTcpServer();
     delay(1000);
   }
@@ -138,14 +151,16 @@ void loop()
   buttonStatus = digitalRead(BUTTON_PIN);
   if (buttonStatus == HIGH)
   {
-    if (oldButtonStatus == LOW) {
+    if (oldButtonStatus == LOW)
+    {
       sendButtonStatus();
     }
     digitalWrite(INDICATOR_LED_PIN, HIGH);
   }
   else
   {
-    if (oldButtonStatus == HIGH) {
+    if (oldButtonStatus == HIGH)
+    {
       sendButtonStatus();
     }
     digitalWrite(INDICATOR_LED_PIN, LOW);
