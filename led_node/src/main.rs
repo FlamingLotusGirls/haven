@@ -184,7 +184,14 @@ async fn main(spawner: Spawner) {
     let w5500_reset = Output::new(p.PIN_20, Level::High);
 
     // Set up ethernet task
-    let mac_addr = [0x00, 0x00, 0x00, 0x00, 0x00, IP_ADDRESS_LAST_NUMBER];
+    let mac_addr = [
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        IP_ADDRESS_SECOND_TO_LAST_NUMBER,
+        IP_ADDRESS_LAST_NUMBER,
+    ];
     static STATE: StaticCell<embassy_net_wiznet::State<8, 8>> = StaticCell::new();
     let state = STATE.init(embassy_net_wiznet::State::<8, 8>::new());
     let (w5500_device, ethernet_task_runner) = embassy_net_wiznet::new(
