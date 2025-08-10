@@ -60,6 +60,7 @@ pub async fn receive_artnet<P: pio::Instance>(
     let mut last_sequence: u8 = 0;
 
     let mut pixels = [[RGB8::default(); PIXEL_COUNT]; 4];
+    let mut highest_universe_received_within_strip = [0usize; 4];
     loop {
         let (packet_length, metadata) = socket.recv_from(&mut buf).await.unwrap();
 
@@ -106,7 +107,8 @@ pub async fn receive_artnet<P: pio::Instance>(
                     last_sequence = sequence;
                 }
 
-                let start_of_universe_in_pixel_array = (port_address % 10) * pixels_per_universe;
+                let universe_within_strip = port_address % 10;
+                let start_of_universe_in_pixel_array = universe_within_strip * pixels_per_universe;
                 let data_iter = dmx
                     .data
                     .chunks_exact(3)
@@ -138,7 +140,9 @@ pub async fn receive_artnet<P: pio::Instance>(
                         pixel.b = dmx_pixel[2];
                     });
 
-                if start_of_universe_in_pixel_array == 0 {
+                highest_universe_received_within_strip[strip_index] =
+                    highest_universe_received_within_strip[strip_index].max(universe_within_strip);
+                if universe_within_strip == highest_universe_received_within_strip[strip_index] {
                     match strip_index {
                         0 => {
                             strip0.write(&pixels[strip_index]).await;
