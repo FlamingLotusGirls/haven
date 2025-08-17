@@ -1,11 +1,11 @@
 [Unit]
-Description=FLG Serenity Flame Controller Webserver
+Description=FLG Haven Flame Controller Webserver
 After=network.target
 
 [Service]
-Environment="PYTHONPATH=/home/flaming/Serenity/util"
-ExecStart=/usr/bin/python3 /home/flaming/Serenity/flames/flames_webserver.py
-WorkingDirectory=/home/flaming/Serenity/flames
+Environment="PYTHONPATH=/home/flaming/haven/util"
+ExecStart=/usr/bin/python3 /home/flaming/haven/Fire/fire_control/flames_webserver.py
+WorkingDirectory=/home/flaming/haven/Fire/fire_control
 Restart=always
 User=flaming
 
