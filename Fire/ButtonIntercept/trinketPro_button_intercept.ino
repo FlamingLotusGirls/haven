@@ -2,7 +2,7 @@
 #include <PCA95x5.h>
 
 // #define TEST
-#define DEBUG
+//#define DEBUG
 
 // NB - for debugging, need to take off channels 0 and 1 for the moment b/c FTDI
 #ifdef DEBUG
@@ -363,9 +363,9 @@ public:
       Serial.print(m_channel);
       Serial.print(", button pressed ");
       Serial.println(m_playState ? "PRESSED" : "UNPRESSED");
+#endif // DEBUG
       // NB - Pressed corresponds to pulling the output low.
       digitalWrite(outputs[m_channel], m_playState ? HIGH : LOW);
-#endif // DEBUG
     }
   }
 
