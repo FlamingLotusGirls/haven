@@ -2,7 +2,7 @@
 #include <PCA95x5.h>
 
 // #define TEST
-// #define DEBUG
+#define DEBUG
 
 // NB - for debugging, need to take off channels 0 and 1 for the moment b/c FTDI
 #ifdef DEBUG
@@ -42,9 +42,11 @@ void readChannelModes() {
   // I appear to be interpreting on and off incorrectly...
   rawData1 = ~rawData1;
   rawData2 = ~rawData2;
-  
+ 
 #ifdef DEBUG
+  Serial.print("Raw data, chip 0: ");
   Serial.println(rawData1, BIN);
+  Serial.print("Raw data, chip 1: ");
   Serial.println(rawData2, BIN);
 #endif
 
@@ -75,7 +77,6 @@ void readChannelModes() {
                ((rawData1 & 0x400) >> 9) | 
                ((rawData1 & 0x800) >> 9);
 
-/*
 #ifdef DEBUG
   for (int i=0; i<8; i++) {
     Serial.print("Channel ");
@@ -84,12 +85,11 @@ void readChannelModes() {
     Serial.println(channelModes[i]);
   }
 #endif
-*/
 }
 
 // Channel State machine
-// wait_pressed - can transition to transition_unpressed  (current state - pressed. Transitions if state is unpressed)
-// wait_unpressed - can transition to transition_pressed  (current state - unpressed. Transitions if state is pressed)
+// pressed - can transition to transition_unpressed  (current state - pressed. Transitions if state is unpressed)
+// unpressed - can transition to transition_pressed  (current state - unpressed. Transitions if state is pressed)
 // transition_pressed - can transition to playback or wait_unpressed (current state - pressed, transitions if state changes within hold time, or hold time met )
 // playback - if pressed, go to wait_pressed. If not pressed, go to transition_unpressed (current state - don't care. Plays program. 
 // transition_unpressed - can transition to wait_unpressed or wait_pressed (current state - unpressed, transitions if state changes within hold time, or hold time met)
@@ -160,8 +160,8 @@ class Program {
 };
 
 enum ChannelState {
-  WAIT_PRESSED,
-  WAIT_UNPRESSED,
+  PRESSED,
+  UNPRESSED,
   TRANSITION_PRESSED,
   PLAYBACK,
   TRANSITION_UNPRESSED
@@ -172,9 +172,10 @@ enum class Mode {
   Program,
 };
 
+// ChannelController starts in state UNPRESSED.a
 class ChannelController {
 public:
-  ChannelController(int sequenceIdx = 0) : m_channel(s_channel++), m_sequenceIdx(-1), m_nextSequenceIdx(-1), m_program(NULL), m_state(WAIT_UNPRESSED), m_playheadTimeMs(0), m_transitionStartTimeMs(0), m_playButtonState(false) {
+  ChannelController(int sequenceIdx = 0) : m_channel(s_channel++), m_sequenceIdx(-1), m_nextSequenceIdx(-1), m_program(NULL), m_state(UNPRESSED), m_playheadTimeMs(0), m_transitionStartTimeMs(0), m_playState(false) {
   }
 
   void setProgram(int sequenceIdx) {
@@ -199,7 +200,7 @@ public:
         m_mode = m_program == NULL ? Mode::Follower : Mode::Program;
         m_sequenceIdx = sequenceIdx;
         m_nextSequenceIdx = -1;
-        m_state = WAIT_UNPRESSED;
+        m_state = UNPRESSED;
 #ifdef DEBUG
         Serial.print("New program on channel ");
         Serial.print(m_channel);
@@ -214,14 +215,18 @@ public:
     }
   }
 
+  // I need to think of this as something that maps button presses to poofer responses. The channel metaphor isn't quite right. 
+  // ButtonChannelController -> Poofer Program
+
+  /* Update channel controller based on state of physical button */
   void update(bool buttonPressed, uint32_t curTimeMs) {
-   // XXX there are too many button states here for me this morning - buttonpressed, buttonstate, play button state?
-    bool oldButtonState = m_playButtonState;
-    if (m_mode == Mode::Follower) { // XXX TODO - debounce!!!
-      m_playButtonState = buttonPressed;      
+   // XXX there are too many button states here for me this morning - buttonpressed, buttonstate, play state?
+    bool oldPlayState = m_playState;
+    if (m_mode == Mode::Follower) {
+      m_playState = buttonPressed;     
     } else { 
       switch(m_state) {
-        case WAIT_PRESSED: // waiting in pressed state
+        case PRESSED: // waiting in pressed state
           if (!buttonPressed) {
             m_state = TRANSITION_UNPRESSED;
 #ifdef DEBUG
@@ -233,7 +238,7 @@ public:
             m_transitionStartTimeMs = curTimeMs;
           }
           break;
-        case WAIT_UNPRESSED:
+        case UNPRESSED:
           if (buttonPressed) {
             m_state = TRANSITION_PRESSED;
 #ifdef DEBUG
@@ -246,6 +251,7 @@ public:
           }
           break;
         case TRANSITION_PRESSED:
+          // If we read button PRESSED for the duration of the transition time, start playback
           if (buttonPressed) {
             uint32_t deltaTime = curTimeMs - m_transitionStartTimeMs; // Not worrying about wrap; 59 days
             if (deltaTime > DEBOUNCE_TIMEOUT_MS) {
@@ -261,13 +267,15 @@ public:
               m_transitionStartTimeMs = 0;
             }
           } else {
+            // If at any time during the transition time we read button UNPRESSED, go to UNPRESSED
+            // state
 #ifdef DEBUG
             Serial.print("Channel: ");
             Serial.print(m_channel);
             Serial.print(", Transition Pressed -> Wait Unpressed,  ");
             Serial.println(curTimeMs);
 #endif
-            m_state = WAIT_UNPRESSED;
+            m_state = UNPRESSED;
             m_transitionStartTimeMs = 0;
           }
           break;
@@ -281,12 +289,12 @@ public:
               Serial.print(", Transition UnPressed -> Wait Unpressed,  ");
               Serial.println(curTimeMs);
 #endif
-              m_state = WAIT_UNPRESSED;
+              m_state = UNPRESSED;
               m_playheadTimeMs = 0;
               m_transitionStartTimeMs = 0;
             }
           } else {
-            m_state = WAIT_PRESSED;
+            m_state = PRESSED;
 #ifdef DEBUG
             Serial.print("Channel: ");
             Serial.print(m_channel);
@@ -306,11 +314,12 @@ public:
             Serial.println(curTimeMs);
 #endif
             if (buttonPressed) {
-              m_state = WAIT_PRESSED;
+              m_state = PRESSED;
             } else {
               m_state = TRANSITION_UNPRESSED;
               m_transitionStartTimeMs = 0;
             }
+            // XXX why am I doing this?
             delete m_program;
             m_program = NULL;
             if (m_nextSequenceIdx >= 0) {
@@ -318,20 +327,20 @@ public:
               m_nextSequenceIdx = -1;
             }
           } else {
-            bool buttonState = m_program->GetButtonState(m_playheadTimeMs);  // What about program that plays on multiple channels? XXX
-            if (m_playButtonState != buttonState) {
+            bool playState = m_program->GetButtonState(m_playheadTimeMs);  // What about program that plays on multiple channels? XXX
+            if (m_playState != playState) {
 #ifdef DEBUG
               Serial.print("Channel: ");
               Serial.print(m_channel);
               Serial.print(", Playback state Transition: ");
-              if (buttonState) {
-                Serial.print("HIGH,  ");
+              if (playState) {
+                Serial.print("PRESSED,  ");
               } else {
-                Serial.print("LOW,  ");
+                Serial.print("UNPRESSED,  ");
               }
               Serial.println(curTimeMs);
 #endif
-              m_playButtonState = buttonState;
+              m_playState = playState;
             }
           }
           break;
@@ -340,16 +349,23 @@ public:
       }
     }
 #ifdef DEBUG
-    if (m_playButtonState != oldButtonState) {
+    if (m_playState != oldPlayState) {
       Serial.print("Channel: ");
       Serial.print(m_channel);
       Serial.print(" write ");
-      Serial.print(m_playButtonState ? "HIGH, " : "LOW, ");
+      Serial.print(m_playState ? "PRESSED, " : "UNPRESSED, ");
       Serial.println(curTimeMs);
     }
 #endif
-    if (m_playButtonState != oldButtonState) {
-      digitalWrite(outputs[m_channel], m_playButtonState ? LOW : HIGH);
+    if (m_playState != oldPlayState) {
+#ifdef DEBUG
+      Serial.print("Changing play state on channel ");
+      Serial.print(m_channel);
+      Serial.print(", button pressed ");
+      Serial.println(m_playState ? "PRESSED" : "UNPRESSED");
+      // NB - Pressed corresponds to pulling the output low.
+      digitalWrite(outputs[m_channel], m_playState ? HIGH : LOW);
+#endif // DEBUG
     }
   }
 
@@ -365,7 +381,7 @@ private:
   ChannelState m_state;
   uint32_t m_transitionStartTimeMs;
   int m_channel;
-  bool m_playButtonState;
+  bool m_playState = HIGH;
   uint32_t m_playbackStartMs;
   uint32_t m_playheadTimeMs;
 };
@@ -458,21 +474,21 @@ void setup() {
   delay(1000); // timeout for ...?
 
 #ifdef DEBUG
-  Serial.println("Starting...");
+  Serial.println("Starting... Sanity");
 #endif
 
-for (int i=0; i<NUM_CHANNELS; i++) {
-  controllers[i].setProgram(0);
-}
+  for (int i=0; i<NUM_CHANNELS; i++) {
+    controllers[i].setProgram(0); 
+  }
 
-#ifndef TEST
+// #ifndef TEST
   // Init I2C bus
   Wire.begin();
 
   // Set up PCA9555 chips for input
   setupForInput(0);
   setupForInput(1);
-#endif
+// #endif
   
   // Set inputs and outputs on trinket
   for (int i=0; i<NUM_CHANNELS; i++) {
@@ -488,37 +504,68 @@ for (int i=0; i<NUM_CHANNELS; i++) {
   controllers[0].setProgram(1);
 #else // FOLLOWER
   controllers[0].setProgram(0);
-#endif
+#endif // PATTERN_OUT
   inputTest.Start();
+#else // STANDARD - NO TEST
+  readChannelModes();
+  for (int i=0; i<NUM_CHANNELS; i++) {
+    controllers[i].setProgram(channelModes[i]);
+  }
 #endif // TEST
+
+  debouncedReadInit();
+  delay(1000); // Wait for pins to settle // XXX shouldn't have to do this
 }
 
-bool inputState[NUM_CHANNELS] = {true};
-bool inputStateChangePending[NUM_CHANNELS] = {false};
-int  inputStateChangeTime[NUM_CHANNELS] = {0};
+bool inputState[NUM_CHANNELS]; // init to HIGH
+bool inputStateChangePending[NUM_CHANNELS]; // init to false
+int  inputStateChangeTime[NUM_CHANNELS]; // init to 0
 const int debounceTimerMs = 100;
 // NB - this returns the high/low state of the line. Button
 // state is pressed LOW, ie, false
+bool debouncedReadInit() {
+  for (int i=0; i<NUM_CHANNELS; i++) {
+    inputState[i] = HIGH;
+    inputStateChangePending[i] = false;
+    inputStateChangeTime[i] = 0;
+  }
+}
 bool debouncedRead(int channel, int curTimeMs) {
   bool input = digitalRead(inputs[channel]);
 #ifdef DEBUG
-  if (input == true) {
-    Serial.print("BUTTON PRESS on channel ");
+  if (input == LOW) {
+    Serial.print("Raw BUTTON PRESS detected on channel ");
     Serial.println(channel);
   }
 #endif
   if (inputStateChangePending[channel]) {
     if (input == inputState[channel]) {
       // change fails debounce state. 
+#ifdef DEBUG
+        Serial.print("Debounce fail on channel ");
+        Serial.println(channel);
+#endif
       inputStateChangePending[channel] = false;
     } else {
       if (curTimeMs > inputStateChangeTime[channel] + debounceTimerMs) {
         // debounce success, change state
+#ifdef DEBUG
+        Serial.print("Debounce success, change state on channel to ");
+        Serial.print(input ? "HIGH" : "LOW");
+        Serial.print(", channel "); 
+        Serial.println(channel);
+#endif
         inputState[channel] = input;
       }
     }
   } else {
     if (input != inputState[channel]) {
+#ifdef DEBUG
+        Serial.print("Potential state change detected, incoming is ");
+        Serial.print(input ? "HIGH" : "LOW");
+        Serial.print(" ,channel ");
+        Serial.println(channel);
+#endif
       inputStateChangePending[channel] = true;
       inputStateChangeTime[channel] = curTimeMs;
     }
@@ -526,7 +573,8 @@ bool debouncedRead(int channel, int curTimeMs) {
   return inputState[channel];
 }
 
-
+// XXX - I have multiple levels of debounce here. FIXME
+bool firstTime = true;
 void loop() {
   // Serial.println("loop...");
   // Read data, send to the channel controllers.
@@ -535,18 +583,33 @@ void loop() {
     controllers[0].update(inputTest.GetButtonState(curTimeMs), curTimeMs);
 #else
   for (int i=0; i<NUM_CHANNELS; i++) {
-    controllers[i].update(debouncedRead(i, curTimeMs), curTimeMs);
+    bool buttonState = debouncedRead(i, curTimeMs);
+    if (firstTime) {
+#ifdef DEBUG
+      Serial.print("Initial button read on channel ");
+      Serial.print(i);
+      Serial.print(" value ");
+      Serial.println(buttonState ? "HIGH" : "LOW");
+#endif
+    } else {
+      // Note here that debouncedRead returns HIGH and LOW. HIGH is UNPRESSED, LOW is PRESSED
+      controllers[i].update(!debouncedRead(i, curTimeMs), curTimeMs);
+    }
   }
+  firstTime = false;
+
 
   // Every second or so, re-read the channelMode and change the program
   if ((curTimeMs < tickTime) || (curTimeMs > tickTime + 1000)) {
 #ifdef DEBUG
-    Serial.println("tick");
+    // Serial.println("tick");
 #endif
+    /*  // XXX - For the moment, let's not change the program in real time
     readChannelModes();
     for (int i=0; i<NUM_CHANNELS; i++) {
       controllers[i].setProgram(channelModes[i]);
     }
+    */
     tickTime = curTimeMs;
   }
 #endif // TEST
