@@ -1,3 +1,5 @@
+#include "button_sequence.h"
+#if 0
 #include <Wire.h>
 #include <PCA95x5.h>
 
@@ -613,4 +615,13 @@ void loop() {
     tickTime = curTimeMs;
   }
 #endif // TEST
+}
+#endif // 0
+
+void loop() {
+  buttonLoop();
+}
+
+void setup() {
+  buttonSetup();
 }
