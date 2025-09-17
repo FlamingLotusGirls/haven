@@ -13,21 +13,21 @@ import pattern_manager
 from flask_utils import CORSResponse
 from flask_utils import JSONResponse
 
-''' 
+'''
     Webserver for the flame effect controller. In this variant, we're mostly
     interested in sequences - we have CRUD endpoints for sequences, as well
     as commands to run (or stop) a particular sequence. Other endpoints will
     globally disable (or re-enable) particular poofers; note, however that
-    the buttons on the sculpture bypass any software control, so if you 
+    the buttons on the sculpture bypass any software control, so if you
     really want to turn a poofer off, you're going to have to go put pink
     tape on the button
 '''
 
-PORT = 5000
+PORT = 5001
 
 logger = logging.getLogger("flames")
 
-app = Flask("flg", static_url_path="", static_folder="/home/flaming/Serenity/Flames/static")
+app = Flask("flg", static_url_path="", static_folder="/home/flaming/haven/Flames/static")
 #app = Flask("flg", static_url_path="")
 
 
@@ -63,7 +63,6 @@ def flame_status():
         return JSONResponse(json.dumps(get_status()))
 
 
-
 @app.route("/flame/poofers/<poofer_id>", methods=['GET', 'POST'])
 def specific_flame_status(poofer_id):
     ''' GET /flame/poofers/<poofername>. Get status of particular poofer.
@@ -87,7 +86,7 @@ def specific_flame_status(poofer_id):
         return CORSResponse("Success", 200)
     else:
         return JSONResponse(json.dumps(get_poofer_status(poofer_id)))
-        
+
 @app.route("/flame/patterns", methods=['GET','POST'])
 def flame_patterns():
     ''' GET /flame/patterns: Get list of all flame patterns, whether active
@@ -116,7 +115,8 @@ def flame_pattern(patternName):
     includesActive  = "active"  in request.values
 
     if request.method == 'POST':
-        # pattern create - pattern data included, but pattern name not in system
+        # modify pattern
+        # XXX - this code does not work, does not go through pattern manager
         if  (not includesPattern) and (not patternName_valid(patternName)):
             return CORSResponse("Must have valid 'patternName'", 400)
 
@@ -207,7 +207,7 @@ def get_flame_patterns():
 def set_flame_pattern(pattern):
     pattern_manager.addOrModifyPattern(json.loads(pattern))
     pattern_manager.savePatterns()
-    
+
 def poofer_id_valid(id):
     return id in poofermapping.mappings
 

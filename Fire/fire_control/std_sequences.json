@@ -1,49 +1,524 @@
 [
-	{"name": "__1_1", "events": [{"ids": ["1_1"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_2", "events": [{"ids": ["1_2"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_3", "events": [{"ids": ["1_3"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_4", "events": [{"ids": ["1_4"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_5", "events": [{"ids": ["1_5"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_6", "events": [{"ids": ["1_6"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_7", "events": [{"ids": ["1_7"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__1_8", "events": [{"ids": ["1_8"], "startTime": 0, "duration": 0.3}], "modifiable": true},
-	{"name": "__2_1", "events": [{"ids": ["2_1"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_2", "events": [{"ids": ["2_2"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_3", "events": [{"ids": ["2_3"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_4", "events": [{"ids": ["2_4"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_5", "events": [{"ids": ["2_5"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_6", "events": [{"ids": ["2_6"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_7", "events": [{"ids": ["2_7"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__2_8", "events": [{"ids": ["2_8"], "startTime": 0, "duration": 0.3}], "modifiable": true},
-	{"name": "__3_1", "events": [{"ids": ["3_1"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_2", "events": [{"ids": ["3_2"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_3", "events": [{"ids": ["3_3"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_4", "events": [{"ids": ["3_4"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_5", "events": [{"ids": ["3_5"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_6", "events": [{"ids": ["3_6"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_7", "events": [{"ids": ["3_7"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__3_8", "events": [{"ids": ["3_8"], "startTime": 0, "duration": 0.3}], "modifiable": true},
-	{"name": "__4_1", "events": [{"ids": ["4_1"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_2", "events": [{"ids": ["4_2"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_3", "events": [{"ids": ["4_3"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_4", "events": [{"ids": ["4_4"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_5", "events": [{"ids": ["4_5"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_6", "events": [{"ids": ["4_6"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_7", "events": [{"ids": ["4_7"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__4_8", "events": [{"ids": ["4_8"], "startTime": 0, "duration": 0.3}], "modifiable": true},
-	{"name": "__5_1", "events": [{"ids": ["5_1"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_2", "events": [{"ids": ["5_2"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_3", "events": [{"ids": ["5_3"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_4", "events": [{"ids": ["5_4"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_5", "events": [{"ids": ["5_5"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_6", "events": [{"ids": ["5_6"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_7", "events": [{"ids": ["5_7"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__5_8", "events": [{"ids": ["5_8"], "startTime": 0, "duration": 0.3}], "modifiable": true},
-	{"name": "__6_1", "events": [{"ids": ["6_1"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__6_2", "events": [{"ids": ["6_2"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__6_3", "events": [{"ids": ["6_3"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__6_4", "events": [{"ids": ["6_4"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__6_5", "events": [{"ids": ["6_5"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__6_6", "events": [{"ids": ["6_6"], "startTime": 0, "duration": 0.3}], "modifiable": true}, 
-	{"name": "__6_7", "events": [{"ids": ["6_7"], "startTime": 0, "duration": 0.3}], "modifiable": true}
+    {
+    "name": "__Cockatoo_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "C1",
+          "C2",
+          "C3",
+          "C4",
+          "C5",
+          "C6"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Cockatoo_bigBird_allpoof",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR1",
+          "C_HAIR2",
+          "C_HAIR3",
+          "C_HAIR4"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Cockatoo_bigBird_chase",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR1"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C_HAIR2"
+        ],
+        "startTime": 0.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C_HAIR3"
+        ],
+        "startTime": 1.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C_HAIR4"
+        ],
+        "startTime": 1.5,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Cockatoo_birds_chase",
+    "events": [
+      {
+        "ids": [
+          "C5"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C3"
+        ],
+        "startTime": 0.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C1"
+        ],
+        "startTime": 1.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C2"
+        ],
+        "startTime": 1.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C4"
+        ],
+        "startTime": 2.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C6"
+        ],
+        "startTime": 2.5,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Osprey_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "O1",
+          "O2",
+          "O3"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Osprey_bigbird_allpoof",
+    "events": [
+      {
+        "ids": [
+          "O_WINGS",
+          "O_EYES"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Magpie_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "M1",
+          "M2",
+          "M3"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Magpie_bigbird_allpoof",
+    "events": [
+      {
+        "ids": [
+          "M_TAIL"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Perch_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "P1",
+          "P2",
+          "P3",
+          "P4"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__Perch_birds_chase",
+    "events": [
+      {
+        "ids": [
+          "P1"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "P2"
+        ],
+        "startTime": 0.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "P3"
+        ],
+        "startTime": 1.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "P4"
+        ],
+        "startTime": 1.5,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C1",
+    "events": [
+      {
+        "ids": [
+          "C1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C2",
+    "events": [
+      {
+        "ids": [
+          "C2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C3",
+    "events": [
+      {
+        "ids": [
+          "C3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C4",
+    "events": [
+      {
+        "ids": [
+          "C4"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C5",
+    "events": [
+      {
+        "ids": [
+          "C5"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C6",
+    "events": [
+      {
+        "ids": [
+          "C6"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C_HAIR1",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C_HAIR2",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C_HAIR3",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__C_HAIR4",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR4"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__M_TAIL",
+    "events": [
+      {
+        "ids": [
+          "M_TAIL"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__M1",
+    "events": [
+      {
+        "ids": [
+          "M1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__M2",
+    "events": [
+      {
+        "ids": [
+          "M2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__M3",
+    "events": [
+      {
+        "ids": [
+          "M3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__O_EYES",
+    "events": [
+      {
+        "ids": [
+          "O_EYES"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__O_WINGS",
+    "events": [
+      {
+        "ids": [
+          "O_WINGS"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__O1",
+    "events": [
+      {
+        "ids": [
+          "O1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__O2",
+    "events": [
+      {
+        "ids": [
+          "O2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__O3",
+    "events": [
+      {
+        "ids": [
+          "O3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__P1",
+    "events": [
+      {
+        "ids": [
+          "P1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__P2",
+    "events": [
+      {
+        "ids": [
+          "P2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+  {
+    "name": "__P3",
+    "events": [
+      {
+        "ids": [
+          "P3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  },
+    {
+    "name": "__P4",
+    "events": [
+      {
+        "ids": [
+          "P4"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false
+  }
 ]
