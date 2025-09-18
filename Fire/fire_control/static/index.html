@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flame Control Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔥 Flame Control Dashboard</h1>
+            <div class="global-controls">
+                <button id="globalPlay" class="btn btn-success">Play</button>
+                <button id="globalPause" class="btn btn-warning">Pause</button>
+                <span id="globalStatus" class="status-indicator"></span>
+            </div>
+        </header>
+
+        <div class="dashboard-grid">
+            <!-- Default Sequences Section -->
+            <section class="card">
+                <h2>Default Sequences</h2>
+                <p>Fire predefined sequences for each bird sculpture.</p>
+                
+                <!-- Cockatoo Sequences -->
+                <div class="sequence-group">
+                    <h3>🦜 Cockatoo Sequences</h3>
+                    <div class="sequence-buttons">
+                        <button class="sequence-btn" data-sequence="__Cockatoo_birds_allpoof">Birds All Poof</button>
+                        <button class="sequence-btn" data-sequence="__Cockatoo_bigBird_allpoof">Big Bird All Poof</button>
+                        <button class="sequence-btn" data-sequence="__Cockatoo_bigBird_chase">Big Bird Chase</button>
+                        <button class="sequence-btn" data-sequence="__Cockatoo_birds_chase">Birds Chase</button>
+                    </div>
+                </div>
+
+                <!-- Osprey Sequences -->
+                <div class="sequence-group">
+                    <h3>🦅 Osprey Sequences</h3>
+                    <div class="sequence-buttons">
+                        <button class="sequence-btn" data-sequence="__Osprey_birds_allpoof">Birds All Poof</button>
+                        <button class="sequence-btn" data-sequence="__Osprey_bigbird_allpoof">Big Bird All Poof</button>
+                    </div>
+                </div>
+
+                <!-- Magpie Sequences -->
+                <div class="sequence-group">
+                    <h3>🐦‍⬛ Magpie Sequences</h3>
+                    <div class="sequence-buttons">
+                        <button class="sequence-btn" data-sequence="__Magpie_birds_allpoof">Birds All Poof</button>
+                        <button class="sequence-btn" data-sequence="__Magpie_bigbird_allpoof">Big Bird All Poof</button>
+                    </div>
+                </div>
+
+                <!-- Perch Sequences -->
+                <div class="sequence-group">
+                    <h3>🪶 Perch Sequences</h3>
+                    <div class="sequence-buttons">
+                        <button class="sequence-btn" data-sequence="__Perch_birds_allpoof">Birds All Poof</button>
+                        <button class="sequence-btn" data-sequence="__Perch_birds_chase">Birds Chase</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Poofer Visual Layout -->
+            <section class="card poofer-visual">
+                <h2>Individual Poofers</h2>
+                <div class="sculpture-layout">
+                    <!-- Cockatoo Poofers -->
+                    <div class="poofer-group cockatoo-group">
+                        <h3>🦜 Cockatoo (C)</h3>
+                        <div class="poofer-grid">
+                            <div class="poofer-item" data-poofer="C1">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">C1</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="C1">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="C1">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="C2">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">C2</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="C2">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="C2">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="C3">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">C3</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="C3">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="C3">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="C4">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">C4</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="C4">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="C4">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="C5">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">C5</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="C5">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="C5">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="C6">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">C6</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="C6">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="C6">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Hair Poofers -->
+                        <div class="hair-poofers">
+                            <h4>Hair</h4>
+                            <div class="poofer-row">
+                                <div class="poofer-item" data-poofer="C_HAIR1">
+                                    <div class="fire-icon">🔥</div>
+                                    <span class="poofer-label">HAIR1</span>
+                                    <div class="poofer-controls">
+                                        <button class="fire-btn btn-fire" data-poofer="C_HAIR1">🔥 Fire</button>
+                                        <button class="toggle-btn" data-poofer="C_HAIR1">Disable</button>
+                                        <span class="status-dot"></span>
+                                    </div>
+                                </div>
+                                <div class="poofer-item" data-poofer="C_HAIR2">
+                                    <div class="fire-icon">🔥</div>
+                                    <span class="poofer-label">HAIR2</span>
+                                    <div class="poofer-controls">
+                                        <button class="fire-btn btn-fire" data-poofer="C_HAIR2">🔥 Fire</button>
+                                        <button class="toggle-btn" data-poofer="C_HAIR2">Disable</button>
+                                        <span class="status-dot"></span>
+                                    </div>
+                                </div>
+                                <div class="poofer-item" data-poofer="C_HAIR3">
+                                    <div class="fire-icon">🔥</div>
+                                    <span class="poofer-label">HAIR3</span>
+                                    <div class="poofer-controls">
+                                        <button class="fire-btn btn-fire" data-poofer="C_HAIR3">🔥 Fire</button>
+                                        <button class="toggle-btn" data-poofer="C_HAIR3">Disable</button>
+                                        <span class="status-dot"></span>
+                                    </div>
+                                </div>
+                                <div class="poofer-item" data-poofer="C_HAIR4">
+                                    <div class="fire-icon">🔥</div>
+                                    <span class="poofer-label">HAIR4</span>
+                                    <div class="poofer-controls">
+                                        <button class="fire-btn btn-fire" data-poofer="C_HAIR4">🔥 Fire</button>
+                                        <button class="toggle-btn" data-poofer="C_HAIR4">Disable</button>
+                                        <span class="status-dot"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Osprey Poofers -->
+                    <div class="poofer-group osprey-group">
+                        <h3>🦅 Osprey (O)</h3>
+                        <div class="poofer-grid">
+                            <div class="poofer-item" data-poofer="O_EYES">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">EYES</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="O_EYES">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="O_EYES">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="O_WINGS">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">WINGS</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="O_WINGS">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="O_WINGS">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="O1">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">O1</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="O1">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="O1">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="O2">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">O2</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="O2">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="O2">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="O3">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">O3</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="O3">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="O3">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Magpie Poofers -->
+                    <div class="poofer-group magpie-group">
+                        <h3>🐦‍⬛ Magpie (M)</h3>
+                        <div class="poofer-grid">
+                            <div class="poofer-item" data-poofer="M_TAIL">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">TAIL</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="M_TAIL">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="M_TAIL">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="M1">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">M1</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="M1">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="M1">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="M2">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">M2</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="M2">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="M2">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="M3">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">M3</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="M3">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="M3">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Perch Poofers -->
+                    <div class="poofer-group perch-group">
+                        <h3>🪶 Perch (P)</h3>
+                        <div class="poofer-grid">
+                            <div class="poofer-item" data-poofer="__P1">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">P1</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="__P1">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="__P1">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="__P2">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">P2</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="__P2">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="__P2">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="__P3">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">P3</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="__P3">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="__P3">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                            <div class="poofer-item" data-poofer="__P4">
+                                <div class="fire-icon">🔥</div>
+                                <span class="poofer-label">P4</span>
+                                <div class="poofer-controls">
+                                    <button class="fire-btn btn-fire" data-poofer="__P4">🔥 Fire</button>
+                                    <button class="toggle-btn" data-poofer="__P4">Disable</button>
+                                    <span class="status-dot"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- System Status Section -->
+            <section class="card">
+                <h2>System Status</h2>
+                <div id="systemStatus">
+                    <div class="loading">Loading system status...</div>
+                </div>
+                <button id="refreshStatus" class="btn btn-secondary">Refresh Status</button>
+            </section>
+
+            <!-- Patterns Control Section -->
+            <section class="card">
+                <h2>Pattern Management</h2>
+                <div class="pattern-controls">
+                    <button id="addPatternBtn" class="btn btn-primary">Add New Pattern</button>
+                    <button id="refreshPatterns" class="btn btn-secondary">Refresh Patterns</button>
+                </div>
+                <div id="patternsContainer">
+                    <div class="loading">Loading patterns...</div>
+                </div>
+            </section>
+
+        </div>
+    </div>
+</body>
+<script src="app.js"></script>
+</html>
