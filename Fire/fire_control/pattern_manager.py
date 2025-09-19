@@ -191,7 +191,7 @@ def savePatterns(filename=None):
     if filename == None:
         filename = patternFileName
     with open(filename, 'w') as f: # open write
-        json.dump(gPatterns, f)
+        json.dump(gPatterns, f, indent=2, separators=(',', ': '))
 
 def patternsEqual(pat1, pat2):
     if pat1["name"] != pat2["name"]:
