@@ -27,8 +27,8 @@ PORT = 5001
 
 logger = logging.getLogger("flames")
 
-app = Flask("flg", static_url_path="", static_folder="/home/flaming/haven/Flames/static")
-#app = Flask("flg", static_url_path="")
+#app = Flask("flg", static_url_path="", static_folder="/home/flaming/haven/Flames/static")
+app = Flask("flg", static_url_path="")
 
 
 # XXX TODO - function to set the log level
@@ -165,11 +165,14 @@ def flame_pattern(patternName):
         pattern_manager.savePatterns()
         return CORSResponse("Success", 200)
 
-    else:
+    else: # ie, GET
         if (not patternName_valid(patternName)):
             return CORSResponse("Must have valid 'patternName'", 400)
         else:
-            return JSONResponse(json.dumps(get_pattern_status(patternName)))
+            if "full" in request.values:
+                return JSONResponse(json.dumps(get_pattern(patternName)))
+            else:                      
+                return JSONResponse(json.dumps(get_pattern_status(patternName)))
 
 
 def get_status():
@@ -200,8 +203,17 @@ def get_pattern_status(patternName):
                      "active" : flames_controller.isFlameEffectActive(patternName)}
     return patternStatus
 
+def get_pattern(patternName):
+    return pattern_manager.getPattern(patternName);
+
 def get_flame_patterns():
-    return pattern_manager.getAllPatterns()
+    patterns = pattern_manager.getAllPatterns()
+    for pattern in patterns: 
+        patternName = pattern["name"]
+        status = get_pattern_status(patternName)
+        for statusKey in status:
+            pattern[statusKey] = status[statusKey]
+    return patterns
 
 # abort 500 in general? how are errors expected to be propagated in this framework?s
 def set_flame_pattern(pattern):
