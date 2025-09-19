@@ -240,7 +240,7 @@ class PooferFiringThread(Thread): # comment out for unit testing
         except Exception as e:
             self.ser.close()
             self.ser = None
-            logger.exception("Error sending bangCommandSequence to poofer controller boards: %s", str(e))
+            logger.exception("Error sending bangCommandSequence to poofer controller boards: %s, command was %s", str(e), str(bangCommandList))
 
     def disablePoofer(self, msgObj):
         logger.info("Disabling poofer {}".format(msgObj["name"]))
