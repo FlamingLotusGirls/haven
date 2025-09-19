@@ -41,6 +41,7 @@
 ///   - Board spin to rationalize IO lines. The wiring to the dip switches is a nightmare - and
 //      there's no good reason for that.
 
+// #define DEBUG
 #ifndef ARDUINO
 #ifndef MOCK_INPUT
 #define MOCK_INPUT
@@ -280,7 +281,7 @@ public:
     if (m_mode == ChannelControllerMode::Follower) {
       m_outputState[m_defaultOutputChannel].valid = true;
       m_outputState[m_defaultOutputChannel].buttonPressed = buttonPressed;
-      
+    } else {
       switch(m_state) {
         case WAIT_FOR_PRESS: 
           if (buttonPressed) {
@@ -312,7 +313,7 @@ public:
               Serial.print("Channel: ");
               Serial.print(m_inputChannel);
               Serial.print(", PLAYBACK FINISHED, ");
-              Serial.println(%curTimeMs);
+              Serial.println(curTimeMs);
 #endif
 #else
               printf("Channel: %d, PLAYBACK FINISHED, %d\n", m_inputChannel, curTimeMs);
@@ -533,8 +534,20 @@ InputTest inputTest;
 // either going to be reading from a Program or getting data from the actual device
 bool readRawInput(int inputChannel, int curTimeMs) {
 #ifdef ARDUINO
+  bool input = digitalRead(inputs[inputChannel]);
+#ifdef DEBUG
+/*
+  Serial.print("Reading value ");
+  Serial.print(input ? "HIGH " : "LOW ");
+  Serial.print("from channel ");
+  Serial.print(inputChannel);
+  Serial.print(", pin ");
+  Serial.println(inputs[inputChannel]);
+  */
+#endif // DEBUG
   // NB - PRESSED is when the pin is held LOW, hence the negation
-  return !digitalRead(inputs[inputChannel]);
+  return !input; 
+  // !digitalRead(inputs[inputChannel]);
 #else
   return inputTest.GetButtonState(inputChannel, curTimeMs);
 #endif
@@ -542,7 +555,17 @@ bool readRawInput(int inputChannel, int curTimeMs) {
 
 void writeOutput(int outputChannel, bool output) {
 #ifdef ARDUINO
-  digitalWrite(outputs[outputChannel], output ? LOW : HIGH); // Note that 'pressed' is indicated by pulling the wire LOW
+#ifdef DEBUG
+/*
+  Serial.print("Writing value ");
+  Serial.print(output ? "PRESSED " : "UNPRESSED ");
+  Serial.print("to output channel ");
+  Serial.print(outputChannel);
+  Serial.print(", pin ");
+  Serial.println(outputs[outputChannel]);
+  */
+ #endif 
+  digitalWrite(outputs[outputChannel], output ? HIGH : LOW); // XXX 'PRESSED' seems to be pulling the wire HIGH, which is not my memory of how it works.
 #else
   // printf("WRITING %s to outputChannel %d\n", output ? "PRESSED" : "UNPRESSED",  outputChannel);
 #endif
@@ -596,9 +619,6 @@ void readInputButtonStates(int curTimeMs) {
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
     bool buttonState = readRawInput(i, curTimeMs);
     inputButtonStates[i] = debouncer.Debounce(i, buttonState, curTimeMs);
-    if (i==0) {
-      // printf("input button state channel 0 raw is %s, debounced is %s\n", buttonState ? "PRESSED" : "UNPRESSED", inputButtonStates[i] ? "PRESSED" : "UNPRESSED");
-    }
   }
 }
 
@@ -664,14 +684,13 @@ void buttonLoop() {
 void buttonSetup() {
   initMillis();
   initIO();
-  initChannelControllers();
 #ifdef ARDUINO
   initI2C();
+  initChannelControllers();
 #ifdef DEBUG
-    Serial.print("Starting");
+  Serial.println("Starting...");
 #endif // DEBUG
-    delay(1000);
-#else
+#else // ~ARDUINO
   printf("Starting...\n");
 #ifdef MOCK_INPUT
   inputTest.Start();
