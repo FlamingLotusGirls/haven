@@ -2,6 +2,7 @@
 class FlameController {
     constructor() {
         this.baseUrl = window.location.origin;
+        this.repeatTimers = new Map(); // Store active repeat timers
         this.init();
     }
 
@@ -45,13 +46,27 @@ class FlameController {
             });
         });
 
+        // Repeat buttons
+        document.querySelectorAll('.repeat-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const sequenceId = e.target.getAttribute('data-sequence');
+                this.toggleRepeat(sequenceId, e.target);
+            });
+        });
+
         // Pattern management
         document.getElementById('addPatternBtn').addEventListener('click', () => this.showPatternModal());
+        document.getElementById('patternForm').addEventListener('submit', (e) => this.savePattern(e));
+        document.getElementById('cancelPattern').addEventListener('click', () => this.hidePatternModal());
+        document.getElementById('addEventBtn').addEventListener('click', () => this.addEventRowIfValid());
    
         // Modal close buttons
         document.querySelectorAll('.close').forEach(closeBtn => {
             closeBtn.addEventListener('click', (e) => {
-                e.target.closest('.modal').style.display = 'none';
+                const modal = e.target.closest('.modal');
+                modal.style.display = 'none';
+                // Restore body scroll
+                document.body.classList.remove('modal-open');
             });
         });
 
@@ -59,6 +74,8 @@ class FlameController {
         window.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal')) {
                 e.target.style.display = 'none';
+                // Restore body scroll
+                document.body.classList.remove('modal-open');
             }
         });
 
@@ -210,6 +227,64 @@ class FlameController {
         }
     }
 
+    toggleRepeat(sequenceId, button) {
+        const sequenceItem = button.closest('.sequence-item');
+        const intervalInput = sequenceItem.querySelector('.repeat-interval');
+        const statusIndicator = sequenceItem.querySelector('.repeat-status');
+        
+        if (this.repeatTimers.has(sequenceId)) {
+            // Stop repeating
+            clearInterval(this.repeatTimers.get(sequenceId));
+            this.repeatTimers.delete(sequenceId);
+            
+            // Update UI
+            button.style.backgroundColor = '';
+            button.style.color = '';
+            button.title = 'Toggle repeat';
+            statusIndicator.textContent = 'Stopped';
+            statusIndicator.className = 'repeat-status stopped';
+            
+            this.showMessage(`Repeat stopped for ${sequenceId}`, 'info');
+        } else {
+            // Start repeating
+            const interval = parseInt(intervalInput.value) * 1000; // Convert to milliseconds
+            
+            if (interval < 1000) {
+                this.showMessage('Repeat interval must be at least 1 second', 'error');
+                return;
+            }
+            
+            // Update button appearance
+            button.style.backgroundColor = '#28a745';
+            button.style.color = 'white';
+            button.title = 'Stop repeat';
+            statusIndicator.textContent = `Repeating (${intervalInput.value}s)`;
+            statusIndicator.className = 'repeat-status repeating';
+            
+            // Start the repeat timer
+            const timerId = setInterval(async () => {
+                try {
+                    const response = await fetch(`${this.baseUrl}/flame/patterns/${sequenceId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `active=true`
+                    });
+                    
+                    if (!response.ok) {
+                        console.error(`Failed to fire sequence ${sequenceId} during repeat`);
+                    }
+                } catch (error) {
+                    console.error(`Error firing sequence ${sequenceId} during repeat:`, error);
+                }
+            }, interval);
+            
+            this.repeatTimers.set(sequenceId, timerId);
+            this.showMessage(`Repeat started for ${sequenceId} every ${intervalInput.value} seconds`, 'success');
+        }
+    }
+
     updatePooferStatus(pooferId, enabled) {
         const pooferItem = document.querySelector(`[data-poofer="${pooferId}"]`);
         if (pooferItem) {
@@ -287,7 +362,10 @@ class FlameController {
     }
 
     displayPatterns(patterns) {
-        const patternsHtml = patterns.map(pattern => `
+        // Filter out patterns that begin with "__"
+        const filteredPatterns = patterns.filter(pattern => !pattern.name.startsWith('__'));
+        
+        const patternsHtml = filteredPatterns.map(pattern => `
             <div class="pattern-item">
                 <div class="pattern-info">
                     <strong>${pattern.name}</strong>
@@ -303,6 +381,9 @@ class FlameController {
                     <button class="btn btn-sm" onclick="flameController.togglePattern('${pattern.name}', 'active')">
                         ${pattern.active ? 'Stop' : 'Start'}
                     </button>
+                    <button class="btn btn-sm btn-primary" onclick="flameController.editPattern('${pattern.name}')">
+                        Edit
+                    </button>
                     <button class="btn btn-sm btn-danger" onclick="flameController.deletePattern('${pattern.name}')">
                         Delete
                     </button>
@@ -310,7 +391,7 @@ class FlameController {
             </div>
         `).join('');
         
-        document.getElementById('patternsContainer').innerHTML = patternsHtml || '<div class="info">No patterns found</div>';
+        document.getElementById('patternsContainer').innerHTML = patternsHtml || '<div class="info">No user patterns found</div>';
     }
 
     async togglePattern(patternName, property) {
@@ -340,6 +421,23 @@ class FlameController {
         }
     }
 
+    async editPattern(patternName) {
+        try {
+            // Fetch the existing pattern data with 'full' parameter to get events
+            const response = await fetch(`${this.baseUrl}/flame/patterns/${patternName}?full=true`);
+            
+            if (response.ok) {
+                const patternData = await response.json();
+                // Open the modal with the existing pattern data
+                this.showPatternModal(patternData);
+            } else {
+                this.showMessage(`Failed to load pattern ${patternName}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error loading pattern: ${error.message}`, 'error');
+        }
+    }
+
     async deletePattern(patternName) {
         if (!confirm(`Are you sure you want to delete pattern "${patternName}"?`)) {
             return;
@@ -365,47 +463,227 @@ class FlameController {
         const modal = document.getElementById('patternModal');
         const title = document.getElementById('modalTitle');
         const nameInput = document.getElementById('patternName');
-        const dataInput = document.getElementById('patternData');
+        const eventsContainer = document.getElementById('eventsContainer');
 
         if (pattern) {
             title.textContent = 'Edit Pattern';
             nameInput.value = pattern.name;
-            dataInput.value = JSON.stringify(pattern, null, 2);
+            // Load existing events
+            eventsContainer.innerHTML = '';
+            pattern.events.forEach(event => {
+                this.addEventRow(event);
+            });
         } else {
             title.textContent = 'Add New Pattern';
             nameInput.value = '';
-            dataInput.value = '{\n  "name": "",\n  "events": []\n}';
+            eventsContainer.innerHTML = '';
+            // Add one empty event row to start
+            this.addEventRow();
         }
 
+        // Prevent body scroll
+        document.body.classList.add('modal-open');
         modal.style.display = 'block';
     }
 
     hidePatternModal() {
         document.getElementById('patternModal').style.display = 'none';
+        // Clear events container
+        document.getElementById('eventsContainer').innerHTML = '';
+        // Restore body scroll
+        document.body.classList.remove('modal-open');
+    }
+
+    addEventRowIfValid() {
+        // Check if all existing event rows have poofers selected
+        const existingRows = document.querySelectorAll('.event-row');
+        
+        for (let row of existingRows) {
+            const pooferSelect = row.querySelector('.event-poofer-id');
+            if (!pooferSelect.value) {
+                this.showMessage('Please select a poofer for all existing events before adding a new one', 'error');
+                // Highlight the empty select field
+                pooferSelect.style.borderColor = '#dc3545';
+                pooferSelect.focus();
+                
+                // Remove highlight after 3 seconds
+                setTimeout(() => {
+                    pooferSelect.style.borderColor = '';
+                }, 3000);
+                
+                return;
+            }
+        }
+        
+        // If all existing events have poofers selected, add a new row
+        this.addEventRow();
+    }
+
+    addEventRow(eventData = null) {
+        const eventsContainer = document.getElementById('eventsContainer');
+        const eventIndex = eventsContainer.children.length;
+        
+        // Valid poofer IDs from poofermapping.py
+        const validPooferIds = [
+            'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
+            'C_HAIR1', 'C_HAIR2', 'C_HAIR3', 'C_HAIR4',
+            'O_EYES', 'O_WINGS', 'O1', 'O2', 'O3',
+            'M_TAIL', 'M1', 'M2', 'M3',
+            'P1', 'P2', 'P3', 'P4'
+        ];
+
+        const eventRow = document.createElement('div');
+        eventRow.className = 'event-row';
+        eventRow.innerHTML = `
+            <div class="event-fields">
+                <div class="field-group">
+                    <label>Poofer ID:</label>
+                    <select class="event-poofer-id" required>
+                        <option value="">Select Poofer</option>
+                        ${validPooferIds.map(id => 
+                            `<option value="${id}" ${eventData && eventData.ids && eventData.ids.includes(id) ? 'selected' : ''}>${id}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label>Start Time (seconds):</label>
+                    <input type="number" class="event-start-time" step="0.1" min="0" value="${eventData ? eventData.startTime : 0}" required>
+                </div>
+                <div class="field-group">
+                    <label>Duration (seconds):</label>
+                    <input type="number" class="event-duration" step="0.1" min="0.1" value="${eventData ? eventData.duration : 0.5}" required>
+                </div>
+                <div class="field-group">
+                    <button type="button" class="btn btn-danger btn-sm remove-event">Remove</button>
+                </div>
+            </div>
+        `;
+
+        // Add event listener for remove button
+        eventRow.querySelector('.remove-event').addEventListener('click', () => {
+            eventRow.remove();
+        });
+
+        eventsContainer.appendChild(eventRow);
     }
 
     async savePattern(event) {
         event.preventDefault();
         
-        const patternData = document.getElementById('patternData').value;
+        const patternName = document.getElementById('patternName').value.trim();
+        if (!patternName) {
+            this.showMessage('Pattern name is required', 'error');
+            return;
+        }
+
+        // Validate that user patterns cannot start with "__"
+        if (patternName.startsWith('__')) {
+            this.showMessage('Pattern names cannot start with "__" - this prefix is reserved for system patterns', 'error');
+            // Highlight the pattern name field
+            const nameInput = document.getElementById('patternName');
+            nameInput.style.borderColor = '#dc3545';
+            nameInput.focus();
+            
+            // Remove highlight after 3 seconds
+            setTimeout(() => {
+                nameInput.style.borderColor = '';
+            }, 3000);
+            
+            return;
+        }
+
+        // Check for duplicate pattern names (case-insensitive) when creating new patterns
+        const modalTitle = document.getElementById('modalTitle').textContent;
+        const isEditing = modalTitle === 'Edit Pattern';
+        
+        if (!isEditing) {
+            try {
+                const response = await fetch(`${this.baseUrl}/flame/patterns`);
+                const existingPatterns = await response.json();
+                
+                // Check if pattern name already exists (case-insensitive)
+                const duplicatePattern = existingPatterns.find(pattern => 
+                    pattern.name.toLowerCase() === patternName.toLowerCase()
+                );
+                
+                if (duplicatePattern) {
+                    this.showMessage(`A pattern named "${duplicatePattern.name}" already exists. Please choose a different name.`, 'error');
+                    // Highlight the pattern name field
+                    const nameInput = document.getElementById('patternName');
+                    nameInput.style.borderColor = '#dc3545';
+                    nameInput.focus();
+                    
+                    // Remove highlight after 3 seconds
+                    setTimeout(() => {
+                        nameInput.style.borderColor = '';
+                    }, 3000);
+                    
+                    return;
+                }
+            } catch (error) {
+                this.showMessage(`Error checking for duplicate patterns: ${error.message}`, 'error');
+                return;
+            }
+        }
+
+        // Collect events from the form
+        const eventRows = document.querySelectorAll('.event-row');
+        const events = [];
+        
+        for (let row of eventRows) {
+            const pooferId = row.querySelector('.event-poofer-id').value;
+            const startTime = parseFloat(row.querySelector('.event-start-time').value);
+            const duration = parseFloat(row.querySelector('.event-duration').value);
+            
+            if (!pooferId) {
+                this.showMessage('All events must have a poofer ID selected', 'error');
+                return;
+            }
+            
+            if (isNaN(startTime) || startTime < 0) {
+                this.showMessage('Start time must be a valid number >= 0', 'error');
+                return;
+            }
+            
+            if (isNaN(duration) || duration <= 0) {
+                this.showMessage('Duration must be a valid number > 0', 'error');
+                return;
+            }
+
+            events.push({
+                ids: [pooferId],
+                startTime: startTime,
+                duration: duration
+            });
+        }
+
+        if (events.length === 0) {
+            this.showMessage('At least one event is required', 'error');
+            return;
+        }
+
+        const patternData = {
+            name: patternName,
+            events: events,
+            modifiable: true
+        };
         
         try {
-            const pattern = JSON.parse(patternData);
-            
             const response = await fetch(`${this.baseUrl}/flame/patterns`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/x-www-form-urlencoded',
                 },
-                body: `patternData=${encodeURIComponent(patternData)}`
+                body: `patternData=${encodeURIComponent(JSON.stringify(patternData))}`
             });
 
             if (response.ok) {
-                this.showMessage(`Pattern ${pattern.name} saved`, 'success');
+                this.showMessage(`Pattern "${patternName}" saved successfully`, 'success');
                 this.hidePatternModal();
                 this.loadPatterns();
             } else {
-                this.showMessage('Failed to save pattern', 'error');
+                const errorText = await response.text();
+                this.showMessage(`Failed to save pattern: ${errorText}`, 'error');
             }
         } catch (error) {
             this.showMessage(`Error saving pattern: ${error.message}`, 'error');

@@ -457,17 +457,25 @@ header h1 {
     height: 100%;
     background-color: rgba(0, 0, 0, 0.8);
     backdrop-filter: blur(5px);
+    overflow-y: auto;
 }
 
 .modal-content {
     background: linear-gradient(135deg, #2d1b1b 0%, #1a1a1a 100%);
-    margin: 5% auto;
+    margin: 20px auto;
     padding: 30px;
     border-radius: 15px;
     width: 90%;
     max-width: 600px;
     border: 2px solid rgba(255, 69, 0, 0.3);
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    position: relative;
+    min-height: 200px;
+}
+
+/* Prevent body scroll when modal is open */
+body.modal-open {
+    overflow: hidden;
 }
 
 .close {
@@ -552,31 +560,309 @@ header h1 {
     text-align: center;
 }
 
+/* Sequence Buttons */
+.sequence-group {
+    margin-bottom: 20px;
+}
+
+.sequence-group h3 {
+    color: #ff6b35;
+    margin-bottom: 15px;
+    text-align: center;
+    font-size: 1.1rem;
+}
+
+.sequence-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.sequence-item {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid rgba(255, 69, 0, 0.2);
+}
+
+.sequence-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.sequence-btn {
+    background: linear-gradient(45deg, #007bff, #0056b3);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    flex: 1;
+    min-width: 140px;
+}
+
+.sequence-btn:hover {
+    background: linear-gradient(45deg, #0056b3, #004085);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+}
+
+.sequence-btn:active {
+    transform: translateY(0);
+}
+
+.sequence-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.repeat-btn {
+    background: linear-gradient(45deg, #6c757d, #545b62);
+    color: white;
+    border: none;
+    padding: 12px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.3s ease;
+    min-width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.repeat-btn:hover {
+    background: linear-gradient(45deg, #545b62, #495057);
+    transform: translateY(-1px);
+}
+
+.repeat-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 69, 0, 0.2);
+}
+
+.repeat-controls label {
+    color: #ff6b35;
+    font-weight: bold;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.repeat-interval {
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 69, 0, 0.3);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    font-size: 14px;
+    width: 80px;
+    text-align: center;
+}
+
+.repeat-interval:focus {
+    outline: none;
+    border-color: #ff6b35;
+    box-shadow: 0 0 10px rgba(255, 69, 0, 0.3);
+}
+
+.repeat-controls span {
+    color: #ff6b35;
+    font-size: 14px;
+    white-space: nowrap;
+}
+
+.repeat-status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    display: none
+}
+
+.repeat-status.stopped {
+    background: #6c757d;
+    color: white;
+    display: none
+}
+
+.repeat-status.repeating {
+    background: #28a745;
+    color: white;
+    animation: pulse 2s infinite;
+    display: block
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+/* Fire Button Styling */
+.btn-fire {
+    background: linear-gradient(45deg, #ff4500, #ff6b35) !important;
+    color: white !important;
+    font-weight: bold;
+    font-size: 12px;
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    box-shadow: 0 2px 8px rgba(255, 69, 0, 0.3);
+}
+
+.btn-fire:hover {
+    background: linear-gradient(45deg, #ff6b35, #ff8c42) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(255, 69, 0, 0.5);
+}
+
+.btn-fire:active {
+    transform: translateY(0);
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .container {
-        padding: 10px;
+        padding: 8px;
+    }
+    
+    header {
+        margin-bottom: 20px;
+        padding: 15px;
     }
     
     header h1 {
-        font-size: 2rem;
+        font-size: 1.8rem;
+        margin-bottom: 10px;
     }
     
     .dashboard-grid {
         grid-template-columns: 1fr;
+        gap: 15px;
     }
     
     .sculpture-layout {
         grid-template-columns: 1fr;
+        gap: 15px;
     }
     
     .poofer-grid {
-        grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+        gap: 8px;
+    }
+    
+    .poofer-item {
+        padding: 8px;
+        min-width: 90px;
+    }
+    
+    .fire-icon {
+        font-size: 1.5rem;
+        margin-bottom: 3px;
+    }
+    
+    .poofer-label {
+        font-size: 0.8rem;
+        margin-bottom: 6px;
+    }
+    
+    .poofer-controls {
+        gap: 4px;
+    }
+    
+    .fire-btn, .toggle-btn {
+        padding: 8px 12px;
+        font-size: 10px;
+        min-height: 36px;
+        width: 100%;
+    }
+    
+    .btn-fire {
+        padding: 10px 14px !important;
+        font-size: 11px !important;
+        min-height: 40px;
     }
     
     .global-controls {
         flex-direction: column;
+        gap: 12px;
+    }
+    
+    .btn {
+        padding: 12px 24px;
+        font-size: 16px;
+        min-height: 48px;
+    }
+    
+    .sequence-buttons {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .sequence-btn {
+        padding: 16px 20px;
+        font-size: 16px;
+        min-height: 52px;
+        width: 100%;
+        margin-bottom: 8px;
+    }
+    
+    .status-grid {
+        grid-template-columns: 1fr;
         gap: 10px;
+    }
+    
+    .status-item {
+        padding: 12px;
+    }
+    
+    .pattern-controls {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .pattern-controls .btn {
+        width: 100%;
+    }
+    
+    .pattern-item {
+        padding: 12px;
+    }
+    
+    .pattern-info {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    
+    .pattern-controls {
+        justify-content: stretch;
+    }
+    
+    .pattern-controls .btn {
+        flex: 1;
+        min-width: 0;
     }
     
     .api-controls {
@@ -585,13 +871,234 @@ header h1 {
     
     .api-controls input {
         min-width: auto;
+        padding: 12px;
+        font-size: 16px;
     }
     
     .modal-content {
-        margin: 10% auto;
+        margin: 5% auto;
         width: 95%;
-        padding: 20px;
+        padding: 15px;
+        max-height: 90vh;
+        overflow-y: auto;
     }
+    
+    .form-group input,
+    .form-group textarea {
+        padding: 12px;
+        font-size: 16px;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .form-actions .btn {
+        width: 100%;
+    }
+    
+    .card {
+        padding: 15px;
+    }
+    
+    .card h2 {
+        font-size: 1.3rem;
+        margin-bottom: 15px;
+    }
+    
+    .poofer-group {
+        padding: 12px;
+    }
+    
+    .poofer-group h3 {
+        font-size: 1.1rem;
+        margin-bottom: 12px;
+    }
+    
+    .hair-poofers {
+        margin-top: 12px;
+        padding-top: 12px;
+    }
+    
+    .hair-poofers h4 {
+        margin-bottom: 8px;
+        font-size: 1rem;
+    }
+    
+    .poofer-row {
+        gap: 8px;
+    }
+}
+
+/* Extra small screens (phones in portrait) */
+@media (max-width: 480px) {
+    .container {
+        padding: 5px;
+    }
+    
+    header {
+        padding: 10px;
+        margin-bottom: 15px;
+    }
+    
+    header h1 {
+        font-size: 1.5rem;
+    }
+    
+    .dashboard-grid {
+        gap: 10px;
+    }
+    
+    .poofer-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+    }
+    
+    .poofer-item {
+        padding: 6px;
+        min-width: 80px;
+    }
+    
+    .fire-icon {
+        font-size: 1.2rem;
+    }
+    
+    .poofer-label {
+        font-size: 0.7rem;
+    }
+    
+    .fire-btn, .toggle-btn {
+        padding: 6px 10px;
+        font-size: 9px;
+        min-height: 32px;
+    }
+    
+    .btn-fire {
+        padding: 8px 12px !important;
+        font-size: 10px !important;
+        min-height: 36px;
+    }
+    
+    .sequence-btn {
+        padding: 14px 16px;
+        font-size: 14px;
+        min-height: 48px;
+    }
+    
+    .card {
+        padding: 10px;
+    }
+    
+    .card h2 {
+        font-size: 1.2rem;
+    }
+    
+    .poofer-group {
+        padding: 8px;
+    }
+    
+    .sculpture-layout {
+        gap: 10px;
+    }
+}
+
+/* Touch-friendly improvements */
+@media (hover: none) and (pointer: coarse) {
+    .btn:hover,
+    .fire-btn:hover,
+    .toggle-btn:hover,
+    .sequence-btn:hover {
+        transform: none;
+    }
+    
+    .poofer-item:hover {
+        transform: none;
+    }
+    
+    .btn:active,
+    .fire-btn:active,
+    .toggle-btn:active,
+    .sequence-btn:active {
+        transform: scale(0.95);
+        transition: transform 0.1s ease;
+    }
+}
+
+/* Event Row Styling */
+.event-row {
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border: 1px solid rgba(255, 69, 0, 0.2);
+}
+
+.event-fields {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr auto;
+    gap: 15px;
+    align-items: end;
+}
+
+.field-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.field-group label {
+    color: #ff6b35;
+    font-weight: bold;
+    margin-bottom: 5px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.field-group select,
+.field-group input {
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 69, 0, 0.3);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    color: white;
+    font-size: 14px;
+}
+
+.field-group select:focus,
+.field-group input:focus {
+    outline: none;
+    border-color: #ff6b35;
+    box-shadow: 0 0 10px rgba(255, 69, 0, 0.3);
+}
+
+.event-poofer-id {
+    min-width: 120px;
+}
+
+.event-start-time,
+.event-duration {
+    min-width: 80px;
+}
+
+.remove-event {
+    background: linear-gradient(45deg, #dc3545, #c82333) !important;
+    color: white !important;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    min-height: 36px;
+}
+
+.remove-event:hover {
+    background: linear-gradient(45deg, #c82333, #a71e2a) !important;
+    transform: translateY(-1px);
 }
 
 /* Animation for fire icons */
@@ -612,4 +1119,48 @@ header h1 {
 .poofer-item[data-enabled="false"] .fire-icon {
     opacity: 0.5;
     filter: grayscale(1);
+}
+
+/* Mobile responsive event rows */
+@media (max-width: 768px) {
+    .event-fields {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    
+    .field-group select,
+    .field-group input {
+        padding: 12px;
+        font-size: 16px;
+    }
+    
+    .remove-event {
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+        min-height: 48px;
+    }
+    
+    .event-row {
+        padding: 12px;
+        margin-bottom: 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    .event-row {
+        padding: 10px;
+        margin-bottom: 10px;
+    }
+    
+    .field-group label {
+        font-size: 11px;
+        margin-bottom: 4px;
+    }
+    
+    .field-group select,
+    .field-group input {
+        padding: 10px;
+        font-size: 16px;
+    }
 }
