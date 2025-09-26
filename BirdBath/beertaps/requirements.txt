@@ -1,0 +1,20 @@
+# ADS1115 ADC Reader System Requirements
+# Install with: pip3 install -r requirements.txt
+
+# Adafruit CircuitPython library for ADS1115/ADS1015 ADCs
+adafruit-circuitpython-ads1x15>=1.0.2
+
+# Adafruit Blinka - CircuitPython APIs for Python on Linux
+# Provides board and busio modules for I2C communication
+adafruit-blinka>=8.0.0
+
+# Note: The following are Python standard library modules and don't need installation:
+# - pickle (object serialization)
+# - argparse (command-line argument parsing)
+# - json (JSON configuration file parsing)
+# - struct (binary data packing/unpacking)
+# - fcntl (file locking for atomic writes)
+# - time (timestamps and delays)
+# - os (file operations)
+# - sys (system-specific parameters)
+# - select (I/O multiplexing)

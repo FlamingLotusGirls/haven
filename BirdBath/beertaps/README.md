@@ -217,9 +217,14 @@ Each controller reads two differential channels:
 
 ## Dependencies
 
-Install required Python packages:
+Install required Python packages using the provided requirements file:
 ```bash
-pip3 install adafruit-circuitpython-ads1x15
+pip3 install -r beertaps/requirements.txt
+```
+
+Or install manually:
+```bash
+pip3 install adafruit-circuitpython-ads1x15 adafruit-blinka
 ```
 
 ## Troubleshooting
