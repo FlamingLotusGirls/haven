@@ -34,3 +34,8 @@ picked up by LightCurve.
 
 The Adafruit ADS1115 python libraries are used.
 
+## RPI config
+
+The RPI used is a Raspberrian Bookworm. The network is configured to be an access point,
+so the lightcurve boards can attach to it, without adding an access point (no room).
+

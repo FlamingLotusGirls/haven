@@ -1,0 +1,26 @@
+{
+  "address": "0x4a",
+  "gain": 1,
+  "channels": [
+    {
+      "name": "controller3_channel1",
+      "positive_pin": "P0",
+      "negative_pin": "P1",
+      "calibration": {
+        "min_voltage": 0.0,
+        "max_voltage": 3.3
+      }
+    },
+    {
+      "name": "controller3_channel2",
+      "positive_pin": "P2",
+      "negative_pin": "P3",
+      "calibration": {
+        "min_voltage": 0.0,
+        "max_voltage": 3.3
+      }
+    }
+  ],
+  "output_pipe": "/tmp/adc_pipe_main",
+  "read_interval": 1.0
+}
