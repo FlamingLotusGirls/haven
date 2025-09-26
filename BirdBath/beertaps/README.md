@@ -49,8 +49,8 @@ This system reads values from ADS1115 ADC controllers over I2C and sends calibra
     },
     // ... more channels
   ],
-  "output_pipe": "/tmp/adc_pipe_main",  // Shared named pipe for all writers
-  "read_interval": 1.0       // Seconds between readings
+  "output_pipe": "/tmp/beertap_pipe",  // Shared named pipe for all writers
+  "read_interval": 0.05       // Seconds between readings
 }
 ```
 
@@ -64,22 +64,43 @@ chmod +x adc_reader.py
 chmod +x calibrate_adc.py
 chmod +x pipe_reader_test.py
 
-# Run ADC reader for controller 1
+# Run ADC reader for controller 1 (silent mode - errors only)
 ./adc_reader.py adc_config_1.json
+
+# Run with debug output (shows readings once per second)
+./adc_reader.py adc_config_1.json --debug
 ```
 
 ### Calibrating Channels
 
-The calibration tool allows you to set the min and max voltage values that map to -1.0 and +1.0:
+The calibration tool offers automatic and manual calibration modes:
+
+#### Automatic Calibration (Recommended)
+The automatic mode tracks min/max values while you move the control through its range:
 
 ```bash
-# Interactive calibration mode
+# Interactive mode with automatic calibration option
 ./calibrate_adc.py adc_config_1.json
+# Then select 'A' for automatic calibration
 
-# Quick calibration - set current reading as minimum for channel 1
+# Quick automatic calibration for channel 1
+./calibrate_adc.py adc_config_1.json --quick 1 --set auto
+```
+
+During automatic calibration:
+1. Move your control smoothly between minimum and maximum positions
+2. The system tracks the lowest and highest values in real-time
+3. Press Enter when you've covered the full range
+4. Confirm to save the tracked values
+
+#### Manual Calibration
+For precise control or specific voltage values:
+
+```bash
+# Set current reading as minimum for channel 1
 ./calibrate_adc.py adc_config_1.json --quick 1 --set min
 
-# Quick calibration - set current reading as maximum for channel 2
+# Set current reading as maximum for channel 2
 ./calibrate_adc.py adc_config_1.json --quick 2 --set max
 ```
 

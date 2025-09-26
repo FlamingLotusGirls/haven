@@ -3,16 +3,16 @@
   "gain": 1,
   "channels": [
     {
-      "name": "controller2_channel1",
+      "name": "tap5",
       "positive_pin": "P0",
       "negative_pin": "P1",
       "calibration": {
-        "min_voltage": 0.0,
-        "max_voltage": 3.3
+        "min_voltage": -3.3025,
+        "max_voltage": 0.0
       }
     },
     {
-      "name": "controller2_channel2",
+      "name": "tap6",
       "positive_pin": "P2",
       "negative_pin": "P3",
       "calibration": {
@@ -21,6 +21,6 @@
       }
     }
   ],
-  "output_pipe": "/tmp/adc_pipe_main",
-  "read_interval": 1.0
+  "output_pipe": "/tmp/beertap_pipe",
+  "read_interval": 0.05
 }

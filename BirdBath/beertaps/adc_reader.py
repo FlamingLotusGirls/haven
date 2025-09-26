@@ -19,8 +19,9 @@ from adafruit_ads1x15.analog_in import AnalogIn
 
 
 class ADCReader:
-    def __init__(self, config_file):
+    def __init__(self, config_file, debug=False):
         """Initialize ADC reader with configuration from file"""
+        self.debug = debug
         self.load_config(config_file)
         self.setup_adc()
         self.setup_named_pipes()
@@ -78,7 +79,8 @@ class ADCReader:
                     'calibration': ch_config['calibration']
                 })
             
-            print(f"ADC initialized at address {hex(address)} with {len(self.channels)} channels")
+            if self.debug:
+                print(f"ADC initialized at address {hex(address)} with {len(self.channels)} channels")
             
         except Exception as e:
             print(f"Error initializing ADC: {e}")
@@ -92,11 +94,12 @@ class ADCReader:
         if not os.path.exists(self.pipe_path):
             try:
                 os.mkfifo(self.pipe_path)
-                print(f"Created named pipe: {self.pipe_path}")
+                if self.debug:
+                    print(f"Created named pipe: {self.pipe_path}")
             except OSError as e:
-                print(f"Failed to create named pipe {self.pipe_path}: {e}")
+                print(f"Error: Failed to create named pipe {self.pipe_path}: {e}", file=sys.stderr)
                 sys.exit(1)
-        else:
+        elif self.debug:
             print(f"Using existing named pipe: {self.pipe_path}")
     
     def calibrate_value(self, voltage, calibration):
@@ -169,13 +172,19 @@ class ADCReader:
     
     def run(self):
         """Main loop - read ADC values and send to pipes"""
-        print(f"\nStarting ADC reader with {self.config['read_interval']}s interval")
-        print("Press Ctrl+C to stop\n")
+        if self.debug:
+            print(f"\nStarting ADC reader with {self.config['read_interval']}s interval")
+            print("Press Ctrl+C to stop\n")
         
         reading_count = 1
+        last_debug_time = time.time()
+        debug_interval = 1.0  # Print debug info once per second max
         
         try:
             while True:
+                # Record start time of read cycle
+                cycle_start = time.time()
+                
                 # Read each channel
                 for i, ch_info in enumerate(self.channels):
                     channel = ch_info['channel']
@@ -189,37 +198,51 @@ class ADCReader:
                     # Calibrate to -1.0 to 1.0 range
                     calibrated_value = self.calibrate_value(voltage, calibration)
                     
-                    # Print status
-                    print(f"[{reading_count:4d}] {name}: {voltage:.4f}V (raw: {raw_value:5d}) -> {calibrated_value:+.4f}")
+                    # Print status only in debug mode and at controlled rate
+                    if self.debug and (time.time() - last_debug_time >= debug_interval):
+                        print(f"[{reading_count:4d}] {name}: {voltage:.4f}V -> {calibrated_value:+.4f}")
                     
                     # Send to the shared pipe
                     self.send_to_pipe(name, calibrated_value)
                 
+                # Update debug timing
+                if self.debug and (time.time() - last_debug_time >= debug_interval):
+                    last_debug_time = time.time()
+                
+                # Calculate how long the reads took
+                cycle_duration = time.time() - cycle_start
+                
+                # Sleep for the remaining time to maintain the desired interval
+                sleep_time = self.config['read_interval'] - cycle_duration
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                # If reads took longer than the interval, no sleep (continuous reading)
+                
                 reading_count += 1
-                time.sleep(self.config['read_interval'])
                 
         except KeyboardInterrupt:
-            print("\nADC reader stopped")
+            if self.debug:
+                print("\nADC reader stopped")
         except Exception as e:
-            print(f"Error in main loop: {e}")
+            print(f"Error in main loop: {e}", file=sys.stderr)
             sys.exit(1)
 
 
 def main():
     parser = argparse.ArgumentParser(description='ADS1115 ADC Reader with Named Pipe Support')
     parser.add_argument('config', help='Path to configuration file (JSON format)')
-    parser.add_argument('--test-pipes', action='store_true', 
-                       help='Test mode: print pipe data instead of writing')
+    parser.add_argument('--debug', '-d', action='store_true', 
+                       help='Enable debug output (default: errors only)')
     
     args = parser.parse_args()
     
     # Check if config file exists
     if not os.path.exists(args.config):
-        print(f"Error: Configuration file '{args.config}' not found")
+        print(f"Error: Configuration file '{args.config}' not found", file=sys.stderr)
         sys.exit(1)
     
     # Create and run reader
-    reader = ADCReader(args.config)
+    reader = ADCReader(args.config, debug=args.debug)
     reader.run()
 
 

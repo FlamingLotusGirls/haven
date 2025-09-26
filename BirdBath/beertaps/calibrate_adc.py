@@ -32,7 +32,6 @@ class ADCCalibrator:
         """Save configuration back to JSON file"""
         with open(self.config_file, 'w') as f:
             json.dump(self.config, f, indent=2)
-        print(f"\nConfiguration saved to {self.config_file}")
     
     def setup_adc(self):
         """Initialize I2C and ADC with configured address"""
@@ -100,6 +99,154 @@ class ADCCalibrator:
             
         print("\n" + "="*60)
     
+    def auto_calibrate_channel(self, channel_index, show_header=True):
+        """Automatic calibration mode - tracks min/max while user moves control"""
+        if channel_index >= len(self.channels):
+            print(f"Invalid channel index: {channel_index}")
+            return False
+        
+        ch_info = self.channels[channel_index]
+        channel = ch_info['channel']
+        name = ch_info['name']
+        config = ch_info['config']
+        
+        if show_header:
+            print(f"\n" + "="*60)
+            print(f"AUTOMATIC CALIBRATION - {name}")
+            print("="*60)
+        else:
+            print(f"\n--- Calibrating {name} ---")
+        
+        # Initialize with current reading
+        initial_voltage = channel.voltage
+        tracked_min = initial_voltage
+        tracked_max = initial_voltage
+        
+        print("\nMove your control through its FULL range")
+        print("Press Enter when done, Ctrl+C to cancel\n")
+        
+        # Start a thread to check for Enter key
+        import threading
+        done_flag = threading.Event()
+        
+        def wait_for_enter():
+            input()
+            done_flag.set()
+        
+        enter_thread = threading.Thread(target=wait_for_enter)
+        enter_thread.daemon = True
+        enter_thread.start()
+        
+        # Display update timing
+        display_interval = 0.2  # Update display 5 times per second
+        last_display_time = time.time()
+        sample_count = 0
+        
+        # Variables for display
+        current_voltage = initial_voltage
+        current_raw = 0
+        
+        try:
+            while not done_flag.is_set():
+                # Sample as fast as possible
+                voltage = channel.voltage
+                raw = channel.value
+                sample_count += 1
+                
+                # Update tracked min/max from every sample
+                if voltage < tracked_min:
+                    tracked_min = voltage
+                if voltage > tracked_max:
+                    tracked_max = voltage
+                
+                # Store current values for display
+                current_voltage = voltage
+                current_raw = raw
+                
+                # Only update display at controlled rate
+                current_time = time.time()
+                if current_time - last_display_time >= display_interval:
+                    # Calculate what the calibrated value would be
+                    if tracked_max != tracked_min:
+                        normalized = (current_voltage - tracked_min) / (tracked_max - tracked_min)
+                        calibrated = 2.0 * normalized - 1.0
+                    else:
+                        calibrated = 0.0
+                    
+                    # Calculate sampling rate
+                    elapsed = current_time - last_display_time
+                    samples_per_sec = sample_count / elapsed if elapsed > 0 else 0
+                    
+                    # Display current status
+                    print(f"\rCurrent: {current_voltage:.4f}V | "
+                          f"Min: {tracked_min:.4f}V | "
+                          f"Max: {tracked_max:.4f}V | "
+                          f"Range: {tracked_max - tracked_min:.4f}V | "
+                          f"Output: {calibrated:+.4f} | "
+                          f"({samples_per_sec:.0f} Hz)   ", 
+                          end='', flush=True)
+                    
+                    # Reset counters for next display cycle
+                    last_display_time = current_time
+                    sample_count = 0
+                
+        except KeyboardInterrupt:
+            print("\n\nCalibration cancelled")
+            return False
+        
+        print(f"\n\nResults for {name}:")
+        print(f"  Min: {tracked_min:.4f}V | Max: {tracked_max:.4f}V | Range: {tracked_max - tracked_min:.4f}V")
+        
+        if tracked_max - tracked_min < 0.1:
+            print("  WARNING: Small range detected - may not have moved through full range")
+        
+        confirm = input("Apply these values? (y/N): ").strip().lower()
+        
+        if confirm == 'y':
+            config['calibration']['min_voltage'] = tracked_min
+            config['calibration']['max_voltage'] = tracked_max
+            self.save_config()
+            print(f"✓ Calibration saved for {name}")
+            return True
+        else:
+            print("✗ Calibration skipped")
+            return False
+    
+    def auto_calibrate_all(self):
+        """Calibrate all channels in sequence automatically"""
+        print("\n" + "="*60)
+        print("AUTOMATIC CALIBRATION - ALL CHANNELS")
+        print("="*60)
+        print("\nThis will calibrate all channels in sequence.")
+        print("For each channel:")
+        print("  1. Move the control through its FULL range")
+        print("  2. Press Enter when done")
+        print("  3. Confirm to save values immediately")
+        print("\nPress Ctrl+C at any time to cancel")
+        
+        results = []
+        
+        for i in range(len(self.channels)):
+            success = self.auto_calibrate_channel(i, show_header=False)
+            results.append(success)
+            
+            # Brief pause between channels
+            if i < len(self.channels) - 1 and success:
+                print("\nMoving to next channel...")
+                time.sleep(1)
+        
+        # Summary
+        print("\n" + "="*60)
+        print("CALIBRATION COMPLETE")
+        print("="*60)
+        for i, ch_info in enumerate(self.channels):
+            name = ch_info['name']
+            if results[i]:
+                cal = ch_info['config']['calibration']
+                print(f"✓ {name}: [{cal['min_voltage']:.3f}V to {cal['max_voltage']:.3f}V]")
+            else:
+                print(f"✗ {name}: Not calibrated")
+    
     def calibrate_channel(self, channel_index):
         """Interactive calibration for a specific channel"""
         if channel_index >= len(self.channels):
@@ -118,30 +265,41 @@ class ADCCalibrator:
         
         while True:
             print("\nOptions:")
+            print("  A. AUTOMATIC calibration (recommended)")
             print("  1. Set current reading as MINIMUM (-1.0)")
             print("  2. Set current reading as MAXIMUM (+1.0)")
             print("  3. Set custom MIN value")
             print("  4. Set custom MAX value")
-            print("  5. Monitor current reading (updates every 0.5s)")
+            print("  5. Monitor current reading")
             print("  6. Done with this channel")
             
-            choice = input("\nChoice (1-6): ").strip()
+            choice = input("\nChoice: ").strip().upper()
             
-            if choice == '1':
+            if choice == 'A':
+                if self.auto_calibrate_channel(channel_index):
+                    # Show updated values after auto calibration
+                    print(f"\nCurrent calibration for {name}:")
+                    print(f"  Min: {config['calibration']['min_voltage']:.4f}V")
+                    print(f"  Max: {config['calibration']['max_voltage']:.4f}V")
+                
+            elif choice == '1':
                 voltage = channel.voltage
                 config['calibration']['min_voltage'] = voltage
-                print(f"Set MIN to current reading: {voltage:.4f}V")
+                self.save_config()
+                print(f"Set MIN to current reading: {voltage:.4f}V and saved")
                 
             elif choice == '2':
                 voltage = channel.voltage
                 config['calibration']['max_voltage'] = voltage
-                print(f"Set MAX to current reading: {voltage:.4f}V")
+                self.save_config()
+                print(f"Set MAX to current reading: {voltage:.4f}V and saved")
                 
             elif choice == '3':
                 try:
                     value = float(input("Enter MIN voltage value: "))
                     config['calibration']['min_voltage'] = value
-                    print(f"Set MIN to {value:.4f}V")
+                    self.save_config()
+                    print(f"Set MIN to {value:.4f}V and saved")
                 except ValueError:
                     print("Invalid value")
                     
@@ -149,29 +307,51 @@ class ADCCalibrator:
                 try:
                     value = float(input("Enter MAX voltage value: "))
                     config['calibration']['max_voltage'] = value
-                    print(f"Set MAX to {value:.4f}V")
+                    self.save_config()
+                    print(f"Set MAX to {value:.4f}V and saved")
                 except ValueError:
                     print("Invalid value")
                     
             elif choice == '5':
                 print("\nMonitoring (press Ctrl+C to stop)...")
+                
+                # Display update timing
+                display_interval = 0.2  # Update display 5 times per second
+                last_display_time = time.time()
+                sample_count = 0
+                
                 try:
                     while True:
+                        # Sample as fast as possible
                         voltage = channel.voltage
                         raw = channel.value
+                        sample_count += 1
                         
-                        cal = config['calibration']
-                        min_v = cal['min_voltage']
-                        max_v = cal['max_voltage']
-                        
-                        if max_v != min_v:
-                            normalized = (voltage - min_v) / (max_v - min_v)
-                            calibrated = 2.0 * normalized - 1.0
-                        else:
-                            calibrated = 0.0
-                        
-                        print(f"\rVoltage: {voltage:+.4f}V (raw: {raw:5d}) -> Output: {calibrated:+.4f}   ", end='', flush=True)
-                        time.sleep(0.5)
+                        # Only update display at controlled rate
+                        current_time = time.time()
+                        if current_time - last_display_time >= display_interval:
+                            cal = config['calibration']
+                            min_v = cal['min_voltage']
+                            max_v = cal['max_voltage']
+                            
+                            if max_v != min_v:
+                                normalized = (voltage - min_v) / (max_v - min_v)
+                                calibrated = 2.0 * normalized - 1.0
+                            else:
+                                calibrated = 0.0
+                            
+                            # Calculate sampling rate
+                            elapsed = current_time - last_display_time
+                            samples_per_sec = sample_count / elapsed if elapsed > 0 else 0
+                            
+                            print(f"\rVoltage: {voltage:+.4f}V (raw: {raw:5d}) -> "
+                                  f"Output: {calibrated:+.4f} ({samples_per_sec:.0f} Hz)   ", 
+                                  end='', flush=True)
+                            
+                            # Reset counters for next display cycle
+                            last_display_time = current_time
+                            sample_count = 0
+                            
                 except KeyboardInterrupt:
                     print("\n")
                     
@@ -194,15 +374,17 @@ class ADCCalibrator:
             self.read_current_values()
             
             print("\nOptions:")
+            print("  A: Auto-calibrate ALL channels (recommended)")
             print("  1-{}: Calibrate specific channel".format(len(self.channels)))
             print("  R: Read current values again")
-            print("  S: Save configuration")
-            print("  Q: Quit without saving")
-            print("  X: Save and exit")
+            print("  Q: Quit")
             
             choice = input("\nChoice: ").strip().upper()
             
-            if choice.isdigit():
+            if choice == 'A':
+                self.auto_calibrate_all()
+            
+            elif choice.isdigit():
                 channel_index = int(choice) - 1
                 if 0 <= channel_index < len(self.channels):
                     self.calibrate_channel(channel_index)
@@ -212,18 +394,8 @@ class ADCCalibrator:
             elif choice == 'R':
                 continue
                 
-            elif choice == 'S':
-                self.save_config()
-                
             elif choice == 'Q':
-                confirm = input("Quit without saving? (y/N): ").strip().lower()
-                if confirm == 'y':
-                    print("Exiting without saving")
-                    break
-                    
-            elif choice == 'X':
-                self.save_config()
-                print("Configuration saved. Exiting.")
+                print("Exiting")
                 break
                 
             else:
@@ -240,19 +412,23 @@ class ADCCalibrator:
         name = ch_info['name']
         config = ch_info['config']
         
-        voltage = channel.voltage
-        
-        if mode == 'min':
-            config['calibration']['min_voltage'] = voltage
-            print(f"Set {name} MIN to {voltage:.4f}V")
-        elif mode == 'max':
-            config['calibration']['max_voltage'] = voltage
-            print(f"Set {name} MAX to {voltage:.4f}V")
+        if mode == 'auto':
+            # Run automatic calibration (saves automatically when user confirms)
+            self.auto_calibrate_channel(channel_index)
         else:
-            print(f"Invalid mode: {mode}")
-            return
-        
-        self.save_config()
+            voltage = channel.voltage
+            
+            if mode == 'min':
+                config['calibration']['min_voltage'] = voltage
+                self.save_config()
+                print(f"Set {name} MIN to {voltage:.4f}V and saved")
+            elif mode == 'max':
+                config['calibration']['max_voltage'] = voltage
+                self.save_config()
+                print(f"Set {name} MAX to {voltage:.4f}V and saved")
+            else:
+                print(f"Invalid mode: {mode}")
+                return
 
 
 def main():
@@ -260,8 +436,8 @@ def main():
     parser.add_argument('config', help='Path to configuration file (JSON format)')
     parser.add_argument('--quick', type=int, metavar='CHANNEL',
                        help='Quick calibrate mode: specify channel number (1-based)')
-    parser.add_argument('--set', choices=['min', 'max'],
-                       help='Used with --quick to set min or max for current reading')
+    parser.add_argument('--set', choices=['min', 'max', 'auto'],
+                       help='Used with --quick: min/max for current reading, auto for automatic calibration')
     
     args = parser.parse_args()
     
