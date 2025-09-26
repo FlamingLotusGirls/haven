@@ -1,0 +1,46 @@
+# PatternDriver Configuration
+# Controller IP addresses for Artnet packets
+controllers:
+  - ip: "192.168.1.100"    # Controller 1 (channels 0-11)
+  - ip: "192.168.1.101"    # Controller 2 (channels 12-23)
+  - ip: "192.168.1.102"    # Controller 3 (channels 24-35)
+
+# 36 pairs of [start, end] values for mapping frame data
+# Each pair defines the output range for the corresponding input value
+ranges:
+  - [0, 255]      # Channel 0
+  - [0, 255]      # Channel 1
+  - [0, 255]      # Channel 2
+  - [0, 255]      # Channel 3
+  - [0, 255]      # Channel 4
+  - [0, 255]      # Channel 5
+  - [0, 255]      # Channel 6
+  - [0, 255]      # Channel 7
+  - [0, 255]      # Channel 8
+  - [0, 255]      # Channel 9
+  - [0, 255]      # Channel 10
+  - [0, 255]      # Channel 11
+  - [0, 255]      # Channel 12
+  - [0, 255]      # Channel 13
+  - [0, 255]      # Channel 14
+  - [0, 255]      # Channel 15
+  - [0, 255]      # Channel 16
+  - [0, 255]      # Channel 17
+  - [0, 255]      # Channel 18
+  - [0, 255]      # Channel 19
+  - [0, 255]      # Channel 20
+  - [0, 255]      # Channel 21
+  - [0, 255]      # Channel 22
+  - [0, 255]      # Channel 23
+  - [0, 255]      # Channel 24
+  - [0, 255]      # Channel 25
+  - [0, 255]      # Channel 26
+  - [0, 255]      # Channel 27
+  - [0, 255]      # Channel 28
+  - [0, 255]      # Channel 29
+  - [0, 255]      # Channel 30
+  - [0, 255]      # Channel 31
+  - [0, 255]      # Channel 32
+  - [0, 255]      # Channel 33
+  - [0, 255]      # Channel 34
+  - [0, 255]      # Channel 35
