@@ -435,7 +435,7 @@ def main():
             print("Running pattern processes as daemons")
 
         # Initialize pipe reader for hardware input
-        pipe_reader = PipeReader('/tmp/adc_pipe_main')
+        pipe_reader = PipeReader('/tmp/beertap_pipe')
         pipe_opened = pipe_reader.open_pipe()
         
         try:
