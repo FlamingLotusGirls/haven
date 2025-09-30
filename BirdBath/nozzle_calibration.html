@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nozzle Calibration Interface</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .header {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 800px;
+            box-sizing: border-box;
+        }
+        
+        .header h1 {
+            margin: 0 0 15px 0;
+            color: #fff;
+            text-align: center;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .control-group label {
+            color: #ccc;
+        }
+        
+        .control-group input {
+            padding: 6px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #333;
+            color: white;
+        }
+        
+        .main-content {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .visualization-container {
+            position: relative;
+        }
+        
+        #canvas {
+            border: 1px solid #444;
+            background-color: #2a2a2a;
+            cursor: pointer;
+        }
+        
+        .control-panel {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            width: 300px;
+            min-height: 400px;
+        }
+        
+        .control-panel.hidden {
+            display: none;
+        }
+        
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #444;
+        }
+        
+        .panel-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .nozzle-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .status-ready { background: #28a745; color: white; }
+        .status-error { background: #dc3545; color: white; }
+        .status-loading { background: #ffc107; color: #212529; }
+        
+        .slider-container {
+            margin: 20px 0;
+        }
+        
+        .slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #ccc;
+        }
+        
+        .slider {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #444;
+            outline: none;
+            -webkit-appearance: none;
+            margin-bottom: 10px;
+        }
+        
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+            border: 2px solid #fff;
+        }
+        
+        .slider::-moz-range-thumb {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: #007bff;
+            cursor: pointer;
+            border: 2px solid #fff;
+        }
+        
+        .calibration-section {
+            border-top: 1px solid #444;
+            padding-top: 20px;
+            margin-top: 20px;
+        }
+        
+        .calibration-title {
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #fff;
+            font-size: 16px;
+        }
+        
+        .calibration-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        
+        .calibration-input {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .calibration-input label {
+            font-size: 12px;
+            color: #ccc;
+            font-weight: bold;
+        }
+        
+        .calibration-input input {
+            padding: 8px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            font-size: 14px;
+            background: #333;
+            color: white;
+        }
+        
+        .calibration-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .btn {
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-primary { background: #007bff; color: white; }
+        .btn-primary:hover { background: #0056b3; }
+        
+        .btn-secondary { background: #6c757d; color: white; }
+        .btn-secondary:hover { background: #545b62; }
+        
+        .btn-success { background: #28a745; color: white; }
+        .btn-success:hover { background: #1e7e34; }
+        
+        .btn-warning { background: #ffc107; color: #212529; }
+        .btn-warning:hover { background: #e0a800; }
+        
+        .btn-danger { background: #dc3545; color: white; }
+        .btn-danger:hover { background: #c82333; }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .message {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            min-height: 16px;
+        }
+        
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .success-message {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .global-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .server-status {
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .server-connected { background: #28a745; color: white; }
+        .server-disconnected { background: #dc3545; color: white; }
+        
+        .info {
+            margin-top: 20px;
+            text-align: center;
+            color: #ccc;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .legend-circle {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        
+        .btn-toggle {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .btn-toggle:hover {
+            background: #138496;
+        }
+        
+        .btn-toggle.active {
+            background: #28a745;
+        }
+        
+        .btn-toggle.active:hover {
+            background: #1e7e34;
+        }
+        
+        .slider-restricted {
+            background: linear-gradient(to right, #444 0%, #007bff 0%, #007bff 100%, #444 100%) !important;
+        }
+        
+        .instructions {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            max-width: 800px;
+            text-align: center;
+        }
+        
+        .instructions h3 {
+            margin-top: 0;
+            color: #fff;
+        }
+        
+        .instructions p {
+            color: #ccc;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Nozzle Calibration Interface</h1>
+        <div class="controls">
+            <div class="control-group">
+                <label for="serverUrl">Calibration Server:</label>
+                <input type="text" id="serverUrl" value="http://localhost:8081">
+            </div>
+            <div class="control-group">
+                <span id="serverStatus" class="server-status server-disconnected">Disconnected</span>
+            </div>
+            <div class="global-controls">
+                <button class="btn btn-primary" onclick="loadAllCalibrations()">Refresh All</button>
+                <button class="btn btn-secondary" onclick="stopAllNozzles()">Stop All</button>
+                <button class="btn btn-danger" onclick="deselectNozzle()">Deselect</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="main-content">
+        <div class="visualization-container">
+            <canvas id="canvas" width="600" height="600"></canvas>
+            
+            <div class="info">
+                <p>Click on a nozzle to select it for calibration</p>
+                <div class="legend">
+                    <div class="legend-item">
+                        <div class="legend-circle" style="background-color: #ff6b6b;"></div>
+                        <span>Ring 0 (outer)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-circle" style="background-color: #4ecdc4;"></div>
+                        <span>Ring 1 (middle)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-circle" style="background-color: #45b7d1;"></div>
+                        <span>Ring 2 (inner)</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-circle" style="background-color: #ffd700;"></div>
+                        <span>Selected</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-circle" style="background-color: #888888;"></div>
+                        <span>Default Calibration [0, 255]</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="control-panel hidden" id="controlPanel">
+            <div class="panel-header">
+                <div class="panel-title" id="panelTitle">No Nozzle Selected</div>
+                <div class="nozzle-status status-ready" id="panelStatus">Ready</div>
+            </div>
+            
+            <div class="slider-container">
+                <div class="slider-label">
+                    <span>Position Control</span>
+                    <span id="sliderValue">0</span>
+                </div>
+                <input type="range" min="0" max="255" value="0" class="slider" 
+                       id="positionSlider" 
+                       oninput="updateSliderValue(this.value)"
+                       onchange="sendNozzlePosition(this.value)">
+            </div>
+            
+            <div class="calibration-section">
+                <div class="calibration-title">Calibration Points</div>
+                <div class="calibration-controls">
+                    <div class="calibration-input">
+                        <label>Low Value</label>
+                        <input type="number" min="0" max="255" value="0" 
+                               id="lowValue" onchange="updateCalibrationValue('low', this.value)">
+                    </div>
+                    <div class="calibration-input">
+                        <label>High Value</label>
+                        <input type="number" min="0" max="255" value="255" 
+                               id="highValue" onchange="updateCalibrationValue('high', this.value)">
+                    </div>
+                </div>
+                <div class="calibration-buttons">
+                    <button class="btn btn-warning" onclick="setCurrentAsLow()">Set Current as Low</button>
+                    <button class="btn btn-success" onclick="setCurrentAsHigh()">Set Current as High</button>
+                    <button class="btn btn-toggle" id="restrictSliderBtn" onclick="toggleSliderRestriction()">
+                        Restrict to Calibration Range
+                    </button>
+                </div>
+            </div>
+            
+            <div class="message" id="panelMessage"></div>
+        </div>
+    </div>
+    
+    <div class="instructions">
+        <h3>Instructions</h3>
+        <p>1. Click on any nozzle in the grid to select it for calibration</p>
+        <p>2. Use the position slider to test the nozzle's range of motion</p>
+        <p>3. Set calibration points by moving to min/max positions and clicking the buttons</p>
+        <p>4. Calibration values are automatically saved to the configuration file</p>
+    </div>
+
+    <script>
+        let serverUrl = 'http://localhost:8081';
+        let selectedNozzle = null;
+        let nozzles = [];
+        let currentValue = 0;
+        let sliderRestricted = false;
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Canvas center
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        
+        // Scale factor to make the visualization fit nicely
+        const scale = 60;
+        
+        // Nozzle configuration (matching the Python code)
+        const ringCount = [3, 2, 1];
+        const ringRadius = [3.0, 2.0, 1.0];
+        const ringBaseAngle = [Math.PI/18.0, Math.PI/12.0, Math.PI/6.0];
+        const posAngle = [
+            [0, Math.PI/9.0, 2 * Math.PI/9.0],
+            [0, Math.PI/6.0],
+            [0]
+        ];
+        
+        // Colors for different rings
+        const ringColors = ['#ff6b6b', '#4ecdc4', '#45b7d1'];
+        const selectedColor = '#ffd700';
+        const defaultCalibrationColor = '#888888'; // Gray for default [0, 255] calibration
+        
+        // Initialize the interface
+        document.addEventListener('DOMContentLoaded', function() {
+            updateServerUrl();
+            generateNozzles();
+            drawVisualization();
+            loadAllCalibrations();
+            
+            // Update server URL when changed
+            document.getElementById('serverUrl').addEventListener('change', updateServerUrl);
+            
+            // Add click handler to canvas
+            canvas.addEventListener('click', handleCanvasClick);
+        });
+        
+        function generateNozzles() {
+            nozzles = [];
+            let nozzleIdx = 0;
+            
+            for (let sectionIdx = 0; sectionIdx < 6; sectionIdx++) {
+                const baseAngle = sectionIdx * Math.PI / 3.0;
+                
+                for (let ringIdx = 0; ringIdx < 3; ringIdx++) {
+                    for (let pos = 0; pos < ringCount[ringIdx]; pos++) {
+                        const fullAngle = baseAngle + ringBaseAngle[ringIdx] + posAngle[ringIdx][pos];
+                        const radius = ringRadius[ringIdx];
+                        
+                        const x = Math.sin(fullAngle) * radius;
+                        const y = Math.cos(fullAngle) * radius;
+                        
+                        nozzles.push({
+                            idx: nozzleIdx,
+                            ringIdx: ringIdx,
+                            sectionIdx: sectionIdx,
+                            position: pos,
+                            x: x,
+                            y: y,
+                            angle: Math.atan2(x, y),
+                            calibration: { low: 0, high: 255 },
+                            lastSetPosition: null  // Track last manually set position
+                        });
+                        
+                        nozzleIdx++;
+                    }
+                }
+            }
+        }
+        
+        function drawVisualization() {
+            // Clear canvas
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw coordinate axes
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 5]);
+            
+            // X axis
+            ctx.beginPath();
+            ctx.moveTo(0, centerY);
+            ctx.lineTo(canvas.width, centerY);
+            ctx.stroke();
+            
+            // Y axis
+            ctx.beginPath();
+            ctx.moveTo(centerX, 0);
+            ctx.lineTo(centerX, canvas.height);
+            ctx.stroke();
+            
+            ctx.setLineDash([]);
+            
+            // Draw center point
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 3, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            // Draw nozzles
+            nozzles.forEach(nozzle => {
+                const screenX = centerX + nozzle.x * scale;
+                const screenY = centerY - nozzle.y * scale; // Flip Y axis for screen coordinates
+                
+                // Determine nozzle color
+                let fillColor;
+                if (selectedNozzle === nozzle.idx) {
+                    fillColor = selectedColor;
+                } else if (nozzle.calibration.low === 0 && nozzle.calibration.high === 255) {
+                    // Use gray color for nozzles with default calibration [0, 255]
+                    fillColor = defaultCalibrationColor;
+                } else {
+                    fillColor = ringColors[nozzle.ringIdx];
+                }
+                
+                // Draw nozzle circle
+                ctx.fillStyle = fillColor;
+                ctx.beginPath();
+                ctx.arc(screenX, screenY, 12, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                // Draw nozzle border
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                
+                // Draw nozzle index
+                ctx.fillStyle = selectedNozzle === nozzle.idx ? '#000' : '#fff';
+                ctx.font = 'bold 10px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(nozzle.idx.toString(), screenX, screenY);
+            });
+            
+            // Draw section lines
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            
+            for (let section = 0; section < 6; section++) {
+                const angle = section * Math.PI * 2.0 / 6.0;
+                const endX = centerX + Math.sin(angle) * 200;
+                const endY = centerY - Math.cos(angle) * 200;
+                
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+            }
+            
+            ctx.setLineDash([]);
+        }
+        
+        function handleCanvasClick(event) {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+            
+            console.log(`Click at: ${clickX}, ${clickY}`);
+            
+            // Check if click is on any nozzle
+            let closestNozzle = null;
+            let closestDistance = Infinity;
+            
+            for (let nozzle of nozzles) {
+                const screenX = centerX + nozzle.x * scale;
+                const screenY = centerY - nozzle.y * scale;
+                
+                const distance = Math.sqrt((clickX - screenX) ** 2 + (clickY - screenY) ** 2);
+                
+                console.log(`Nozzle ${nozzle.idx} at (${screenX.toFixed(1)}, ${screenY.toFixed(1)}), distance: ${distance.toFixed(1)}`);
+                
+                if (distance < closestDistance) {
+                    closestDistance = distance;
+                    closestNozzle = nozzle;
+                }
+                
+                if (distance <= 15) { // Increased click radius for easier selection
+                    selectNozzle(nozzle.idx);
+                    return;
+                }
+            }
+            
+            // If no direct hit but we have a close nozzle within reasonable range, select it
+            if (closestNozzle && closestDistance <= 25) {
+                console.log(`Selecting closest nozzle ${closestNozzle.idx} at distance ${closestDistance.toFixed(1)}`);
+                selectNozzle(closestNozzle.idx);
+                return;
+            }
+            
+            // If no nozzle was clicked, deselect
+            console.log('No nozzle selected, deselecting');
+            deselectNozzle();
+        }
+        
+        function selectNozzle(nozzleId) {
+            selectedNozzle = nozzleId;
+            sliderRestricted = false;
+            
+            // Update UI
+            document.getElementById('panelTitle').textContent = `Nozzle ${nozzleId}`;
+            document.getElementById('controlPanel').classList.remove('hidden');
+            
+            // Reset slider restriction button
+            const restrictBtn = document.getElementById('restrictSliderBtn');
+            restrictBtn.classList.remove('active');
+            restrictBtn.textContent = 'Restrict to Calibration Range';
+            
+            // Reset slider to full range
+            const slider = document.getElementById('positionSlider');
+            slider.min = 0;
+            slider.max = 255;
+            slider.classList.remove('slider-restricted');
+            
+            // Load calibration for this nozzle (this will set the slider to middle of range)
+            loadNozzleCalibration(nozzleId);
+            
+            // Redraw visualization
+            drawVisualization();
+        }
+        
+        function deselectNozzle() {
+            selectedNozzle = null;
+            sliderRestricted = false;
+            document.getElementById('controlPanel').classList.add('hidden');
+            drawVisualization();
+        }
+        
+        function updateServerUrl() {
+            serverUrl = document.getElementById('serverUrl').value;
+            checkServerConnection();
+        }
+        
+        async function checkServerConnection() {
+            const statusElement = document.getElementById('serverStatus');
+            try {
+                const response = await fetch(`${serverUrl}/nozzle/0/calibration`);
+                if (response.ok) {
+                    statusElement.textContent = 'Connected';
+                    statusElement.className = 'server-status server-connected';
+                } else {
+                    throw new Error('Server responded with error');
+                }
+            } catch (error) {
+                statusElement.textContent = 'Disconnected';
+                statusElement.className = 'server-status server-disconnected';
+            }
+        }
+        
+        function updateSliderValue(value) {
+            document.getElementById('sliderValue').textContent = value;
+            currentValue = parseInt(value);
+        }
+        
+        async function sendNozzlePosition(value) {
+            if (selectedNozzle === null) return;
+            
+            setPanelStatus('loading', 'Sending...');
+            
+            try {
+                const response = await fetch(`${serverUrl}/nozzle/${selectedNozzle}/position`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ value: parseInt(value) })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    // Remember this position for next time
+                    nozzles[selectedNozzle].lastSetPosition = parseInt(value);
+                    
+                    setPanelStatus('ready', 'Ready');
+                    showPanelMessage(`Position set to ${value}`, 'success');
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to set position');
+                }
+            } catch (error) {
+                setPanelStatus('error', 'Error');
+                showPanelMessage(`Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function loadNozzleCalibration(nozzleId) {
+            try {
+                const response = await fetch(`${serverUrl}/nozzle/${nozzleId}/calibration`);
+                if (response.ok) {
+                    const data = await response.json();
+                    nozzles[nozzleId].calibration = data.calibration;
+                    
+                    // Update UI
+                    document.getElementById('lowValue').value = data.calibration.low;
+                    document.getElementById('highValue').value = data.calibration.high;
+                    
+                    // Set slider to last set position if available, otherwise middle of calibrated range
+                    let initialValue;
+                    if (nozzles[nozzleId].lastSetPosition !== null) {
+                        initialValue = nozzles[nozzleId].lastSetPosition;
+                    } else {
+                        initialValue = Math.round((data.calibration.low + data.calibration.high) / 2);
+                    }
+                    document.getElementById('positionSlider').value = initialValue;
+                    document.getElementById('sliderValue').textContent = initialValue.toString();
+                    currentValue = initialValue;
+                    
+                    // Update slider restriction if currently active
+                    if (sliderRestricted) {
+                        updateSliderRestriction();
+                    }
+                    
+                    setPanelStatus('ready', 'Ready');
+                } else {
+                    throw new Error('Failed to load calibration');
+                }
+            } catch (error) {
+                setPanelStatus('error', 'Error');
+                showPanelMessage(`Error loading calibration: ${error.message}`, 'error');
+            }
+        }
+        
+        async function updateCalibrationValue(type, value) {
+            if (selectedNozzle === null) return;
+            
+            const intValue = parseInt(value);
+            if (intValue < 0 || intValue > 255) {
+                showPanelMessage(`${type} value must be between 0 and 255`, 'error');
+                return;
+            }
+            
+            setPanelStatus('loading', 'Updating...');
+            
+            try {
+                const response = await fetch(`${serverUrl}/nozzle/${selectedNozzle}/calibration/${type}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ value: intValue })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    nozzles[selectedNozzle].calibration[type] = intValue;
+                    
+                    // Update slider restriction if currently active
+                    if (sliderRestricted) {
+                        updateSliderRestriction();
+                    }
+                    
+                    // Redraw visualization to update color if calibration changed from/to default
+                    drawVisualization();
+                    
+                    setPanelStatus('ready', 'Ready');
+                    showPanelMessage(`${type} calibration updated to ${intValue}`, 'success');
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.message || `Failed to update ${type} calibration`);
+                }
+            } catch (error) {
+                setPanelStatus('error', 'Error');
+                showPanelMessage(`Error: ${error.message}`, 'error');
+            }
+        }
+        
+        function setCurrentAsLow() {
+            if (selectedNozzle === null) return;
+            document.getElementById('lowValue').value = currentValue;
+            updateCalibrationValue('low', currentValue);
+        }
+        
+        function setCurrentAsHigh() {
+            if (selectedNozzle === null) return;
+            document.getElementById('highValue').value = currentValue;
+            updateCalibrationValue('high', currentValue);
+        }
+        
+        function setPanelStatus(status, text) {
+            const statusElement = document.getElementById('panelStatus');
+            statusElement.textContent = text;
+            statusElement.className = `nozzle-status status-${status}`;
+        }
+        
+        function showPanelMessage(message, type) {
+            const messageElement = document.getElementById('panelMessage');
+            messageElement.textContent = message;
+            messageElement.className = `message ${type}-message`;
+            
+            // Clear message after 3 seconds
+            setTimeout(() => {
+                messageElement.textContent = '';
+                messageElement.className = 'message';
+            }, 3000);
+        }
+        
+        async function loadAllCalibrations() {
+            checkServerConnection();
+            
+            for (let i = 0; i < nozzles.length; i++) {
+                try {
+                    const response = await fetch(`${serverUrl}/nozzle/${i}/calibration`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        nozzles[i].calibration = data.calibration;
+                    }
+                } catch (error) {
+                    console.error(`Error loading calibration for nozzle ${i}:`, error);
+                }
+                // Small delay to avoid overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            
+            // Redraw visualization to reflect the actual calibration status
+            drawVisualization();
+        }
+        
+        async function stopAllNozzles() {
+            for (let i = 0; i < 36; i++) {
+                try {
+                    await fetch(`${serverUrl}/nozzle/${i}/position`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ value: 0 })
+                    });
+                } catch (error) {
+                    console.error(`Error stopping nozzle ${i}:`, error);
+                }
+                // Small delay between commands
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            
+            // Reset slider if a nozzle is selected
+            if (selectedNozzle !== null) {
+                document.getElementById('positionSlider').value = 0;
+                document.getElementById('sliderValue').textContent = '0';
+                currentValue = 0;
+            }
+        }
+        
+        function toggleSliderRestriction() {
+            if (selectedNozzle === null) return;
+            
+            sliderRestricted = !sliderRestricted;
+            const restrictBtn = document.getElementById('restrictSliderBtn');
+            
+            if (sliderRestricted) {
+                updateSliderRestriction();
+                restrictBtn.classList.add('active');
+                restrictBtn.textContent = 'Remove Range Restriction';
+            } else {
+                // Reset to full range
+                const slider = document.getElementById('positionSlider');
+                slider.min = 0;
+                slider.max = 255;
+                slider.classList.remove('slider-restricted');
+                restrictBtn.classList.remove('active');
+                restrictBtn.textContent = 'Restrict to Calibration Range';
+            }
+        }
+        
+        function updateSliderRestriction() {
+            if (!sliderRestricted || selectedNozzle === null) return;
+            
+            const nozzle = nozzles[selectedNozzle];
+            const slider = document.getElementById('positionSlider');
+            
+            // Set slider range to calibration values
+            slider.min = nozzle.calibration.low;
+            slider.max = nozzle.calibration.high;
+            slider.classList.add('slider-restricted');
+            
+            // If current value is outside the restricted range, adjust it
+            if (currentValue < nozzle.calibration.low) {
+                slider.value = nozzle.calibration.low;
+                updateSliderValue(nozzle.calibration.low);
+            } else if (currentValue > nozzle.calibration.high) {
+                slider.value = nozzle.calibration.high;
+                updateSliderValue(nozzle.calibration.high);
+            }
+        }
+    </script>
+</body>
+</html>

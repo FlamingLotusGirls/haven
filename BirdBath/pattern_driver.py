@@ -8,7 +8,17 @@ from typing import List, Tuple, Dict
 
 class PatternDriver:
     """
-    Concrete class for pattern drivers that receive and process final frame data.
+    Send frame data to hardware controllers.
+    When Frame() function is called, takes the frame data (array of values in [-1.0, 1.0]),
+    and turns them into artnet packets with data in range [0, 255]
+    
+    A given channel will almost certainly not want to use the full [0, 255] range.
+    We read a configuration file (driver_config.yaml) to tell us the correct 
+    calibration for each channel.
+
+    (Actual use here is on a separate process from the main Birdbath process. The main
+    process sends the frame data on a pipe to a pattern_driver process, which owns the 
+    PatternDriver object and calls its Frame() function.)
     """
     
     def __init__(self, config_file: str = 'driver_config.yaml'):
@@ -101,10 +111,12 @@ class PatternDriver:
         universe_bytes = struct.pack("<H", universe)  # Universe (little endian)
         
         # Data length (2 bytes per tuple: 1 byte bool + 1 byte for float as byte)
-        data_length = struct.pack(">H", len(data) * 2)  # Big endian
+        data_length = struct.pack(">H", len(data) * 2 + 1)  # Big endian
         
         # Pack data as series of [bool, float] where bool is always 0 and float is converted to byte
+        # There is also a header here (the type of packet). In this case, the header is 0.
         packet_data = bytearray()
+        packet_data.append(0);   # Header meaning 'this is a full frame'
         for bool_val, float_val in data:
             packet_data.append(0)  # Bool is always 0 (false)
             # Convert float to byte (0-255 range)
