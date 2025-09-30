@@ -39,7 +39,7 @@ This system reads values from ADS1115 ADC controllers over I2C and sends calibra
   "gain": 1,                // ADC gain setting
   "channels": [
     {
-      "name": "controller1_channel1",  // Unique name for this channel
+      "name": "tap1",        // Name for the channel - tap1, tap2, etc
       "positive_pin": "P0",  // Positive differential input
       "negative_pin": "P1",  // Negative differential input
       "calibration": {
@@ -165,7 +165,7 @@ Data is sent through a single shared named pipe as pickled Python objects with a
 The Python object contains:
 ```python
 {
-  "channel": "controller1_channel1",  # Unique channel name from config
+  "channel": "tap1",                  # Unique channel name from config - tap1, tap2, ...
   "value": 0.5432,                    # Calibrated value (-1.0 to 1.0)
   "timestamp": 1635789012.345         # Unix timestamp
 }
