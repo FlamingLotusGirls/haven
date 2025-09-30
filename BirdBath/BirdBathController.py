@@ -10,6 +10,8 @@ import time
 import yaml
 import os
 import json
+import struct
+import pickle
 import numpy as np
 from typing import List, Dict, Any
 from pattern_runner import PatternRunner
@@ -127,6 +129,108 @@ def pattern_process(pattern_name: str, process_id: int, conn):
         conn.close()
 
 
+class PipeReader:
+    """
+    Class to read messages from the ADC named pipe and track multiple channels.
+    """
+    
+    def __init__(self, pipe_path='/tmp/adc_pipe_main'):
+        self.pipe_path = pipe_path
+        self.buffer = b''
+        self.pipe_fd = None
+        self.channel_values = {}  # Dictionary to store latest value for each channel
+        
+    def open_pipe(self):
+        """Open the named pipe for reading."""
+        try:
+            if not os.path.exists(self.pipe_path):
+                print(f"Warning: Named pipe {self.pipe_path} does not exist. Using default input values 0.0")
+                return False
+            
+            self.pipe_fd = os.open(self.pipe_path, os.O_RDONLY | os.O_NONBLOCK)
+            print(f"Opened named pipe: {self.pipe_path}")
+            return True
+        except Exception as e:
+            print(f"Error opening named pipe {self.pipe_path}: {str(e)}")
+            return False
+    
+    def read_latest_values(self):
+        """
+        Read all available messages from the pipe and update channel values.
+        
+        Returns:
+            Dict[str, float]: Dictionary mapping channel names to their latest values
+        """
+        if self.pipe_fd is None:
+            return self.channel_values
+        
+        try:
+            # Read available data (non-blocking)
+            chunk = os.read(self.pipe_fd, 4096)
+            if chunk:
+                self.buffer += chunk
+        except OSError:
+            # No data available (EAGAIN/EWOULDBLOCK)
+            return self.channel_values
+        except Exception as e:
+            print(f"Error reading from pipe: {str(e)}")
+            return self.channel_values
+        
+        # Process complete messages from buffer
+        while len(self.buffer) >= 4:
+            try:
+                # Read length header
+                length = struct.unpack('>I', self.buffer[:4])[0]
+                
+                # Check if we have the complete message
+                if len(self.buffer) >= 4 + length:
+                    # Extract and unpickle the message
+                    pickled_data = self.buffer[4:4+length]
+                    self.buffer = self.buffer[4+length:]
+                    
+                    data = pickle.loads(pickled_data)
+                    
+                    # Extract channel and value
+                    if isinstance(data, dict) and 'channel' in data and 'value' in data:
+                        channel = data['channel']
+                        value = float(data['value'])
+                        # Clamp to expected range just in case
+                        value = max(-1.0, min(1.0, value))
+                        
+                        # Update channel value
+                        self.channel_values[channel] = value
+                else:
+                    break
+            except Exception as e:
+                print(f"Error parsing pipe message: {str(e)}")
+                # Clear buffer on parse error
+                self.buffer = b''
+                break
+        
+        return self.channel_values
+    
+    def get_channel_value(self, channel: str) -> float:
+        """
+        Get the latest value for a specific channel.
+        
+        Args:
+            channel (str): Channel name to get value for
+            
+        Returns:
+            float: Latest value for the channel, or 0.0 if channel not found
+        """
+        return self.channel_values.get(channel, 0.0)
+    
+    def close_pipe(self):
+        """Close the named pipe."""
+        if self.pipe_fd is not None:
+            try:
+                os.close(self.pipe_fd)
+            except:
+                pass
+            self.pipe_fd = None
+
+
 def write_nozzle_data(final_result: np.ndarray, data_file: str = 'nozzle_data.json'):
     """
     Write nozzle data to JSON file for web server consumption.
@@ -158,7 +262,7 @@ def write_nozzle_data(final_result: np.ndarray, data_file: str = 'nozzle_data.js
         raise e
 
 
-def load_configuration(config_file: str) -> tuple[List[str], float]:
+def load_configuration(config_file: str) -> tuple[List[Dict[str, str]], float]:
     """
     Load pattern configuration from a YAML file.
     
@@ -166,7 +270,7 @@ def load_configuration(config_file: str) -> tuple[List[str], float]:
         config_file (str): Path to the configuration file
         
     Returns:
-        tuple[List[str], float]: List of pattern names to run and frame interval in seconds
+        tuple[List[Dict[str, str]], float]: List of pattern configs with name and input_channel, and frame interval in seconds
         
     Raises:
         FileNotFoundError: If the configuration file doesn't exist
@@ -187,15 +291,34 @@ def load_configuration(config_file: str) -> tuple[List[str], float]:
         if 'patterns' not in config:
             raise ValueError("Configuration must contain a 'patterns' key")
         
-        patterns = config['patterns']
+        patterns_config = config['patterns']
         
-        # Validate that patterns is a list of strings
-        if not isinstance(patterns, list):
+        # Validate that patterns is a list
+        if not isinstance(patterns_config, list):
             raise ValueError("Patterns must be a list")
         
-        for pattern in patterns:
-            if not isinstance(pattern, str):
-                raise ValueError("All pattern names must be strings")
+        patterns = []
+        for i, pattern_entry in enumerate(patterns_config):
+            if not isinstance(pattern_entry, dict):
+                raise ValueError(f"Pattern entry {i} must be a dictionary with 'pattern' and 'input_channel' keys")
+            
+            if 'pattern' not in pattern_entry:
+                raise ValueError(f"Pattern entry {i} must contain 'pattern' key")
+            if 'input_channel' not in pattern_entry:
+                raise ValueError(f"Pattern entry {i} must contain 'input_channel' key")
+            
+            pattern_name = pattern_entry['pattern']
+            input_channel = pattern_entry['input_channel']
+            
+            if not isinstance(pattern_name, str):
+                raise ValueError(f"Pattern name must be a string, got {type(pattern_name)}")
+            if not isinstance(input_channel, str):
+                raise ValueError(f"Input channel must be a string, got {type(input_channel)}")
+            
+            patterns.append({
+                'pattern': pattern_name,
+                'input_channel': input_channel
+            })
         
         # Limit to 6 patterns maximum
         if len(patterns) > 6:
@@ -239,7 +362,10 @@ def main():
             print("No patterns found in configuration file")
             sys.exit(1)
         
-        print(f"Loaded {len(patterns)} patterns: {', '.join(patterns)}")
+        pattern_names = [p['pattern'] for p in patterns]
+        channels = [p['input_channel'] for p in patterns]
+        pattern_descriptions = [f"{p['pattern']}({p['input_channel']})" for p in patterns]
+        print(f"Loaded {len(patterns)} patterns: {', '.join(pattern_descriptions)}")
         print(f"Frame interval: {frame_interval*1000:.1f}ms")
         
         # Create pattern driver process and pipe
@@ -256,8 +382,11 @@ def main():
         # Create processes and pipes for each pattern
         processes = []
         pipes = []
-        for i, pattern_name in enumerate(patterns):
+        for i, pattern_config in enumerate(patterns):
             try:
+                pattern_name = pattern_config['pattern']
+                input_channel = pattern_config['input_channel']
+                
                 # Create bidirectional pipe for communication
                 parent_conn, child_conn = multiprocessing.Pipe()
                 
@@ -271,11 +400,12 @@ def main():
                 if args.daemon:
                     process.daemon = True
                 
-                processes.append((process, pattern_name, i))
+                # Store process info with input channel for filtering
+                processes.append((process, pattern_name, input_channel, i))
                 pipes.append(parent_conn)
                 
             except Exception as e:
-                print(f"Error creating process for pattern {pattern_name}: {str(e)}")
+                print(f"Error creating process for pattern {pattern_config['pattern']}: {str(e)}")
                 continue
         
         if not processes:
@@ -293,8 +423,9 @@ def main():
         
         # Start all pattern processes
         print(f"\nStarting {len(processes)} pattern processes...")
-        for process, pattern_name, process_id in processes:
+        for process, pattern_name, process_id, idx in processes:
             try:
+                print("Starting pattern process\n")
                 process.start()
                 print(f"Started process {process_id} ({pattern_name}) with PID: {process.pid}")
             except Exception as e:
@@ -302,25 +433,35 @@ def main():
         
         if args.daemon:
             print("Running pattern processes as daemons")
+
+        # Initialize pipe reader for hardware input
+        pipe_reader = PipeReader('/tmp/adc_pipe_main')
+        pipe_opened = pipe_reader.open_pipe()
         
         try:
             # Main frame generation loop with configurable timing
             print(f"\nStarting frame generation loop ({frame_interval*1000:.1f}ms intervals). Press Ctrl+C to stop.")
+            if pipe_opened:
+                print("Reading input values from hardware via named pipe")
+            else:
+                print("Using default input value 0.0 (no hardware pipe available)")
+            
             frame_number = 0
-            start_time = time.time()
             
             while True:
                 frame_start = time.time()
                 
-                # Calculate input value based on time
-                input_value = (time.time() - start_time) % 100.0
+                # Read all channel values from hardware pipe
+                pipe_reader.read_latest_values()
                 
-                # Send frame request to all pattern processes
-                for i, pipe in enumerate(pipes):
+                # Send frame request to all pattern processes with channel-specific values
+                for i, (process, pattern_name, input_channel, process_id) in enumerate(processes):
                     try:
-                        pipe.send(('start_frame', input_value))
+                        # Get the input value for this pattern's specific channel
+                        input_value = pipe_reader.get_channel_value(input_channel)
+                        pipes[i].send(('start_frame', input_value))
                     except Exception as e:
-                        print(f"Error sending frame request to process {i}: {str(e)}")
+                        print(f"Error sending frame request to process {i} ({pattern_name}): {str(e)}")
                 
                 # Collect results from all pattern processes
                 results = []
@@ -367,6 +508,9 @@ def main():
             
         except KeyboardInterrupt:
             print(f"\nShutting down all processes...")
+            
+            # Close hardware pipe reader
+            pipe_reader.close_pipe()
             
             # Send shutdown signal to pattern driver
             try:

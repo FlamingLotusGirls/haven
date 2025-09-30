@@ -1,8 +1,9 @@
 # BirdBath Pattern Configuration
-# List of pattern classes to run and frame timing configuration
+# List of pattern classes to run with their input channels and frame timing configuration
 
 patterns:
-  - TestPattern
+  - pattern: TestPattern
+    input_channel: tap1
 
 # Frame interval in milliseconds (default: 100ms = 10 FPS)
 frame_interval_ms: 100
