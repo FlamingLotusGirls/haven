@@ -146,7 +146,7 @@ class PipeReader:
             if not os.path.exists(self.pipe_path):
                 print(f"Warning: Named pipe {self.pipe_path} does not exist. Using default input values 0.0")
                 return False
-            
+            print(f"Attempting to opening pipe {self.pipe_path}")
             self.pipe_fd = os.open(self.pipe_path, os.O_RDONLY | os.O_NONBLOCK)
             print(f"Opened named pipe: {self.pipe_path}")
             return True
@@ -162,6 +162,7 @@ class PipeReader:
             Dict[str, float]: Dictionary mapping channel names to their latest values
         """
         if self.pipe_fd is None:
+            print("No pipe, no values\n")
             return self.channel_values
         
         try:
@@ -171,12 +172,15 @@ class PipeReader:
                 self.buffer += chunk
         except OSError:
             # No data available (EAGAIN/EWOULDBLOCK)
+            print("Read latest value: No data")
             return self.channel_values
         except Exception as e:
             print(f"Error reading from pipe: {str(e)}")
             return self.channel_values
         
         # Process complete messages from buffer
+        # Note here that we can end up with more than one message per channel
+        # TODO - average values, if we have more than one. 
         while len(self.buffer) >= 4:
             try:
                 # Read length header

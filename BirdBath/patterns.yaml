@@ -2,7 +2,7 @@
 # List of pattern classes to run with their input channels and frame timing configuration
 
 patterns:
-  - pattern: TestPattern
+  - pattern: AmplitudePattern
     input_channel: tap1
 
 # Frame interval in milliseconds (default: 100ms = 10 FPS)
