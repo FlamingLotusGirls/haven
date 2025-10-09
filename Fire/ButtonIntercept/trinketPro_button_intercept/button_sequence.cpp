@@ -15,8 +15,8 @@
 // and I'll be able to dynamically update config files. That day is not today. 
 
 
-#define PERCH
-// #define COCKATOO
+// #define PERCH
+#define COCKATOO
 
 /// BUTTON_SEQUENCE.CPP
 /// Controller for the button intercept hardware module added to the flame control box for Haven.
@@ -205,7 +205,7 @@ Section chirpChirp[] = {{true, 75}, {false, 200}, {true, 75}, {false, 200}, {fal
 
 // For chase - starting at different times
 Section poof[] = {{true, 500},{false, 200}, {false, -1}};
-Section longPoof[] = {{true, 1500}, {false, 200}, {false, -1}};
+Section longPoof[] = {{true, 1000}, {false, 200}, {false, -1}};
 
 // XXX - There *may* be a way, avoiding templates, to initialize arrays in a nicer-looking way
 // than this. I do not know what it is. (I'm avoiding templates because I don't want to create any
@@ -227,13 +227,28 @@ Program longPoofProgram(universalLongPoofArray, "LongPoof");
 
 ChannelSequence thisThenThatJDVBird(4, 0, JDVBird);
 ChannelSequence thisThenThatChirpChirp(5, 100, chirpChirp);
+
 ChannelSequence* thisThenThatArray[] = {&thisThenThatJDVBird, &thisThenThatChirpChirp, NULL};
 Program thisThenThatProgram(thisThenThatArray, "ThisAndThat");
 
 ChannelSequence* stdAndOtherArray[] = {&thisThenThatJDVBird, &universalChirpChirp, NULL};
 Program stdAndOtherProgram(stdAndOtherArray, "StdAndOther");
 
-ChannelSequence chaseFirstOnOne(0, 0, poof);
+#ifdef COCKATOO
+ChannelSequence chaseFirst(7, 0, poof);
+ChannelSequence chaseSecond(4, 500, poof);
+ChannelSequence chaseThird(3, 1000, poof);
+ChannelSequence chaseFourth(0, 1500, poof);
+#else
+#ifdef PERCH
+ChannelSequence chaseFirst(7, 0, poof);
+ChannelSequence chaseSecond(6, 500, poof);
+ChannelSequence chaseThird(5, 1000, poof);
+ChannelSequence chaseFourth(4, 1500, poof);
+#endif //PERCH
+#endif //COCKATOO
+
+ChannelSequence chaseFirstOnOne(7, 0, poof);
 ChannelSequence chaseSecondOnTwo(1, 500, poof);
 ChannelSequence chaseThirdOnThree(2, 1000, poof);
 ChannelSequence chaseFourthOnFour(3, 1500, poof);
@@ -260,20 +275,18 @@ ChannelSequence longPoof6(5, 0, longPoof);
 ChannelSequence longPoof7(6, 0, longPoof);
 ChannelSequence longPoof8(7, 0, longPoof);
 
-ChannelSequence* chaseArrayPerch[] = {&chaseFirstOnOne, &chaseSecondOnTwo, &chaseThirdOnThree, &chaseFourthOnFour, NULL};
-ChannelSequence* chaseArrayCockatoo[] = {&chaseFirstOnOne, &chaseSecondOnTwo, &chaseThirdOnThree, NULL};
-
-#ifdef COCKATOO
-ChannelSequence* allPoofarray[] = {&poof1, &poof2, &poof3, NULL};
-ChannelSequence* chaseArray[] = {&chaseFirstOnOne, &chaseSecondOnTwo, &chaseThirdOnThree, NULL};
-#else
+#ifdef  COCKATOO
+ChannelSequence* allPoofArray[] = {&poof8, &poof5, &poof4, &poof1, NULL};
+ChannelSequence* chaseArray[] = {&chaseFirst, &chaseSecond, &chaseThird, &chaseFourth, NULL};
+#else 
 #ifdef PERCH
-ChannelSequence* chaseArray[] = {&chaseFirstOnOne, &chaseSecondOnTwo, &chaseThirdOnThree, &chaseFourthOnFour, NULL};
+ChannelSequence* allPoofArray[] = {&longPoof8, &longPoof7, &longPoof6, &longPoof5,  NULL};
+ChannelSequence* chaseArray[] = {&chaseFirst, &chaseSecond, &chaseThird, &chaseFourth, NULL};
 #else
 ChannelSequence* chaseArray[] = {&chaseFirstOnOne, &chaseSecondOnTwo, &chaseThirdOnThree, &chaseFourthOnFour, &chaseFifthOnFive, 
                                  &chaseSixthOnSix, &chaseSeventhOnSeven, &chaseEighthOnEight, NULL};
-#endif // PERCH
 ChannelSequence* allPoofArray[] = {&poof1, &poof2, &poof3, &poof4, &poof5, &poof6, &poof7, &poof8, NULL};
+#endif // PERCH
 #endif // COCKATOO
 
 Program chaseProgram(chaseArray, "Chase");
