@@ -175,8 +175,8 @@ def main():
     parser = argparse.ArgumentParser(description='Nozzle Data Web Server')
     parser.add_argument('--port', '-p', type=int, default=8080,
                        help='Port to run the server on (default: 8080)')
-    parser.add_argument('--host', default='localhost',
-                       help='Host to bind to (default: localhost)')
+    parser.add_argument('--host', default='0.0.0.0',
+                       help='Host to bind to (default: 0.0.0.0)')
     parser.add_argument('--data-file', default='nozzle_data.json',
                        help='JSON file containing nozzle data (default: nozzle_data.json)')
     
