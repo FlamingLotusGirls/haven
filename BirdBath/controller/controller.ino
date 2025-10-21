@@ -36,7 +36,7 @@ IPAddress gateway(10, 0, 0, 9);  // NB - Controlling rpi is acting as access poi
 //IPAddress gateway(192, 168, 13, 1);
 IPAddress subnet(255, 255, 255, 0);
 const char *ssid = "birdbath";
-const char *password = "birdbath";
+const char *password = "flg-birdbath";
 // const char *ssid = "lightcurve";
 // const char *password = "curvelight";
 ArtnetWifi artnet;
@@ -131,7 +131,11 @@ void setValveState(int valveNum, float state, bool print = 0)
     Serial.print(" valve set too high ");
     Serial.println(state);
     state = 1.0;
-  } // XXX what about low values? 
+  } else if (state < -1.0) {
+    Serial.print(" valve set too low ");
+    Serial.print(state);
+    state = -1.0;
+  }
   valveStates[valveNum] = state;
   int servoValue = valueToMsec(valveNum, state);
   controlValve(valveNum, servoValue);
@@ -336,9 +340,9 @@ void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, 
       setValveState(nozzleIndex, float(data[3]) / 255.0);
     }
   } else { // frameType == ARTNET_FRAME
-    int numNozzlesReceived = min(numBytesReceived / 2, NUM_VALVES);
+    int numNozzlesReceived = min((numBytesReceived - 1) / 2, NUM_VALVES);
     for (int nozzleIndex = 0; nozzleIndex < numNozzlesReceived; nozzleIndex++) {
-      int valveDataStartIndex = nozzleIndex * 2;
+      int valveDataStartIndex = nozzleIndex * 2 + 1;
 #ifdef USE_SOLENOIDS
       uint8_t solenoidByte = data[valveDataStartIndex];
       setSolenoidState(nozzleIndex, solenoidByte > 0);
@@ -355,6 +359,8 @@ void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, 
 // there are three switches on the board. THey seem to be
 // right after the solenoids, thus they should be at pins 12, 13, 14
 
+// XXX Reading the schematic, they appear to be at 17, 18, and 19.
+
 int switch1 = -1;
 int switch2 = -1;
 int switch3 = -1;
@@ -363,13 +369,15 @@ void readSwitches()
 {
 
   // this doesn't seem to work?
-  //  switch1 = pca9539.digitalRead(12);
-  //  switch2 = pca9539.digitalRead(13);
-  //  switch3 = pca9539.digitalRead(14);
+  switch1 = pca9539.digitalRead(pca_B5);
+  switch2 = pca9539.digitalRead(pca_B6);
+  switch3 = pca9539.digitalRead(pca_B7);
 
+/*
   switch1 = 0;
   switch2 = 0;
   switch3 = 0;
+  */
 }
 
 // RGB LED functions
