@@ -70,6 +70,9 @@ class CalibrationHandler(BaseHTTPRequestHandler):
         # Serve calibration interface at root
         if parsed_path.path == '/' or parsed_path.path == '/index.html':
             self._serve_calibration_interface()
+        # Match GET /nozzles (all nozzle status)
+        elif parsed_path.path == '/nozzles':
+            self._get_all_nozzle_status()
         # Match GET /nozzle/<id>/calibration
         elif re.match(r'^/nozzle/(\d+)/calibration$', parsed_path.path):
             match = re.match(r'^/nozzle/(\d+)/calibration$', parsed_path.path)
@@ -105,6 +108,124 @@ class CalibrationHandler(BaseHTTPRequestHandler):
         
         self._send_404()
     
+    def _get_all_nozzle_status(self):
+        """Get current valve status from all controllers via UDP."""
+        try:
+            # Use cached controllers
+            if CalibrationHandler._controllers is None:
+                self._send_error(500, "Controller configuration not loaded")
+                return
+            
+            all_nozzle_values = []
+            controller_responses = {}
+            
+            # Query each controller via UDP
+            for controller_idx, controller in enumerate(CalibrationHandler._controllers):
+                controller_ip = controller['ip']
+                
+                try:
+                    # Send UDP STATUS request
+                    valve_values = self._query_controller_status(controller_ip)
+                    if valve_values is not None:
+                        controller_responses[controller_idx] = {
+                            'ip': controller_ip,
+                            'status': 'success',
+                            'values': valve_values
+                        }
+                        all_nozzle_values.extend(valve_values)
+                    else:
+                        controller_responses[controller_idx] = {
+                            'ip': controller_ip,
+                            'status': 'timeout',
+                            'values': [0] * 12  # Default to 0 for unreachable controllers
+                        }
+                        all_nozzle_values.extend([0] * 12)
+                        
+                except Exception as e:
+                    print(f"Error querying controller {controller_idx} ({controller_ip}): {str(e)}")
+                    controller_responses[controller_idx] = {
+                        'ip': controller_ip,
+                        'status': 'error',
+                        'error': str(e),
+                        'values': [0] * 12
+                    }
+                    all_nozzle_values.extend([0] * 12)
+            
+            # Pad to ensure we have exactly 36 values
+            while len(all_nozzle_values) < 36:
+                all_nozzle_values.append(0)
+            
+            # Trim to exactly 36 values
+            all_nozzle_values = all_nozzle_values[:36]
+            
+            # Send JSON response
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response_data = {
+                'nozzle_count': 36,
+                'values': all_nozzle_values,
+                'controllers': controller_responses,
+                'timestamp': time.time()
+            }
+            
+            json_data = json.dumps(response_data, indent=2)
+            self.wfile.write(json_data.encode('utf-8'))
+            
+        except Exception as e:
+            print(f"Error getting all nozzle status: {str(e)}")
+            self._send_error(500, f"Internal server error: {str(e)}")
+    
+    def _query_controller_status(self, controller_ip: str, timeout: float = 0.25) -> list:
+        """
+        Send UDP STATUS request to a controller and return valve values.
+        
+        Args:
+            controller_ip (str): IP address of the controller
+            timeout (float): Timeout in seconds for UDP response
+            
+        Returns:
+            list: List of 12 valve values (0-255), or None if failed
+        """
+        try:
+            # Create UDP socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            
+            try:
+                # Send STATUS request
+                status_message = b"STATUS"
+                sock.sendto(status_message, (controller_ip, 7777))
+                print(f"Sent STATUS request to {controller_ip}:7777")
+                
+                # Wait for response
+                response_data, addr = sock.recvfrom(1024)  # Buffer for up to 1024 bytes
+                
+                # Convert bytes to list of integers
+                valve_values = list(response_data)
+                
+                print(f"Received {len(valve_values)} valve values from {controller_ip}: {valve_values}")
+                
+                # Ensure we have exactly 12 values (pad or trim as needed)
+                if len(valve_values) < 12:
+                    valve_values.extend([0] * (12 - len(valve_values)))
+                elif len(valve_values) > 12:
+                    valve_values = valve_values[:12]
+                
+                return valve_values
+                
+            finally:
+                sock.close()
+                
+        except socket.timeout:
+            print(f"Timeout waiting for response from {controller_ip}")
+            return None
+        except Exception as e:
+            print(f"Error querying controller {controller_ip}: {str(e)}")
+            return None
+
     def _get_nozzle_calibration(self, nozzle_id: int):
         """Get calibration data for a specific nozzle."""
         try:
@@ -481,6 +602,7 @@ class CalibrationHandler(BaseHTTPRequestHandler):
             'error': 'Not Found',
             'message': 'Endpoint not found',
             'available_endpoints': [
+                'GET /nozzles',
                 'GET /nozzle/<id>/calibration',
                 'PUT /nozzle/<id>/calibration/high',
                 'PUT /nozzle/<id>/calibration/low',
@@ -627,6 +749,7 @@ def main():
     print(f"Starting nozzle calibration server on http://{args.host}:{args.port}")
     print(f"Driver configuration file: {args.config_file}")
     print("\nAvailable endpoints:")
+    print("  GET /nozzles                       - Get current status of all nozzles via UDP")
     print("  GET /nozzle/<id>/calibration       - Get calibration data for nozzle")
     print("  PUT /nozzle/<id>/calibration/high  - Set high calibration value (0-255)")
     print("  PUT /nozzle/<id>/calibration/low   - Set low calibration value (0-255)")
