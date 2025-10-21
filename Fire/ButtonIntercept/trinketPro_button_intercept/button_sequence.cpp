@@ -10,6 +10,14 @@
 #include <unistd.h>
 #endif
 
+// Please only define on of these (if any). They set up the special sequences on the specific
+// flame control boxes. Perhaps one day I will have an ESP32 rather than a trinketPro on the board,
+// and I'll be able to dynamically update config files. That day is not today. 
+
+
+// #define PERCH
+#define COCKATOO
+
 /// BUTTON_SEQUENCE.CPP
 /// Controller for the button intercept hardware module added to the flame control box for Haven.
 /// This software (currently) runs on a trinketPro 5V, and translates the 8 button input signals
@@ -132,7 +140,6 @@ class Program {
       while (curSequence != NULL) {
         // printf(" Getting sequence, delay %d, outputChannel %d, section at %p\n", curSequence->delayMs, curSequence->outputChannel, curSequence->section);
         int sequencePlayTimeMs = curSequence->delayMs;
-        int idx = 0;
         Section* curSection = curSequence->section;
         while (curSection->duration >= 0) {
           sequencePlayTimeMs += curSection->duration;
@@ -144,9 +151,6 @@ class Program {
         }
         i++;
         curSequence = m_sequences[i];
-        if (i>2) {
-          break;
-        }
       }
       // printf("Total play time is %d\n", m_totalPlayTime);
     }
@@ -199,28 +203,98 @@ Section JDVBird[] = {{true, 500}, {false, 300}, {true, 500}, {false, 200}, {true
 // Chirp chirp - two shorts.
 Section chirpChirp[] = {{true, 75}, {false, 200}, {true, 75}, {false, 200}, {false, -1}};
 
+// For chase - starting at different times
+Section poof[] = {{true, 500},{false, 200}, {false, -1}};
+Section longPoof[] = {{true, 1000}, {false, 200}, {false, -1}};
+
 // XXX - There *may* be a way, avoiding templates, to initialize arrays in a nicer-looking way
 // than this. I do not know what it is. (I'm avoiding templates because I don't want to create any
 // sort of templates on a very memory limited embedded device).
 ChannelSequence universalJDVBird(-1, 0, JDVBird);
 ChannelSequence universalChirpChirp(-1, 0, chirpChirp);
+ChannelSequence universalPoof(-1, 0, poof);
+ChannelSequence universalLongPoof(-1, 0, longPoof);
 
 ChannelSequence* universalJDVBirdArray[] = {&universalJDVBird, NULL};
 ChannelSequence* universalChirpChirpArray[] = {&universalChirpChirp, NULL};
+ChannelSequence* universalPoofArray[] = {&universalPoof, NULL};
+ChannelSequence* universalLongPoofArray[] = {&universalLongPoof, NULL};
 
 Program JDVBirdProgram(universalJDVBirdArray, "JDVBird");
 Program chirpChirpProgram(universalChirpChirpArray, "ChirpChirp");
+Program poofProgram(universalPoofArray, "Poof");
+Program longPoofProgram(universalLongPoofArray, "LongPoof");
 
 ChannelSequence thisThenThatJDVBird(4, 0, JDVBird);
 ChannelSequence thisThenThatChirpChirp(5, 100, chirpChirp);
+
 ChannelSequence* thisThenThatArray[] = {&thisThenThatJDVBird, &thisThenThatChirpChirp, NULL};
 Program thisThenThatProgram(thisThenThatArray, "ThisAndThat");
 
 ChannelSequence* stdAndOtherArray[] = {&thisThenThatJDVBird, &universalChirpChirp, NULL};
 Program stdAndOtherProgram(stdAndOtherArray, "StdAndOther");
 
+#ifdef COCKATOO
+ChannelSequence chaseFirst(7, 0, poof);
+ChannelSequence chaseSecond(4, 500, poof);
+ChannelSequence chaseThird(3, 1000, poof);
+ChannelSequence chaseFourth(0, 1500, poof);
+#else
+#ifdef PERCH
+ChannelSequence chaseFirst(7, 0, poof);
+ChannelSequence chaseSecond(6, 500, poof);
+ChannelSequence chaseThird(5, 1000, poof);
+ChannelSequence chaseFourth(4, 1500, poof);
+#endif //PERCH
+#endif //COCKATOO
+
+ChannelSequence chaseFirstOnOne(7, 0, poof);
+ChannelSequence chaseSecondOnTwo(1, 500, poof);
+ChannelSequence chaseThirdOnThree(2, 1000, poof);
+ChannelSequence chaseFourthOnFour(3, 1500, poof);
+ChannelSequence chaseFifthOnFive(4, 2000, poof);
+ChannelSequence chaseSixthOnSix(5, 2500, poof);
+ChannelSequence chaseSeventhOnSeven(6, 3000, poof);
+ChannelSequence chaseEigthOnEight(7, 3500, poof);
+
+ChannelSequence poof1(0, 0, poof);
+ChannelSequence poof2(1, 0, poof);
+ChannelSequence poof3(2, 0, poof);
+ChannelSequence poof4(3, 0, poof);
+ChannelSequence poof5(4, 0, poof);
+ChannelSequence poof6(5, 0, poof);
+ChannelSequence poof7(6, 0, poof);
+ChannelSequence poof8(7, 0, poof);
+
+ChannelSequence longPoof1(0, 0, longPoof);
+ChannelSequence longPoof2(1, 0, longPoof);
+ChannelSequence longPoof3(2, 0, longPoof);
+ChannelSequence longPoof4(3, 0, longPoof);
+ChannelSequence longPoof5(4, 0, longPoof);
+ChannelSequence longPoof6(5, 0, longPoof);
+ChannelSequence longPoof7(6, 0, longPoof);
+ChannelSequence longPoof8(7, 0, longPoof);
+
+#ifdef  COCKATOO
+ChannelSequence* allPoofArray[] = {&poof8, &poof5, &poof4, &poof1, NULL};
+ChannelSequence* chaseArray[] = {&chaseFirst, &chaseSecond, &chaseThird, &chaseFourth, NULL};
+#else 
+#ifdef PERCH
+ChannelSequence* allPoofArray[] = {&longPoof8, &longPoof7, &longPoof6, &longPoof5,  NULL};
+ChannelSequence* chaseArray[] = {&chaseFirst, &chaseSecond, &chaseThird, &chaseFourth, NULL};
+#else
+ChannelSequence* chaseArray[] = {&chaseFirstOnOne, &chaseSecondOnTwo, &chaseThirdOnThree, &chaseFourthOnFour, &chaseFifthOnFive, 
+                                 &chaseSixthOnSix, &chaseSeventhOnSeven, &chaseEighthOnEight, NULL};
+ChannelSequence* allPoofArray[] = {&poof1, &poof2, &poof3, &poof4, &poof5, &poof6, &poof7, &poof8, NULL};
+#endif // PERCH
+#endif // COCKATOO
+
+Program chaseProgram(chaseArray, "Chase");
+Program allPoofProgram(allPoofArray, "AllPoof");
+
+
 // 8 possible programs, from 3 bit switch on the board
-Program* programs[8] = {NULL, &JDVBirdProgram, &chirpChirpProgram, NULL, NULL, NULL, &stdAndOtherProgram, &thisThenThatProgram};
+Program* programs[8] = {NULL, &JDVBirdProgram, &chirpChirpProgram, &chaseProgram, &allPoofProgram, &longPoofProgram, &poofProgram, &stdAndOtherProgram};
 
 
 /******************** CHANNELS AND CHANNELCONTROLLERS ****************/

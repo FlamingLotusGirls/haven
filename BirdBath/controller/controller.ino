@@ -1,6 +1,7 @@
 
 #include <Adafruit_PWMServoDriver.h>
 #include <Adafruit_NeoPixel.h>
+#include <WiFiUdp.h>
 
 // #define USE_ARTMODE
 // #define USE_SOLENOIDS
@@ -9,7 +10,8 @@
 
 // NB - The three board addresses are hardcoded to 4, 5, 6. 
 // Must recompile when generating software for a different board
-#define BOARD_ADDRESS 4
+const int BOARD_ADDRESSES[] = {3,4,5,6,7,8,2,1};
+// #define BOARD_ADDRESS 4
 
 #define ARTNET_FRAME 0
 #define ARTNET_NOZZLE 1
@@ -30,16 +32,20 @@ PCA9539 pca9539(0x77);
 
 #include <ArtnetWifi.h>
 
-IPAddress ip(10, 0, 0, BOARD_ADDRESS);
 IPAddress gateway(10, 0, 0, 9);  // NB - Controlling rpi is acting as access point and router
 //IPAddress ip(192, 168, 13, BOARD_ADDRESS);
 //IPAddress gateway(192, 168, 13, 1);
 IPAddress subnet(255, 255, 255, 0);
 const char *ssid = "birdbath";
-const char *password = "birdbath";
+const char *password = "flg-birdbath";
 // const char *ssid = "lightcurve";
 // const char *password = "curvelight";
 ArtnetWifi artnet;
+
+// UDP for status reporting
+WiFiUDP udp;
+const unsigned int UDP_PORT = 7777;
+char udpPacketBuffer[255]; // Buffer to hold incoming packet
 
 // SERVOS
 const int NUM_VALVES = 12;
@@ -77,6 +83,111 @@ struct ValveData
 
 ValveData valveData[NUM_VALVES];
 
+
+//
+// SWITCHES
+// There are many switches on the board. There are three switches associated with
+// the DIP switch in the center of the board, three momentary switches at the side of the board,
+// and three 'we could put a switch here' pins on the big header in the middle of the board. 
+
+// The pins associated with the DIP switch are D8, D9, and D10 on the ESP32.
+// The pins associated with the momentary switches are D0, D1, and D2 on the ESP32.
+// The pins associated with the big header are B5, B6, and B7 on the PCA9539
+
+class Switches {
+  public:
+   enum {
+      SW_HEADER1,
+      SW_HEADER2,
+      SW_HEADER3,
+      SW_DIP1,
+      SW_DIP2,
+      SW_DIP3,
+      SW_MOMENTARY1,
+      SW_MOMENTARY2,
+      SW_MOMENTARY3
+    };
+    
+    void InitSwitches() {
+      // These are the three header switches
+      pca9539.pinMode(pca_B5, INPUT); // SW1
+      pca9539.pinMode(pca_B6, INPUT); // SW2
+      pca9539.pinMode(pca_B7, INPUT); // SW3
+      
+      // These three read the momentary switches
+      pinMode(D0, INPUT);
+      pinMode(D1, INPUT);
+      pinMode(D2, INPUT);
+
+      // These read the DIP switch in the center of the board
+      pinMode(D8, INPUT_PULLUP);
+      pinMode(D9, INPUT_PULLUP);
+      pinMode(D10, INPUT_PULLUP); 
+    };
+
+    void PrintSwitches() {
+      Serial.print("  Header: ");
+      Serial.print(switchesArray[SW_HEADER1]);
+      Serial.print(", ");
+      Serial.print(switchesArray[SW_HEADER2]);
+      Serial.print(", ");
+      Serial.println(switchesArray[SW_HEADER3]);
+
+      Serial.print("  DIP: ");
+      Serial.print(switchesArray[SW_DIP1]);
+      Serial.print(", ");
+      Serial.print(switchesArray[SW_DIP2]);
+      Serial.print(", ");
+      Serial.println(switchesArray[SW_DIP3]);
+
+      int dipValue = 7 - ((switchesArray[SW_DIP1] << 2) + (switchesArray[SW_DIP2] << 1) + switchesArray[SW_DIP3]);
+      Serial.print("DIP value is ");
+      Serial.println(dipValue);
+
+      Serial.print("  Momentary: ");
+      Serial.print(switchesArray[SW_MOMENTARY1]);
+      Serial.print(", ");
+      Serial.print(switchesArray[SW_MOMENTARY2]);
+      Serial.print(", ");
+      Serial.println(switchesArray[SW_MOMENTARY3]);
+    };
+
+    void ReadSwitches() {
+      memcpy(oldSwitchesArray, switchesArray, sizeof(switchesArray));
+
+      switchesArray[SW_HEADER1] = pca9539.digitalRead(pca_B5);
+      switchesArray[SW_HEADER2] = pca9539.digitalRead(pca_B6);
+      switchesArray[SW_HEADER3] = pca9539.digitalRead(pca_B7);
+
+      switchesArray[SW_DIP1] = digitalRead(D10);
+      switchesArray[SW_DIP2] = digitalRead(D9);
+      switchesArray[SW_DIP3] = digitalRead(D8);
+
+      switchesArray[SW_MOMENTARY1] = digitalRead(D0);
+      switchesArray[SW_MOMENTARY2] = digitalRead(D1);
+      switchesArray[SW_MOMENTARY3] = digitalRead(D2);
+
+      if (memcmp(oldSwitchesArray, switchesArray, sizeof(switchesArray))) {
+        // Switches have changed. Let's print!
+        Serial.println("Switches have changed. New values are: ");
+        PrintSwitches();
+      }
+    };
+    
+    int GetValue(int switchType) {
+      return switchesArray[switchType];
+    };
+
+  private:
+    static const int NUM_SWITCHES = 9;
+    int switchesArray[NUM_SWITCHES] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+    int oldSwitchesArray[NUM_SWITCHES] = {-1, -1, -1, -1, -1, -1, -1, -1, -1};
+
+};
+
+// Global class to hold switches values
+Switches switches;
+
 //
 // States of Controller
 //
@@ -95,6 +206,7 @@ bool preventArtMode = false;
 #endif // USE_ARTMODE
 
 bool artnetActive = false;
+bool udpActive = false;
 
 // set to the millis value when we last did a successful beghinwifi
 // does not account for wraparound, so reboot your board every 49 days
@@ -131,7 +243,11 @@ void setValveState(int valveNum, float state, bool print = 0)
     Serial.print(" valve set too high ");
     Serial.println(state);
     state = 1.0;
-  } // XXX what about low values? 
+  } else if (state < -1.0) {
+    Serial.print(" valve set too low ");
+    Serial.print(state);
+    state = -1.0;
+  }
   valveStates[valveNum] = state;
   int servoValue = valueToMsec(valveNum, state);
   controlValve(valveNum, servoValue);
@@ -216,6 +332,14 @@ void beginWifi()
   WiFi.setSleep(false);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.setMinSecurity(WIFI_AUTH_WEP);
+  int dipValue = 7 - ((switches.GetValue(Switches::SW_DIP1) << 2) + (switches.GetValue(Switches::SW_DIP2) << 1) + switches.GetValue(Switches::SW_DIP3));
+  Serial.print("DIP value is ");
+  Serial.println(dipValue);
+  // int boardAddress = 4;
+  int boardAddress = BOARD_ADDRESSES[dipValue];
+  Serial.print("Board address is ");
+  Serial.println(boardAddress);
+  IPAddress ip(10, 0, 0, boardAddress);
   WiFi.config(ip, gateway, subnet);
   WiFi.begin(ssid, password);
 }
@@ -242,6 +366,10 @@ void printWifiStatus()
     Serial.print("signal strength (RSSI):");
     Serial.print(rssi);
     Serial.println(" dBm");
+
+  int dipValue = 7 - ((switches.GetValue(Switches::SW_DIP1) << 2) + (switches.GetValue(Switches::SW_DIP2) << 1) + switches.GetValue(Switches::SW_DIP3));
+  Serial.print("DIP value is ");
+  Serial.println(dipValue);
 
 
   }
@@ -300,17 +428,85 @@ void endArtnet()
   artnetActive = false;
 }
 
+// This must be called after wifi is connected
+void beginUDP()
+{
+  udpActive = true;
+  udp.begin(UDP_PORT);
+  Serial.print("UDP server started on port ");
+  Serial.println(UDP_PORT);
+}
+
+void endUDP()
+{
+  udp.stop();
+  udpActive = false;
+}
+
 // This must be called repeatedly in a loop, with a delay of at least 1ms between calls.
 void receiveArtnet()
 {
   artnet.read();
 }
 
-// Do not call this directly, it will be called when you call `receiveArtnet`.
+// Handle UDP packets for status requests
+void handleUDP()
+{
+  int packetSize = udp.parsePacket();
+  if (packetSize) {
+    Serial.print("Received UDP packet of size ");
+    Serial.print(packetSize);
+    Serial.print(" from ");
+    Serial.print(udp.remoteIP());
+    Serial.print(", port ");
+    Serial.println(udp.remotePort());
 
-// Okay, we have a problem for calibration. The artnet packet does not have a way to 
-// adjust just a single value, which is extremely useful for calibration.
-// Okay, so I'm going to modify the artnet packets.
+    // Read the packet into packetBuffer
+    int len = udp.read(udpPacketBuffer, sizeof(udpPacketBuffer) - 1);
+    if (len > 0) {
+      udpPacketBuffer[len] = 0; // Null terminate
+    }
+    
+    Serial.print("Contents: ");
+    Serial.println(udpPacketBuffer);
+
+    // Check if packet contains "STATUS"
+    if (strstr(udpPacketBuffer, "STATUS") != NULL) {
+      Serial.println("STATUS request received, sending valve states");
+      sendValveStatus();
+    }
+  }
+}
+
+// Send current valve states as byte array over UDP
+void sendValveStatus()
+{
+  uint8_t statusData[NUM_VALVES];
+  
+  // Convert float valve states (0.0-1.0) to bytes (0-255)
+  for (int i = 0; i < NUM_VALVES; i++) {
+    statusData[i] = (uint8_t)(valveStates[i] * 255.0);
+  }
+  
+  // Send UDP response to the requester
+  udp.beginPacket(udp.remoteIP(), udp.remotePort());
+  udp.write(statusData, NUM_VALVES);
+  udp.endPacket();
+  
+  Serial.print("Sent ");
+  Serial.print(NUM_VALVES);
+  Serial.println(" valve states over UDP");
+  
+  // Debug: print the values being sent
+  Serial.print("Values: ");
+  for (int i = 0; i < NUM_VALVES; i++) {
+    Serial.print(statusData[i]);
+    if (i < NUM_VALVES - 1) Serial.print(", ");
+  }
+  Serial.println();
+}
+
+// Do not call this directly, it will be called when you call `receiveArtnet`.
 void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, uint8_t *data)
 {
   millisLastArtnet = millis();
@@ -336,9 +532,9 @@ void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, 
       setValveState(nozzleIndex, float(data[3]) / 255.0);
     }
   } else { // frameType == ARTNET_FRAME
-    int numNozzlesReceived = min(numBytesReceived / 2, NUM_VALVES);
+    int numNozzlesReceived = min((numBytesReceived - 1) / 2, NUM_VALVES);
     for (int nozzleIndex = 0; nozzleIndex < numNozzlesReceived; nozzleIndex++) {
-      int valveDataStartIndex = nozzleIndex * 2;
+      int valveDataStartIndex = nozzleIndex * 2 + 1;
 #ifdef USE_SOLENOIDS
       uint8_t solenoidByte = data[valveDataStartIndex];
       setSolenoidState(nozzleIndex, solenoidByte > 0);
@@ -350,27 +546,51 @@ void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, 
   }
 }
 
-//
-// SWITCHES
-// there are three switches on the board. THey seem to be
-// right after the solenoids, thus they should be at pins 12, 13, 14
-
-int switch1 = -1;
-int switch2 = -1;
-int switch3 = -1;
-
+/*
 void readSwitches()
 {
+  memcpy(oldSwitchesArray, switchesArray, sizeof(int) * NUM_SWITCHES);
 
   // this doesn't seem to work?
-  //  switch1 = pca9539.digitalRead(12);
-  //  switch2 = pca9539.digitalRead(13);
-  //  switch3 = pca9539.digitalRead(14);
+  switchesArray[SW_HEADER1] = pca9539.digitalRead(pca_B5);
+  switchesArray[SW_HEADER2]  = pca9539.digitalRead(pca_B6);
+  switchesArray[SW_HEADER3]  = pca9539.digitalRead(pca_B7);
 
-  switch1 = 0;
-  switch2 = 0;
-  switch3 = 0;
+
+  switchesArray[SW_DIP1]  = digitalRead(D10);
+  switchesArray[SW_DIP2]  = digitalRead(D9);
+  switchesArray[SW_DIP3]  = digitalRead(D8);
+
+  switchesArray[SW_MOMENTARY1]  = digitalRead(D0);
+  switchesArray[SW_MOMENTARY2]  = digitalRead(D1);
+  switchesArray[SW_MOMENTARY3]  = digitalRead(D2);
+
+  if (!memcmp(oldSwitchesArray, switchesArray, sizeof(int) * NUM_SWITCHES)) {
+    // Switches have changed. Let's print!
+    Serial.println("Switches have changed. New values are: ");
+    Serial.print("  Header: ");
+    Serial.print(switchesArray[SW_HEADER1]);
+    Serial.print(", ");
+    Serial.print(switchesArray[SW_HEADER2]);
+    Serial.print(", ");
+    Serial.println(switchesArray[SW_HEADER3]);
+
+    Serial.print("  DIP: ");
+    Serial.print(switchesArray[SW_DIP1]);
+    Serial.print(", ");
+    Serial.print(switchesArray[SW_DIP2]);
+    Serial.print(", ");
+    Serial.println(switchesArray[SW_DIP3]);
+
+    Serial.print("  Momentary: ");
+    Serial.print(switchesArray[SW_MOMENTARY1]);
+    Serial.print(", ");
+    Serial.print(switchesArray[SW_MOMENTARY2]);
+    Serial.print(", ");
+    Serial.println(switchesArray[SW_MOMENTARY3]);
+  }
 }
+*/
 
 // RGB LED functions
 
@@ -405,11 +625,13 @@ void setup()
     update_rgb_led_color();
   }
 
+  // Initialize switches
+  switches.InitSwitches();
+
   // we have a pin that is the RST for the 9539
   Serial.println(" setting reset pin to low ");
   pinMode( D3, OUTPUT);
   digitalWrite( D3, HIGH);
-
 
   // initialize solenoid pins
   pca9539.pinMode(pca_A0, OUTPUT); // 0
@@ -425,17 +647,6 @@ void setup()
   pca9539.pinMode(pca_B2, OUTPUT); // 10
   pca9539.pinMode(pca_B3, OUTPUT); // 11
   pca9539.pinMode(pca_B4, OUTPUT); // 12
-  // I believe these are input switches but didn't work?
-#if 0
-  pca9539.pinMode(pca_B5, OUTPUT); // SW1
-  pca9539.pinMode(pca_B6, OUTPUT); // SW2
-  pca9539.pinMode(pca_B7, OUTPUT); // SW3
-#else
-  pca9539.pinMode(pca_B5, INPUT); // SW1
-  pca9539.pinMode(pca_B6, INPUT); // SW2
-  pca9539.pinMode(pca_B7, INPUT); // SW3
-#endif
-
 
   // Initialize the servo system
   pwm.begin();
@@ -444,7 +655,7 @@ void setup()
   pwm.setPWMFreq(50); // Analog servos run at ~50 Hz updates
 
   // get the initial switch state
-  readSwitches();
+  switches.ReadSwitches();
 
   // initialize the valve structure and set servos to SAFE
   for (int i = 0; i < NUM_VALVES; i++)
@@ -461,7 +672,7 @@ void setup()
   led_status = led_status_okay;
   update_rgb_led_color();
 
-  // Start trying to connect to wifi
+  // Start trying to connect to wifi (must come after read switches)
   beginWifi();
 
   //
@@ -495,23 +706,21 @@ void setup()
 //
 // loop
 
-// XXX NB - So apparently the switches are for reading art mode!
-
 #ifdef USE_ARTMODE
 void checkArtMode() {
-  if (switch1 && (!forceArtMode))
+  if (switches.GetSwitchValue(Switches::SW_HEADER1) && (!forceArtMode))
   {
     Serial.println(" switch 1 detected: forcing ArtMode");
     forceArtMode = true;
     preventArtMode = false;
   }
-  if (switch2 && (!preventArtMode))
+  if (switches.GetSwitchValue(Switches::SW_HEADER2) && (!preventArtMode))
   {
     Serial.println(" switch 2 detected: prevent artmode");
     forceArtMode = false;
     preventArtMode = true;
   }
-  if (switch3 && (forceArtMode || preventArtMode))
+  if (switches.GetSwitchValue(Switches::SW_HEADER3) && (forceArtMode || preventArtMode))
   {
     Serial.println(" switch 3 detected: normal mode ");
     forceArtMode = false;
@@ -538,37 +747,38 @@ void loop()
   // this will only display occasionally
   displayValves(currentTime, 0);
 
+  switches.ReadSwitches();
+
 #ifdef USE_ARTMODE
   // Switch1: safe valves and enter artmode immediately
-  readSwitches();
   checkArtMode();
 #endif 
   
   // if we're not connected, attempt to connect
-  if (!isWifiConnected())
-  {
-
-    // if we're not connected but we had an artnet listener, stop it
-    if (artnetActive == true)
-    {
+  if (!isWifiConnected()) {
+    // if we're not connected but we had network services running, stop them
+    if (artnetActive) {
       endArtnet();
     }
+    if (udpActive) {
+      endUDP();
+    }
 
-    // occasionally, reinit the wifi unit
-    if (currentTime > millisLastBeginWifi + WIFI_BEGIN_INTERVAL)
-    {
+    // occasionally, reinit the wifi unit if we haven't been able to connect
+    if (currentTime > millisLastBeginWifi + WIFI_BEGIN_INTERVAL) {
       printWifiStatus();
       Serial.println("Attempting to connect to wifi");
       beginWifi();
     }
-  }
-  else // wifiIsConnected
-  {
-    if (artnetActive == false)
-    {
+  } else { // wifiIsConnected
+    if (!artnetActive) {
       beginArtnet();
     }
+    if (!udpActive){
+      beginUDP();
+    }
     receiveArtnet();
+    handleUDP(); // Handle incoming UDP packets
   }
 
   delay(2); // Delay(1) supposedly important for ArtNet, it's also not good to overdrive
