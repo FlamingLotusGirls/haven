@@ -12,6 +12,7 @@ import os
 import sys
 import struct
 import fcntl
+import errno
 import math
 
 # Hardware-specific imports only when not in test mode
@@ -277,7 +278,11 @@ class ADCReader:
                 
         except (BrokenPipeError, OSError) as e:
             # No reader on the other end, that's okay
-            print(f"Problem sending to pipe {e}")
+            if isinstance(e, OSError) and e.errno == errno.ENXIO:
+                if self.debug:
+                    print(f"No reader connected to {self.pipe_path}, dropping data")
+            else:
+                print(f"Problem sending to pipe {e}")
             # pass
     
     def run(self):
