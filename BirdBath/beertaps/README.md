@@ -11,6 +11,10 @@ This system reads values from ADS1115 ADC controllers over I2C and sends calibra
 - Systemd service templates for auto-starting
 - JSON-based configuration files
 
+[!NOTE]
+The code is written such that the named pipe, if there is no reader, will throw what looks like
+an error. That is errno 6.
+
 ## Files
 
 ### Main Programs
