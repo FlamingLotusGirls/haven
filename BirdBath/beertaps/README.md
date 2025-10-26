@@ -22,6 +22,9 @@ The system is written to allow both readers and writers to come up in any order.
 code convention: everyone, readers and writers, attempts to create the /tmp before reading (or on read failure).
 If you write code to use this, follow the convention, or risk a timing hole.
 
+The wiring is built for *differential* use. This is due to concern about long run length (design requirement: placed 10' or more
+from controller to ADC unit). While this may not be strictly necessary, it was chosen to increase reliability.
+
 ## Files
 
 ### Main Programs
