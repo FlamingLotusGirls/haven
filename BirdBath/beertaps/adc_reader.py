@@ -12,6 +12,7 @@ import os
 import sys
 import struct
 import fcntl
+import errno
 import math
 
 # Hardware-specific imports only when not in test mode
@@ -213,13 +214,10 @@ class ADCReader:
             calibration: Dict with min_voltage and max_voltage
         
         Returns:
-            Float value between -1.0 and 1.0
+            Float value between -1.0 and 1.0 (clamped to this range)
         """
         min_v = calibration['min_voltage']
         max_v = calibration['max_voltage']
-        
-        # Clamp voltage to calibration range
-        voltage = max(min_v, min(max_v, voltage))
         
         # Map from [min_v, max_v] to [-1.0, 1.0]
         # Formula: output = 2 * ((input - min) / (max - min)) - 1
@@ -228,6 +226,10 @@ class ADCReader:
             calibrated = 2.0 * normalized - 1.0  # -1 to 1
         else:
             calibrated = 0.0  # Avoid division by zero
+        
+        # Clamp output to exactly -1.0 to 1.0 range
+        # This ensures values outside the calibration range don't exceed bounds
+        calibrated = max(-1.0, min(1.0, calibrated))
         
         return calibrated
     
@@ -277,7 +279,11 @@ class ADCReader:
                 
         except (BrokenPipeError, OSError) as e:
             # No reader on the other end, that's okay
-            print(f"Problem sending to pipe {e}")
+            if isinstance(e, OSError) and e.errno == errno.ENXIO:
+                if self.debug:
+                    print(f"No reader connected to {self.pipe_path}, dropping data")
+            else:
+                print(f"Problem sending to pipe {e}")
             # pass
     
     def run(self):

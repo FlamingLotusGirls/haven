@@ -7,8 +7,8 @@
       "positive_pin": "P0",
       "negative_pin": "P1",
       "calibration": {
-        "min_voltage": -3.3025,
-        "max_voltage": 0.0
+        "min_voltage": -3.30075,
+        "max_voltage": -0.000125
       }
     },
     {
@@ -16,8 +16,8 @@
       "positive_pin": "P2",
       "negative_pin": "P3",
       "calibration": {
-        "min_voltage": 0.0,
-        "max_voltage": 3.3
+        "min_voltage": -3.30075,
+        "max_voltage": 0.0
       }
     }
   ],

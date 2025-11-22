@@ -1,15 +1,29 @@
-# ADC Reader System for ADS1115
+# Beertaps: ADC Reader System using RPI and ADS1115
 
 This system reads values from ADS1115 ADC controllers over I2C and sends calibrated values (-1.0 to 1.0) through named pipes for inter-process communication.
 
 ## Features
 
-- Reads from individual ADS1115 controllers (supports 3 controllers at addresses 0x48, 0x49, 0x4a)
+- Reads from individual ADS1115 controllers (configured for 3 controllers at addresses 0x48, 0x49, 0x4a)
 - Each controller reads 2 differential channels
 - Calibration system to map voltage ranges to -1.0 to 1.0
 - Named pipes (FIFOs) for inter-process communication with multiple writer support
 - Systemd service templates for auto-starting
 - JSON-based configuration files
+
+## Notes!
+
+The Systemd service is built with pyenv in mind. If you install on a non-pyenv system, you will have to make
+some modifications.
+
+If you attempt to calibrate, you likely have to stop the three services reading from those ADC units.
+
+The system is written to allow both readers and writers to come up in any order. Named pipes have a
+code convention: everyone, readers and writers, attempts to create the /tmp before reading (or on read failure).
+If you write code to use this, follow the convention, or risk a timing hole.
+
+The wiring is built for *differential* use. This is due to concern about long run length (design requirement: placed 10' or more
+from controller to ADC unit). While this may not be strictly necessary, it was chosen to increase reliability.
 
 ## Files
 
