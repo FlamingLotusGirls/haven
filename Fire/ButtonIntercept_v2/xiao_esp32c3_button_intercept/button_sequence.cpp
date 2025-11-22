@@ -1,7 +1,14 @@
 //#define ARDUINO
+// #define MCP2x017
 #ifdef ARDUINO
 #include <Wire.h>
+#ifndef MCP2x017
 #include <PCA95x5.h>
+#else
+#include <MCP23017.h>
+#endif
+#include <LittleFS.h>
+#include <ArduinoJson.h>
 #else
 #include <stdio.h>
 #include <cstdint>
@@ -57,30 +64,20 @@
 #endif // ~ARDUINO
 
 #ifdef ARDUINO
-// NB - for debugging, need to take off channels 0 and 1 for the moment b/c FTDI
-#ifdef DEBUG
-const int inputs[] = {15,14,4,12,11,10};
-const int outputs[] = {3,13,5,6,8,9}; 
-#else 
-const int inputs[] = {0,1,15,14,4,12,11,10};
-const int outputs[] = {17,16,3,13,5,6,8,9}; 
-#endif
+const int outputs[] = {D7, D8, D9, D10, D6, D3, D2, D1}; // XXX D9 is strapping; problematic for initial output.
+const uint16_t gpioInputs[] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080, 0x0800, 0x0400, 0x0200, 0x0100};
 #endif // ARDUINO
 
-#if defined(ARDUINO) && defined(DEBUG)
-const int NUM_INPUT_CHANNELS = 6;
-const int NUM_OUTPUT_CHANNELS = 6;
-#else
-const int NUM_INPUT_CHANNELS = 8;
+const int NUM_INPUT_CHANNELS = 12;
 const int NUM_OUTPUT_CHANNELS = 8;
-#endif
+static constexpr int INVALID_OUTPUT_CHANNEL = -1;
 
 // Forward declarations
 void initMillis();
 #ifndef ARDUINO
 uint32_t millis();
 #endif
-bool readRawInput();
+bool readRawInput(int channelId, uint16_t gpioRawData, int curTimeMs);
 bool writeOutput();
 
 
@@ -178,8 +175,10 @@ class Program {
           curSection++;
         }
         int outputChannel = curSequence->outputChannel >= 0 ? curSequence->outputChannel : defaultOutputChannel;
-        playState[outputChannel].buttonPressed = output;
-        playState[outputChannel].valid = true;
+        if (outputChannel != INVALID_OUTPUT_CHANNEL) {
+          playState[outputChannel].buttonPressed = output;
+          playState[outputChannel].valid = true;
+        }
         curSequence = m_sequences[++i];
       }
 
@@ -296,6 +295,49 @@ Program allPoofProgram(allPoofArray, "AllPoof");
 // 8 possible programs, from 3 bit switch on the board
 Program* programs[8] = {NULL, &JDVBirdProgram, &chirpChirpProgram, &chaseProgram, &allPoofProgram, &longPoofProgram, &poofProgram, &stdAndOtherProgram};
 
+#ifdef ARDUINO
+// Storage for dynamically loaded sequences and programs
+struct NamedSequence {
+  String name;
+  Section* sections;
+  NamedSequence() : sections(nullptr) {}
+};
+
+struct NamedProgram {
+  String name;
+  Program* program;
+  NamedProgram() : program(nullptr) {}
+};
+
+const int MAX_DYNAMIC_SEQUENCES = 16;
+const int MAX_DYNAMIC_PROGRAMS = 16;
+
+NamedSequence dynamicSequences[MAX_DYNAMIC_SEQUENCES];
+NamedProgram dynamicPrograms[MAX_DYNAMIC_PROGRAMS];
+int dynamicSequenceCount = 0;
+int dynamicProgramCount = 0;
+
+// Helper function to find a dynamic sequence by name
+Section* findDynamicSequence(const String& name) {
+  for (int i = 0; i < dynamicSequenceCount; i++) {
+    if (dynamicSequences[i].name == name) {
+      return dynamicSequences[i].sections;
+    }
+  }
+  return nullptr;
+}
+
+// Helper function to find a dynamic program by name
+Program* findDynamicProgram(const String& name) {
+  for (int i = 0; i < dynamicProgramCount; i++) {
+    if (dynamicPrograms[i].name == name) {
+      return dynamicPrograms[i].program;
+    }
+  }
+  return nullptr;
+}
+#endif
+
 
 /******************** CHANNELS AND CHANNELCONTROLLERS ****************/
 // A ChannelController takes an input on a specified input channel, and decides what that means for 
@@ -316,7 +358,9 @@ enum class ChannelControllerMode {
 class ChannelController {
 public:
   ChannelController() : m_program(NULL), m_mode(ChannelControllerMode::Follower), m_inputChannel(s_inputChannel++), m_nextProgram(NULL), m_state(WAIT_FOR_UNPRESS) {
-    m_defaultOutputChannel = m_inputChannel;
+    // If the input channel idx can't be paired with an output channel, set the default output to
+    // INVALID_OUTPUT_CHANNEL (-1).
+    m_defaultOutputChannel = m_inputChannel < NUM_OUTPUT_CHANNELS ? m_inputChannel : INVALID_OUTPUT_CHANNEL;
     memset(m_outputState, 0, NUM_OUTPUT_CHANNELS*sizeof(PlayState));
   }
 
@@ -352,9 +396,23 @@ public:
   }
 
   void update(bool buttonPressed, uint32_t curTimeMs) {
+    if (buttonPressed) {
+      /*
+      Serial.print("Button press received for program listening on channel ");
+      Serial.print(m_inputChannel);
+      Serial.print(", mode is ");
+      Serial.println((int)m_mode);
+      */
+    }
     if (m_mode == ChannelControllerMode::Follower) {
-      m_outputState[m_defaultOutputChannel].valid = true;
-      m_outputState[m_defaultOutputChannel].buttonPressed = buttonPressed;
+      if (m_defaultOutputChannel != INVALID_OUTPUT_CHANNEL) {
+        m_outputState[m_defaultOutputChannel].valid = true;
+        m_outputState[m_defaultOutputChannel].buttonPressed = buttonPressed;
+        if (buttonPressed) {
+            Serial.print("Button press received for program listening on channel ");
+            Serial.println(m_inputChannel);
+        }
+      }
     } else {
       switch(m_state) {
         case WAIT_FOR_PRESS: 
@@ -429,20 +487,64 @@ int ChannelController::s_inputChannel = 0;
 
 ChannelController controllers[NUM_INPUT_CHANNELS];
 
+// Global channel aliases - initialized with default names, loaded from file
 #ifdef ARDUINO
-const int NUM_PCA9555_CHIPS = 2;
-const int PCA9555_ADDRESS[NUM_PCA9555_CHIPS] = {0x20, 0x27};
-PCA9555 ioex[NUM_PCA9555_CHIPS];
+String channelAlias[8] = {
+  "Channel 0", "Channel 1", "Channel 2", "Channel 3",
+  "Channel 4", "Channel 5", "Channel 6", "Channel 7"
+};
+#else
+const char* channelAlias[8] = {
+  "Channel 0", "Channel 1", "Channel 2", "Channel 3",
+  "Channel 4", "Channel 5", "Channel 6", "Channel 7"
+};
+#endif
+
+#ifdef ARDUINO
+const int NUM_GPIO_CHIPS = 1;
+#ifndef MCP2x017
+const int PCA9555_ADDRESS[NUM_GPIO_CHIPS] = {0x20};
+PCA9555 ioex[NUM_GPIO_CHIPS];
+#else
+const int MCP23017_ADDRESS[NUM_GPIO_CHIPS] = {0x20};
+MCP23017 mcp[NUM_GPIO_CHIPS] = {MCP23017(MCP23017_ADDRESS[0])};
+#endif
 
 void initI2C() {
   Wire.begin();
-  for (int i=0; i<NUM_PCA9555_CHIPS; i++){
+  for (int i=0; i<NUM_GPIO_CHIPS; i++){
+#ifndef MCP2x017
     ioex[i].attach(Wire, PCA9555_ADDRESS[i]);
     ioex[i].polarity(PCA95x5::Polarity::ORIGINAL_ALL);
     ioex[i].direction(PCA95x5::Direction::IN_ALL);
+    ioex[i].direction(PCA95x5::Port::P17, PCA95x5::Direction::OUT); // All input except for an LED
+#else
+    mcp[i].init();
+    mcp[i].portMode(MCP23017Port::A, 0b11111110); //Port A as input // XXX what about the LED?
+    mcp[i].portMode(MCP23017Port::B, 0b11111110); //Port B as input
+    mcp[i].writeRegister(MCP23017Register::GPIO_A, 0x00);  //Reset port A 
+    mcp[i].writeRegister(MCP23017Register::GPIO_B, 0x00);  //Reset port B
+    mcp[i].writeRegister(MCP23017Register::IPOL_A, 0x00);  // polarity same as input
+    mcp[i].writeRegister(MCP23017Register::IPOL_B, 0x00);
+#endif
   }
 }
 
+uint16_t readGPIOExpander() {
+#ifndef MCP2x017
+  return ioex[0].read();
+#else
+  return mcp[0].read();
+#endif
+}
+
+int8_t readDIPSwitch(uint16_t gpioRawData) {
+  return ((gpioRawData & 0x1000 >> 10) +
+           (gpioRawData & 0x2000 >> 12) + 
+           (gpioRawData & 0x4000 >> 14));
+}
+
+/*
 void readChannelModes(uint8_t channelModes[]) {
   uint16_t rawData1 = ioex[0].read();
   uint16_t rawData2 = ioex[1].read();
@@ -494,8 +596,10 @@ void readChannelModes(uint8_t channelModes[]) {
   }
 #endif
 }
+*/
 #endif // ARDUINO
 
+/*
 void initChannelControllers() {
 #ifdef ARDUINO
   uint8_t channelModes[8]; // would be NUM_INPUT_CHANNELS, if I hadn't fucked up the wiring...
@@ -509,6 +613,7 @@ void initChannelControllers() {
   controllers[2].setProgram(programs[7]);
 #endif
 }
+*/
 
 /********** FAKE INPUT ********/
 // Fake input on/off
@@ -606,9 +711,10 @@ InputTest inputTest;
 /************** IO **************/
 
 // either going to be reading from a Program or getting data from the actual device
-bool readRawInput(int inputChannel, int curTimeMs) {
+bool readRawInput(int inputChannel, uint16_t gpioRawData, int curTimeMs) {
 #ifdef ARDUINO
-  bool input = digitalRead(inputs[inputChannel]);
+  uint16_t gpioChannel = gpioInputs[inputChannel];
+  bool input = gpioRawData & gpioChannel;
 #ifdef DEBUG
 /*
   Serial.print("Reading value ");
@@ -624,6 +730,14 @@ bool readRawInput(int inputChannel, int curTimeMs) {
   // !digitalRead(inputs[inputChannel]);
 #else
   return inputTest.GetButtonState(inputChannel, curTimeMs);
+#endif
+}
+
+void setLEDState(bool onOff) {
+#ifdef ARDUINO
+#ifndef MCP2x017
+  ioex[0].write(PCA95x5::Port::P17, onOff ? PCA95x5::Level::H : PCA95x5::Level::L);
+#endif
 #endif
 }
 
@@ -689,10 +803,17 @@ class Debouncer {
 Debouncer debouncer;
 bool inputButtonStates[NUM_INPUT_CHANNELS];
 
-void readInputButtonStates(int curTimeMs) {
+void readInputButtonStates(uint16_t gpioRawData, int curTimeMs) {
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
-    bool buttonState = readRawInput(i, curTimeMs);
+    bool oldButtonState = inputButtonStates[i];
+    bool buttonState = readRawInput(i, gpioRawData, curTimeMs);
     inputButtonStates[i] = debouncer.Debounce(i, buttonState, curTimeMs);
+    if (inputButtonStates[i] != oldButtonState) {
+      Serial.print("ButtonChange on channel ");
+      Serial.print(i);
+      Serial.println(oldButtonState ? ",now UNPRESSED" : ",now PRESSED");
+    }
+    // XXX if button state change, send udp packet to ... somewhere
   }
 }
 
@@ -700,12 +821,12 @@ bool consolidatedOutput[NUM_OUTPUT_CHANNELS];
 
 void initIO() {
 #ifdef ARDUINO
-#ifdef DEBUG
-  Serial.begin(9600);
-#endif
+  // input is now on the PCA9555 - how do we initialize that?
+  // XXX initialized in the PCA initialization sequence
+  /*
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
     pinMode(inputs[i], INPUT_PULLUP);
-  }
+  }*/
   for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {
     digitalWrite(outputs[j], LOW); // making sure output starts low
     pinMode(outputs[j], OUTPUT);
@@ -714,6 +835,7 @@ void initIO() {
   memset(consolidatedOutput, 0, NUM_OUTPUT_CHANNELS*sizeof(bool));
 }
 
+uint16_t oldGpioRawData = 0xFFFF;
 void buttonLoop() {
   // Read data, send to the channel controllers.
   int curTimeMs = millis();
@@ -721,7 +843,17 @@ void buttonLoop() {
   memcpy(consolidatedOutputDebugCopy, consolidatedOutput, NUM_OUTPUT_CHANNELS*sizeof(bool));
   memset(consolidatedOutput, 0, NUM_OUTPUT_CHANNELS*sizeof(bool));
 
-  readInputButtonStates(curTimeMs);
+  uint16_t gpioRawData = readGPIOExpander();
+  if (gpioRawData != oldGpioRawData) {
+  #ifdef DEBUG
+    Serial.print("Data change! Old data was ");
+    Serial.print(oldGpioRawData, BIN);
+    Serial.print(", new data is ");
+    Serial.println(gpioRawData, BIN);
+  #endif
+    oldGpioRawData = gpioRawData;
+  }
+  readInputButtonStates(gpioRawData, curTimeMs);
 
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
     controllers[i].update(inputButtonStates[i], curTimeMs);
@@ -729,6 +861,8 @@ void buttonLoop() {
     for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {
       // For the moment, if any program says that the button is pressed, it's pressed.
       if (playState->valid && playState->buttonPressed) {
+        // Serial.print("Consolidated button press on output channel ");
+        // Serial.println(j);
         consolidatedOutput[j] = true;
       }
       playState++;
@@ -755,12 +889,273 @@ void buttonLoop() {
   }
 }
 
+// Load channel aliases from channels.json file
+#ifdef ARDUINO
+void loadChannelsFromFile() {
+  // Initialize with default names first
+  for (int i = 0; i < 8; i++) {
+    channelAlias[i] = "Channel " + String(i);
+  }
+  
+  if (!LittleFS.exists("/channels.json")) {
+    Serial.println("channels.json not found, using default channel names");
+    return;
+  }
+  
+  File file = LittleFS.open("/channels.json", "r");
+  if (!file) {
+    Serial.println("Failed to open channels.json");
+    return;
+  }
+  
+  // Read file into string
+  String jsonString = file.readString();
+  file.close();
+  
+  // Parse JSON
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, jsonString);
+  
+  if (error) {
+    Serial.print("channels.json parsing failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+  
+  // Process channel mappings - expecting array of [channelIndex, solenoidName]
+  if (doc.is<JsonArray>()) {
+    JsonArray channelArray = doc.as<JsonArray>();
+    for (JsonArray::iterator it = channelArray.begin(); it != channelArray.end(); ++it) {
+      JsonArray mapping = *it;
+      if (mapping.size() == 2) {
+        int channelIndex = mapping[0];
+        String solenoidName = mapping[1].as<String>();
+        
+        if (channelIndex >= 0 && channelIndex < 8) {
+          channelAlias[channelIndex] = solenoidName;
+          Serial.print("Channel ");
+          Serial.print(channelIndex);
+          Serial.print(" mapped to: ");
+          Serial.println(solenoidName);
+        }
+      }
+    }
+  }
+  Serial.println("Channels loaded from file successfully");
+}
+
+// Dynamic sequence and pattern loading from JSON files
+void loadPatternsFromFile() {
+  if (!LittleFS.exists("/patterns.json")) {
+    Serial.println("patterns.json not found, using hardcoded patterns");
+    return;
+  }
+  
+  File file = LittleFS.open("/patterns.json", "r");
+  if (!file) {
+    Serial.println("Failed to open patterns.json");
+    return;
+  }
+  
+  // Read file into string
+  String jsonString = file.readString();
+  file.close();
+  
+  // Parse JSON
+  DynamicJsonDocument doc(8192); // Adjust size as needed
+  DeserializationError error = deserializeJson(doc, jsonString);
+  
+  if (error) {
+    Serial.print("JSON parsing failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+  
+  // First, load sequences from JSON
+  if (doc.containsKey("sequences")) {
+    JsonObject sequences = doc["sequences"];
+    for (JsonPair sequencePair : sequences) {
+      if (dynamicSequenceCount >= MAX_DYNAMIC_SEQUENCES) {
+        Serial.println("Warning: Maximum dynamic sequences reached");
+        break;
+      }
+      
+      String sequenceName = sequencePair.key().c_str();
+      JsonArray sequenceData = sequencePair.value().as<JsonArray>();
+      
+      // Count sections to allocate memory
+      int sectionCount = sequenceData.size();  
+      Section* dynamicSection = new Section[sectionCount];
+      
+      int index = 0;
+      for (JsonArray::iterator it = sequenceData.begin(); it != sequenceData.end(); ++it) {
+        JsonArray sectionData = *it;
+        if (sectionData.size() == 2) {
+          dynamicSection[index].onOff = sectionData[0].as<bool>();
+          dynamicSection[index].duration = sectionData[1].as<int32_t>();
+          index++;
+        }
+      }
+      
+      // Store in the dynamic sequences array
+      dynamicSequences[dynamicSequenceCount].name = sequenceName;
+      dynamicSequences[dynamicSequenceCount].sections = dynamicSection;
+      dynamicSequenceCount++;
+      
+      Serial.print("Loaded sequence: ");
+      Serial.print(sequenceName);
+      Serial.print(" with ");
+      Serial.print(sectionCount);
+      Serial.println(" sections");
+    }
+  }
+  
+  // Then load patterns from JSON
+  if (doc.containsKey("patterns")) {
+    JsonObject patterns = doc["patterns"];
+    for (JsonPair patternPair : patterns) {
+      String patternName = patternPair.key().c_str();
+      JsonArray patternData = patternPair.value().as<JsonArray>();
+      
+      Serial.print("Loading pattern: ");
+      Serial.println(patternName);
+      
+      // Create channel sequences for this pattern
+      int sequenceCount = patternData.size();
+      ChannelSequence** dynamicSequences = new ChannelSequence*[sequenceCount + 1];
+      
+      int index = 0;
+      for (JsonArray::iterator it = patternData.begin(); it != patternData.end(); ++it) {
+        JsonArray channelData = *it;
+        if (channelData.size() == 3) {
+          String channelName = channelData[0].as<String>();
+          int delayMs = channelData[1].as<int>();
+          String sequenceName = channelData[2].as<String>();
+          
+          // Find channel index by name
+          int channelIndex = -1;
+          for (int i = 0; i < 8; i++) {
+            if (channelAlias[i] == channelName) {
+              channelIndex = i;
+              break;
+            }
+          }
+          
+          if (channelIndex >= 0) {
+            // Try to find dynamic sequence first, then fall back to hardcoded
+            Section* sequenceSection = findDynamicSequence(sequenceName);
+            
+            if (sequenceSection == nullptr) {
+              // Fall back to hardcoded sequences
+              if (sequenceName == "poof") {
+                sequenceSection = poof;
+              } else if (sequenceName == "quick_burst") {
+                sequenceSection = chirpChirp; // Use existing sequence as placeholder
+              } else if (sequenceName == "slow_flame") {
+                sequenceSection = longPoof; // Use existing sequence as placeholder
+              }
+            }
+            
+            if (sequenceSection != nullptr) {
+              ChannelSequence* channelSeq = new ChannelSequence(channelIndex, delayMs, sequenceSection);
+              dynamicSequences[index] = channelSeq;
+              index++;
+              
+              Serial.print("  Channel: ");
+              Serial.print(channelName);
+              Serial.print(" (index ");
+              Serial.print(channelIndex);
+              Serial.print("), delay: ");
+              Serial.print(delayMs);
+              Serial.print(", sequence: ");
+              Serial.println(sequenceName);
+            } else {
+              Serial.print("  Warning: Sequence '");
+              Serial.print(sequenceName);
+              Serial.println("' not found");
+            }
+          } else {
+            Serial.print("  Warning: Channel name '");
+            Serial.print(channelName);
+            Serial.println("' not found in channel aliases");
+          }
+        }
+      }
+      
+      dynamicSequences[index] = nullptr; // Null terminate
+      
+      // Create program from dynamic sequences
+      if (index > 0 && dynamicProgramCount < MAX_DYNAMIC_PROGRAMS) {
+        Program* dynamicProgram = new Program(dynamicSequences, patternName.c_str());
+        
+        // Store it in the dynamic programs array
+        dynamicPrograms[dynamicProgramCount].name = patternName;
+        dynamicPrograms[dynamicProgramCount].program = dynamicProgram;
+        dynamicProgramCount++;
+        
+        Serial.print("Created dynamic program: ");
+        Serial.println(patternName);
+      } else if (dynamicProgramCount >= MAX_DYNAMIC_PROGRAMS) {
+        Serial.println("Warning: Maximum dynamic programs reached");
+      }
+    }
+  }
+  
+  // Load channel mappings for pattern_mappings
+  if (doc.containsKey("pattern_mappings")) {
+    JsonObject mappings = doc["pattern_mappings"];
+    for (JsonPair kv : mappings) {
+      int buttonIndex = String(kv.key().c_str()).toInt();
+      String patternName = kv.value().as<String>();
+      
+      // Find matching program by name - check hardcoded programs first, then dynamic programs
+      Program* selectedProgram = nullptr;
+      
+      // Check hardcoded programs first
+      for (int i = 0; i < 8; i++) {
+        if (programs[i] != nullptr && strcmp(programs[i]->GetName(), patternName.c_str()) == 0) {
+          selectedProgram = programs[i];
+          break;
+        }
+      }
+      
+      // If not found in hardcoded programs, check dynamic programs
+      if (selectedProgram == nullptr) {
+        selectedProgram = findDynamicProgram(patternName);
+      }
+      
+      // Set the program for this button
+      if (buttonIndex < NUM_INPUT_CHANNELS && selectedProgram != nullptr) {
+        controllers[buttonIndex].setProgram(selectedProgram);
+        Serial.print("Mapped button ");
+        Serial.print(buttonIndex);
+        Serial.print(" to pattern ");
+        Serial.println(patternName);
+      } else {
+        Serial.print("Warning: Could not find or map pattern '");
+        Serial.print(patternName);
+        Serial.print("' to button ");
+        Serial.println(buttonIndex);
+      }
+    }
+  }
+  
+  Serial.println("Patterns loaded from file successfully");
+}
+#endif
+
 void buttonSetup() {
   initMillis();
   initIO();
 #ifdef ARDUINO
   initI2C();
-  initChannelControllers();
+  // Try to load configuration from files first, fallback to hardcoded
+  if (LittleFS.begin()) {
+    loadChannelsFromFile();  // Load channel aliases
+    loadPatternsFromFile();  // Load pattern mappings
+  } else {
+    // initChannelControllers(); // Use hardcoded patterns
+  }
 #ifdef DEBUG
   Serial.println("Starting...");
 #endif // DEBUG

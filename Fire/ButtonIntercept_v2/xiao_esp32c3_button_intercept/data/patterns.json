@@ -1,0 +1,89 @@
+{
+  "sequences": {
+    "poof": [
+      [
+        true,
+        500
+      ],
+      [
+        false,
+        200
+      ],
+      [
+        false,
+        -1
+      ]
+    ],
+    "quick_burst": [
+      [
+        true,
+        200
+      ],
+      [
+        false,
+        100
+      ],
+      [
+        true,
+        200
+      ],
+      [
+        false,
+        -1
+      ]
+    ],
+    "slow_flame": [
+      [
+        true,
+        1000
+      ],
+      [
+        false,
+        500
+      ],
+      [
+        true,
+        1000
+      ],
+      [
+        false,
+        -1
+      ]
+    ]
+  },
+  "patterns": {
+    "BirdChase": [
+      [
+        "Cockatoo1",
+        0,
+        "poof"
+      ],
+      [
+        "Cockatoo4",
+        500,
+        "poof"
+      ]
+    ],
+    "TripleBurst": [
+      [
+        "Cockatoo1",
+        0,
+        "quick_burst"
+      ],
+      [
+        "CockatooChick1",
+        200,
+        "quick_burst"
+      ],
+      [
+        "Cockatoo4",
+        400,
+        "quick_burst"
+      ]
+    ]
+  },
+  "pattern_mappings": {
+    "0": "BirdChase",
+    "1": "TripleBurst"
+  }
+}
