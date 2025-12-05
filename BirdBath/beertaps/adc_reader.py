@@ -15,6 +15,8 @@ import fcntl
 import errno
 import math
 
+from i2c_lock import I2CLock, I2CDeviceInUseError
+
 # Hardware-specific imports only when not in test mode
 TEST_MODE = False
 
@@ -122,6 +124,23 @@ class ADCReader:
     def setup_adc(self):
         """Initialize I2C and ADC with configured address (or mock in test mode)"""
         try:
+            # Acquire I2C lock for this address (unless in test mode)
+            if not self.test_mode:
+                address = self.config['address']
+                if isinstance(address, str):
+                    address = int(address, 16)
+                
+                try:
+                    self.i2c_lock = I2CLock(address)
+                    self.i2c_lock.acquire()
+                    if self.debug:
+                        print(f"Acquired I2C lock for address {hex(address)}")
+                except I2CDeviceInUseError as e:
+                    print(str(e), file=sys.stderr)
+                    sys.exit(1)
+            else:
+                self.i2c_lock = None
+            
             if self.test_mode:
                 # Mock setup for test mode
                 self.i2c = None  # Not needed in test mode
