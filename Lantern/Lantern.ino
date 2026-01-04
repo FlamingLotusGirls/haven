@@ -2,10 +2,18 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <Matter.h>
+#include <MatterEndPoints/MatterOnOffLight.h>
 #include "lantern_webserver.h"
 
 // Preferences object for NVS
 Preferences preferences;
+
+// Matter Light device
+MatterOnOffLight matterLight;
+
+// Light power state
+bool lightPower = true;  // Light is on by default
 
 // WiFi Configuration - UPDATE THESE WITH YOUR CREDENTIALS
 String ssid;
@@ -42,6 +50,24 @@ unsigned long lastDitherTime = 0;
 unsigned long ditherPeriod = 1000 / DITHER_FREQUENCY;  // Period in milliseconds
 bool showColorA = true;  // Which color to currently show in dither cycle
 
+// Matter callback - called when on/off state changes
+bool onMatterLightChange(bool state) {
+  lightPower = state;
+  Serial.printf("Matter: Light turned %s\n", state ? "ON" : "OFF");
+  
+  // Save power state to NVS
+  preferences.begin("lantern", false);
+  preferences.putBool("lightPower", lightPower);
+  preferences.end();
+  
+  // If turning off, set LED to black immediately
+  if (!lightPower) {
+    leds[0] = CRGB::Black;
+    FastLED.show();
+  }
+  return true;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("\nWS2812 Color Transition with Web Server Starting...");
@@ -65,6 +91,9 @@ void setup() {
   // Load network ssid and password
   ssid = preferences.getString("ssid", "not");
   password = preferences.getString("password", "set");
+  
+  // Load light power state (use default if not set)
+  lightPower = preferences.getBool("lightPower", true);
   
   preferences.end();
   
@@ -112,6 +141,43 @@ void setup() {
   // Setup web server routes
   setupWebServer();
   
+  // Initialize Matter
+  matterLight.begin();
+  matterLight.setOnOff(lightPower);
+  matterLight.onChange(onMatterLightChange);
+  
+  Serial.println("\n============================================");
+  Serial.println("Matter: Initialized as On/Off Light");
+  Serial.println("Matter: Device is ready for commissioning");
+  Serial.println("============================================");
+  
+  // Print Matter commissioning information
+  Serial.println("\n** COMMISSIONING INFORMATION **");
+  Serial.println();
+  Serial.println("To add to Google Home or Alexa:");
+  Serial.println("1. Open the app and tap 'Add Device' → 'Matter'");
+  Serial.println("2. Use one of these methods:");
+  Serial.println();
+  
+  // Get and print the manual pairing code
+  Serial.print("Manual Pairing Code: ");
+  Serial.println(Matter.getManualPairingCode());
+  Serial.println();
+  
+  // Get and print the QR code payload
+  Serial.println("QR Code Payload:");
+  // Serial.println(Matter.getQRCodeURL());
+  Serial.println();
+  
+  Serial.printf("Device State: %s\n", lightPower ? "ON" : "OFF");
+  Serial.println("============================================\n");
+  
+  // If light is off, keep LED off
+  if (!lightPower) {
+    leds[0] = CRGB::Black;
+    FastLED.show();
+  }
+  
   // Start the first transition after a brief delay
   transitionStart = millis() + 500;
   isTransitioning = true;
@@ -124,6 +190,15 @@ void loop() {
   handleWebServer();
   
   unsigned long currentMillis = millis();
+  
+  // Only update LED if light is powered on
+  if (!lightPower) {
+    // Light is off - ensure LED stays off
+    leds[0] = CRGB::Black;
+    FastLED.show();
+    delay(100);  // Longer delay when off to save power
+    return;
+  }
   
   if (isTransitioning && currentMillis >= transitionStart) {
     // Calculate transition progress (0.0 to 1.0)
