@@ -50,6 +50,10 @@ unsigned long lastDitherTime = 0;
 unsigned long ditherPeriod = 1000 / DITHER_FREQUENCY;  // Period in milliseconds
 bool showColorA = true;  // Which color to currently show in dither cycle
 
+void onMatterEvent(matterEvent_t eventType, const chip::DeviceLayer::ChipDeviceEvent* eventInfo) {
+  Serial.printf("Matter event received\n");
+}
+
 // Matter callback - called when on/off state changes
 bool onMatterLightChange(bool state) {
   lightPower = state;
@@ -123,14 +127,38 @@ void setup() {
   
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi connected!");
-    Serial.print("IP address: ");
+    Serial.print("IPv4 address: ");
     Serial.println(WiFi.localIP());
+    
+    // Enable and wait for IPv6 (required for Matter)
+    Serial.println("Enabling IPv6...");
+    WiFi.enableIPv6();
+    
+    // Wait for IPv6 to initialize (up to 10 seconds)
+    Serial.print("Waiting for IPv6 address");
+    for (int i = 0; i < 20; i++) {
+      delay(500);
+      Serial.print(".");
+      String ipv6 = WiFi.linkLocalIPv6().toString();
+      if (ipv6 != "::") {
+        Serial.println();
+        Serial.print("IPv6 address: ");
+        Serial.println(ipv6);
+        Serial.println("IPv6 configured - Matter should work!");
+        break;
+      }
+      if (i == 19) {
+        Serial.println();
+        Serial.println("IPv6 address: NOT AVAILABLE (::)");
+        Serial.println("WARNING: Your router may not support IPv6");
+        Serial.println("Matter requires IPv6 - commissioning may fail");
+      }
+    }
     
     // Start mDNS service
     if (MDNS.begin("flg_lantern")) {
       Serial.println("mDNS responder started");
-      Serial.println("Access at: http://flg_lantern.local");
-      MDNS.addService("http", "tcp", 80);
+      Serial.println("Web UI: http://flg_lantern.local");
     } else {
       Serial.println("Error setting up mDNS responder!");
     }
@@ -142,7 +170,10 @@ void setup() {
   setupWebServer();
   
   // Initialize Matter
+  Matter.onEvent(onMatterEvent);
   matterLight.begin();
+  Matter.begin();
+
   matterLight.setOnOff(lightPower);
   matterLight.onChange(onMatterLightChange);
   
@@ -217,8 +248,10 @@ void loop() {
       transitionStart = currentMillis + 500;  // 500ms pause between transitions
       isTransitioning = true;
       
+      /*
       Serial.print("Transition complete. Next direction: ");
       Serial.println(transitioningToB ? "to COLOR_B" : "to COLOR_A");
+      */
     }
     
     // Calculate precise intermediate HSV values with sub-pixel precision
