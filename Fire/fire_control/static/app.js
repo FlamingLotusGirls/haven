@@ -8,8 +8,50 @@ class FlameController {
 
     init() {
         this.bindEvents();
+        this.initTabs();
         this.loadSystemStatus();
         this.loadPatterns();
+    }
+
+    initTabs() {
+        // Tab switching
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const tabId = e.target.getAttribute('data-tab');
+                this.switchTab(tabId);
+                
+                // Load data when switching to specific tabs
+                if (tabId === 'patterns') {
+                    this.loadPatterns();
+                } else if (tabId === 'triggers') {
+                    this.loadTriggerIntegration();
+                }
+            });
+        });
+    }
+
+    switchTab(tabId) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        
+        // Remove active class from all buttons
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.classList.remove('active');
+        });
+        
+        // Show selected tab
+        const selectedTab = document.getElementById(`tab-${tabId}`);
+        if (selectedTab) {
+            selectedTab.classList.add('active');
+        }
+        
+        // Set active button
+        const selectedButton = document.querySelector(`[data-tab="${tabId}"]`);
+        if (selectedButton) {
+            selectedButton.classList.add('active');
+        }
     }
 
     bindEvents() {
@@ -849,6 +891,370 @@ class FlameController {
                 messageEl.parentNode.removeChild(messageEl);
             }
         }, 3000);
+    }
+
+    // Trigger Integration Functions
+    async loadTriggerIntegration() {
+        await this.loadTriggerStatus();
+        await this.loadAvailableTriggers();
+        await this.loadAvailableSequencesForTriggers();
+        await this.loadTriggerMappings();
+        this.initTriggerForm();
+    }
+
+    async loadTriggerStatus() {
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/status`);
+            const status = await response.json();
+            
+            const statusBox = document.getElementById('trigger-status-box');
+            const statusClass = status.registered ? 'success' : 'error';
+            statusBox.className = statusClass;
+            statusBox.innerHTML = `
+                <strong>Integration Status:</strong><br>
+                Connected to Trigger Server: <strong>${status.registered ? 'Yes ✓' : 'No ✗'}</strong><br>
+                Trigger Server: ${status.trigger_server_url}<br>
+                Listen Port: ${status.listen_port}<br>
+                Active Mappings: ${status.mapping_count}<br>
+                Available Triggers: ${status.available_triggers_count}
+            `;
+        } catch (error) {
+            const statusBox = document.getElementById('trigger-status-box');
+            statusBox.className = 'error';
+            statusBox.innerHTML = `<strong>Error:</strong> Cannot connect to trigger integration service`;
+        }
+    }
+
+    async loadAvailableTriggers() {
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/triggers`);
+            const data = await response.json();
+            this.availableTriggersData = data.triggers || [];
+            
+            console.log('Loaded triggers:', this.availableTriggersData);
+            
+            const select = document.getElementById('trigger-name');
+            select.innerHTML = '<option value="">Select a trigger...</option>';
+            
+            this.availableTriggersData.forEach(trigger => {
+                // Extract values from range.values for discrete triggers
+                const values = trigger.range && trigger.range.values ? trigger.range.values : [];
+                console.log(`Trigger: ${trigger.name}, Type: ${trigger.type}, Range:`, trigger.range, 'Values:', values);
+                const option = document.createElement('option');
+                option.value = trigger.name;
+                option.textContent = `${trigger.name} (${trigger.type})`;
+                // Store trigger data for later use
+                option.dataset.triggerType = trigger.type;
+                option.dataset.triggerValues = JSON.stringify(values);
+                select.appendChild(option);
+            });
+            
+            // Add change listener to update value field based on trigger type
+            select.addEventListener('change', () => this.updateTriggerValueField());
+        } catch (error) {
+            console.error('Error loading triggers:', error);
+        }
+    }
+
+    async loadAvailableSequencesForTriggers() {
+        try {
+            const response = await fetch(`${this.baseUrl}/flame/patterns`);
+            const patterns = await response.json();
+            
+            const select = document.getElementById('flame-sequence');
+            select.innerHTML = '<option value="">Select a flame sequence...</option>';
+            
+            patterns.forEach(pattern => {
+                const option = document.createElement('option');
+                option.value = pattern.name;
+                option.textContent = pattern.name;
+                select.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Error loading sequences:', error);
+        }
+    }
+
+    async loadTriggerMappings() {
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/mappings`);
+            const data = await response.json();
+            const mappings = data.mappings || [];
+            
+            this.displayTriggerMappings(mappings);
+        } catch (error) {
+            console.error('Error loading mappings:', error);
+            document.getElementById('trigger-mappings-table').innerHTML = 
+                '<div class="empty-state">Error loading mappings</div>';
+        }
+    }
+
+    displayTriggerMappings(mappings) {
+        const container = document.getElementById('trigger-mappings-table');
+        
+        if (mappings.length === 0) {
+            container.innerHTML = '<div class="empty-state">No mappings configured yet. Create one above!</div>';
+            return;
+        }
+        
+        let html = '<table>';
+        html += '<thead><tr>';
+        html += '<th>Trigger Name</th>';
+        html += '<th>Trigger Value</th>';
+        html += '<th>Flame Sequence</th>';
+        html += '<th>Allow Override</th>';
+        html += '<th>Actions</th>';
+        html += '</tr></thead><tbody>';
+        
+        mappings.forEach(mapping => {
+            html += '<tr>';
+            html += `<td>${this.escapeHtml(mapping.trigger_name)}</td>`;
+            html += `<td>${mapping.trigger_value || '<em>any</em>'}</td>`;
+            html += `<td>${this.escapeHtml(mapping.flame_sequence)}</td>`;
+            html += `<td>${mapping.allow_override ? 'Yes' : 'No'}</td>`;
+            html += `<td>`;
+            html += `<button class="btn btn-primary btn-sm" onclick="flameController.editTriggerMapping(${mapping.id})">Edit</button>`;
+            html += `<button class="btn btn-danger btn-sm" onclick="flameController.deleteTriggerMapping(${mapping.id})">Delete</button>`;
+            html += `</td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    initTriggerForm() {
+        const form = document.getElementById('triggerMappingForm');
+        if (form && !form.dataset.initialized) {
+            form.dataset.initialized = 'true';
+            form.addEventListener('submit', (e) => this.saveTriggerMapping(e));
+            
+            const cancelBtn = document.getElementById('cancel-trigger-btn');
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', () => this.resetTriggerForm());
+            }
+            
+            // Add reveal button handler
+            const addBtn = document.getElementById('add-trigger-mapping-btn');
+            if (addBtn && !addBtn.dataset.initialized) {
+                addBtn.dataset.initialized = 'true';
+                addBtn.addEventListener('click', () => {
+                    document.getElementById('trigger-mapping-form-container').style.display = 'block';
+                    document.getElementById('cancel-trigger-btn').style.display = 'inline-block';
+                    addBtn.style.display = 'none';
+                });
+            }
+        }
+    }
+
+    async saveTriggerMapping(event) {
+        event.preventDefault();
+        
+        const mappingId = document.getElementById('trigger-mapping-id').value;
+        const triggerName = document.getElementById('trigger-name').value;
+        const triggerValue = document.getElementById('trigger-value').value;
+        const flameSequence = document.getElementById('flame-sequence').value;
+        const allowOverride = document.getElementById('allow-override').checked;
+        
+        console.log('Saving mapping:', { mappingId, triggerName, triggerValue, flameSequence, allowOverride });
+        
+        const formData = new FormData();
+        formData.append('trigger_name', triggerName);
+        formData.append('trigger_value', triggerValue);
+        formData.append('flame_sequence', flameSequence);
+        formData.append('allow_override', allowOverride ? 'true' : 'false');
+        
+        try {
+            let url, method;
+            if (mappingId) {
+                url = `${this.baseUrl}/trigger-integration/mappings/${mappingId}`;
+                method = 'PUT';
+            } else {
+                url = `${this.baseUrl}/trigger-integration/mappings`;
+                method = 'POST';
+            }
+            
+            console.log('Request:', method, url);
+            
+            const response = await fetch(url, {
+                method: method,
+                body: formData
+            });
+            
+            console.log('Response status:', response.status);
+            
+            if (response.ok) {
+                const responseText = await response.text();
+                console.log('Response:', responseText);
+                this.showMessage(mappingId ? 'Mapping updated!' : 'Mapping created!', 'success');
+                this.resetTriggerForm();
+                this.loadTriggerMappings();
+                this.loadTriggerStatus();
+            } else {
+                const errorText = await response.text();
+                console.error('Error response:', errorText);
+                this.showMessage(`Error: ${errorText}`, 'error');
+            }
+        } catch (error) {
+            console.error('Exception:', error);
+            this.showMessage(`Error: ${error.message}`, 'error');
+        }
+    }
+
+    async editTriggerMapping(id) {
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/mappings/${id}`);
+            const mapping = await response.json();
+            
+            // Show the form and hide the button
+            document.getElementById('trigger-mapping-form-container').style.display = 'block';
+            document.getElementById('add-trigger-mapping-btn').style.display = 'none';
+            
+            document.getElementById('trigger-form-title').textContent = 'Edit Mapping';
+            document.getElementById('trigger-mapping-id').value = mapping.id;
+            document.getElementById('trigger-name').value = mapping.trigger_name;
+            document.getElementById('trigger-value').value = mapping.trigger_value || '';
+            document.getElementById('flame-sequence').value = mapping.flame_sequence;
+            document.getElementById('allow-override').checked = mapping.allow_override;
+            document.getElementById('cancel-trigger-btn').style.display = 'inline-block';
+            document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Update Mapping';
+            
+            // Scroll to form
+            document.getElementById('trigger-form-title').scrollIntoView({ behavior: 'smooth' });
+        } catch (error) {
+            this.showMessage(`Error loading mapping: ${error.message}`, 'error');
+        }
+    }
+
+    async deleteTriggerMapping(id) {
+        if (!confirm('Are you sure you want to delete this mapping?')) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/mappings/${id}`, {
+                method: 'DELETE'
+            });
+            
+            if (response.ok) {
+                this.showMessage('Mapping deleted', 'success');
+                this.loadTriggerMappings();
+                this.loadTriggerStatus();
+            } else {
+                this.showMessage('Error deleting mapping', 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error: ${error.message}`, 'error');
+        }
+    }
+
+    updateTriggerValueField() {
+        const triggerSelect = document.getElementById('trigger-name');
+        const selectedOption = triggerSelect.options[triggerSelect.selectedIndex];
+        
+        if (!selectedOption || !selectedOption.value) {
+            return;
+        }
+        
+        const triggerType = selectedOption.dataset.triggerType;
+        const triggerValues = JSON.parse(selectedOption.dataset.triggerValues || '[]');
+        
+        // Get the full trigger data to access range info
+        const triggerName = selectedOption.value;
+        const trigger = this.availableTriggersData.find(t => t.name === triggerName);
+        
+        const valueContainer = document.getElementById('trigger-value').parentElement;
+        const currentValue = document.getElementById('trigger-value').value;
+        const label = valueContainer.querySelector('label');
+        
+        // Replace the input with appropriate field based on trigger type
+        if (triggerType === 'On/Off' || (triggerValues && triggerValues.length > 0)) {
+            // Create dropdown for discrete triggers
+            let selectHtml = '<select id="trigger-value" class="form-control">';
+            selectHtml += '<option value="">Any value</option>';
+            
+            if (triggerType === 'On/Off') {
+                selectHtml += '<option value="On">On</option>';
+                selectHtml += '<option value="Off">Off</option>';
+            } else {
+                triggerValues.forEach(val => {
+                    selectHtml += `<option value="${this.escapeHtml(val)}">${this.escapeHtml(val)}</option>`;
+                });
+            }
+            
+            selectHtml += '</select>';
+            
+            valueContainer.innerHTML = '';
+            valueContainer.appendChild(label);
+            valueContainer.insertAdjacentHTML('beforeend', selectHtml);
+            valueContainer.insertAdjacentHTML('beforeend', 
+                '<div class="help-text">Leave empty to trigger on any value</div>');
+            
+            // Set the current value if it exists
+            if (currentValue) {
+                document.getElementById('trigger-value').value = currentValue;
+            }
+        } else {
+            // Text input for continuous triggers
+            // Show min/max range in help text if available
+            let helpText = 'Leave empty to trigger on any value';
+            if (trigger && trigger.range) {
+                const min = trigger.range.min;
+                const max = trigger.range.max;
+                if (min !== undefined && max !== undefined) {
+                    helpText = `Valid range: ${min} to ${max}. Leave empty for any value.`;
+                }
+            }
+            
+            if (document.getElementById('trigger-value').tagName !== 'INPUT') {
+                valueContainer.innerHTML = '';
+                valueContainer.appendChild(label);
+                valueContainer.insertAdjacentHTML('beforeend', 
+                    '<input type="text" id="trigger-value" placeholder="e.g., 0.5">');
+                valueContainer.insertAdjacentHTML('beforeend', 
+                    `<div class="help-text">${helpText}</div>`);
+                
+                // Set the current value if it exists
+                if (currentValue) {
+                    document.getElementById('trigger-value').value = currentValue;
+                }
+            } else {
+                // Update help text even if input already exists
+                const existingHelpText = valueContainer.querySelector('.help-text');
+                if (existingHelpText) {
+                    existingHelpText.textContent = helpText;
+                }
+            }
+        }
+    }
+
+    resetTriggerForm() {
+        document.getElementById('triggerMappingForm').reset();
+        document.getElementById('trigger-form-title').textContent = 'Add New Mapping';
+        document.getElementById('trigger-mapping-id').value = '';
+        document.getElementById('cancel-trigger-btn').style.display = 'none';
+        document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Add Mapping';
+        
+        // Reset trigger value field to text input
+        const valueContainer = document.getElementById('trigger-value').parentElement;
+        const label = valueContainer.querySelector('label');
+        const helpText = valueContainer.querySelector('.help-text');
+        
+        valueContainer.innerHTML = '';
+        valueContainer.appendChild(label);
+        valueContainer.insertAdjacentHTML('beforeend', 
+            '<input type="text" id="trigger-value" placeholder="e.g., On, Off, 5">');
+        if (helpText) valueContainer.appendChild(helpText);
+        
+        // Hide form and show button again
+        document.getElementById('trigger-mapping-form-container').style.display = 'none';
+        document.getElementById('add-trigger-mapping-btn').style.display = 'block';
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 

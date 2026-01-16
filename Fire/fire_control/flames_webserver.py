@@ -10,6 +10,7 @@ import urllib
 import flames_controller
 import poofermapping
 import pattern_manager
+import trigger_integration
 from flask_utils import CORSResponse
 from flask_utils import JSONResponse
 
@@ -229,11 +230,97 @@ def patternName_valid(patternName):
 def param_valid(value, validValues):
     return value != None and (value.lower() in validValues)
 
+# Trigger Integration Endpoints
+
+@app.route("/trigger-integration/status", methods=['GET'])
+def trigger_integration_status():
+    '''GET /trigger-integration/status: Get trigger integration status'''
+    integration = trigger_integration.get_integration()
+    if integration:
+        return JSONResponse(json.dumps(integration.get_status()))
+    else:
+        return CORSResponse("Trigger integration not initialized", 503)
+
+@app.route("/trigger-integration/triggers", methods=['GET'])
+def trigger_integration_triggers():
+    '''GET /trigger-integration/triggers: Get available triggers from trigger server'''
+    integration = trigger_integration.get_integration()
+    if integration:
+        triggers = integration.get_available_triggers()
+        return JSONResponse(json.dumps({'triggers': triggers}))
+    else:
+        return CORSResponse("Trigger integration not initialized", 503)
+
+@app.route("/trigger-integration/mappings", methods=['GET', 'POST'])
+def trigger_integration_mappings():
+    '''GET /trigger-integration/mappings: Get all trigger-to-flame mappings
+       POST /trigger-integration/mappings: Create new mapping
+    '''
+    integration = trigger_integration.get_integration()
+    if not integration:
+        return CORSResponse("Trigger integration not initialized", 503)
+    
+    if request.method == 'GET':
+        mappings = integration.get_mappings()
+        return JSONResponse(json.dumps({'mappings': mappings}))
+    else:  # POST
+        if not "trigger_name" in request.values:
+            return CORSResponse("'trigger_name' must be present", 400)
+        if not "flame_sequence" in request.values:
+            return CORSResponse("'flame_sequence' must be present", 400)
+        
+        trigger_name = request.values["trigger_name"]
+        trigger_value = request.values.get("trigger_value", None)
+        flame_sequence = request.values["flame_sequence"]
+        allow_override = request.values.get("allow_override", "false").lower() == "true"
+        
+        mapping = integration.add_mapping(trigger_name, trigger_value, flame_sequence, allow_override)
+        return JSONResponse(json.dumps({'message': 'Mapping created', 'mapping': mapping}))
+
+@app.route("/trigger-integration/mappings/<int:mapping_id>", methods=['GET', 'PUT', 'DELETE'])
+def trigger_integration_mapping(mapping_id):
+    '''GET /trigger-integration/mappings/<id>: Get specific mapping
+       PUT /trigger-integration/mappings/<id>: Update mapping
+       DELETE /trigger-integration/mappings/<id>: Delete mapping
+    '''
+    integration = trigger_integration.get_integration()
+    if not integration:
+        return CORSResponse("Trigger integration not initialized", 503)
+    
+    if request.method == 'DELETE':
+        if integration.delete_mapping(mapping_id):
+            return CORSResponse("Mapping deleted", 200)
+        else:
+            return CORSResponse("Mapping not found", 404)
+    
+    elif request.method == 'PUT':
+        trigger_name = request.values.get("trigger_name")
+        trigger_value = request.values.get("trigger_value")
+        flame_sequence = request.values.get("flame_sequence")
+        allow_override = None
+        if "allow_override" in request.values:
+            allow_override = request.values["allow_override"].lower() == "true"
+        
+        if integration.update_mapping(mapping_id, trigger_name, trigger_value, 
+                                      flame_sequence, allow_override):
+            return CORSResponse("Mapping updated", 200)
+        else:
+            return CORSResponse("Mapping not found", 404)
+    
+    else:  # GET
+        mappings = integration.get_mappings()
+        for mapping in mappings:
+            if mapping['id'] == mapping_id:
+                return JSONResponse(json.dumps(mapping))
+        return CORSResponse("Mapping not found", 404)
+
 def shutdown():
+    logger.info("Flames webserver shutdown")
     flames_drv.shutdown()
     flames_controller.shutdown()
     event_manager.shutdown()
     pattern_manager.shutdown()
+    trigger_integration.shutdown()
 
 production = True
 
@@ -253,11 +340,16 @@ if __name__ == "__main__":
     commandQueue = queue.Queue()
     flames_drv.init(commandQueue, ".") # XXX FIXME. Homedir may not be "." Take from args?:
     flames_controller.init(commandQueue)
+    
+    # Initialize trigger integration
+    trigger_integration.init(trigger_server_url="http://localhost:5002", listen_port=6000)
+    logger.info(f"Production is {production}")
 
     if production:
         try:
             serve_forever()
-        except Exception:
+        except Exception as e:
+            logger.error(f"Webserver gets exception {e}")
             shutdown()
     else:
         flaskThread = Thread(target=serve_forever) #, args=[5000, "localhost", 9000])

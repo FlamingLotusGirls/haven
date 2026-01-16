@@ -17,6 +17,15 @@
             </div>
         </header>
 
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+            <button class="tab-button active" data-tab="control">Control</button>
+            <button class="tab-button" data-tab="patterns">Pattern Manager</button>
+            <button class="tab-button" data-tab="triggers">Trigger Mappings</button>
+        </div>
+
+        <!-- Tab: Control -->
+        <div id="tab-control" class="tab-content active">
         <div class="dashboard-grid">
             <!-- Default Sequences Section -->
             <section class="card">
@@ -428,7 +437,12 @@
                 <button id="refreshStatus" class="btn btn-secondary">Refresh Status</button>
             </section>
 
-            <!-- Patterns Control Section -->
+        </div>
+        </div>
+        <!-- End Tab: Control -->
+
+        <!-- Tab: Patterns -->
+        <div id="tab-patterns" class="tab-content">
             <section class="card">
                 <h2>Pattern Management</h2>
                 <div class="pattern-controls">
@@ -439,8 +453,64 @@
                     <div class="loading">Loading patterns...</div>
                 </div>
             </section>
-
         </div>
+        <!-- End Tab: Patterns -->
+
+        <!-- Tab: Trigger Mappings -->
+        <div id="tab-triggers" class="tab-content">
+            <section class="card">
+                <h2>⚡ Trigger to Flame Mappings</h2>
+                
+                <div id="trigger-status-box"></div>
+                
+                <button id="add-trigger-mapping-btn" class="btn btn-primary" style="margin-bottom: 20px;">Add New Mapping</button>
+                
+                <div id="trigger-mapping-form-container" style="display: none;">
+                    <h3 id="trigger-form-title">Add New Mapping</h3>
+                    <form id="triggerMappingForm">
+                    <input type="hidden" id="trigger-mapping-id" value="">
+                    
+                    <div class="form-group">
+                        <label for="trigger-name">Trigger Name *</label>
+                        <select id="trigger-name" required>
+                            <option value="">Select a trigger...</option>
+                        </select>
+                        <div class="help-text">Select from available triggers on the Trigger Server</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="trigger-value">Trigger Value (optional)</label>
+                        <input type="text" id="trigger-value" placeholder="e.g., On, Off, 5">
+                        <div class="help-text">Leave empty to trigger on any value</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="flame-sequence">Flame Sequence *</label>
+                        <select id="flame-sequence" required>
+                            <option value="">Select a flame sequence...</option>
+                        </select>
+                        <div class="help-text">The flame pattern to trigger</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="allow-override">
+                            Allow Override
+                        </label>
+                        <div class="help-text">If checked, will restart the sequence if already running</div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Add Mapping</button>
+                    <button type="button" id="cancel-trigger-btn" class="btn btn-secondary">Cancel</button>
+                </form>
+                </div>
+                
+                <h3>Current Mappings</h3>
+                <div id="trigger-mappings-table"></div>
+            </section>
+        </div>
+        <!-- End Tab: Triggers -->
+
     </div>
 
     <!-- Pattern Creation Modal -->

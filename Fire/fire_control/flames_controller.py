@@ -150,4 +150,5 @@ if __name__ == "__main__":
 
     event_manager.shutdown()
     mock_event_producer.shutdown()
+    logger.info("??? shutdown ???")
     shutdown()
