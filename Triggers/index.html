@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haven Trigger Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="text"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+            font-family: monospace;
+        }
+
+        .range-help {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button.delete {
+            background: #e74c3c;
+        }
+
+        button.delete:hover {
+            background: #c0392b;
+        }
+
+        button.edit {
+            background: #3498db;
+        }
+
+        button.edit:hover {
+            background: #2980b9;
+        }
+
+        .trigger-list {
+            margin-top: 20px;
+        }
+
+        .trigger-item {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .trigger-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .trigger-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .trigger-name {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .trigger-type {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .trigger-details {
+            color: #666;
+            margin-top: 10px;
+        }
+
+        .trigger-actions {
+            margin-top: 10px;
+        }
+
+        .alert {
+            padding: 12px 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .last-modified {
+            text-align: right;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        #rangeGroup {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔥 Haven Trigger Server</h1>
+
+        <div id="alertContainer"></div>
+
+        <!-- Add/Edit Trigger Form -->
+        <div class="card">
+            <h2 id="formTitle">Add New Trigger</h2>
+            <form id="triggerForm">
+                <input type="hidden" id="editingTrigger" value="">
+                
+                <div class="form-group">
+                    <label for="triggerName">Trigger Name *</label>
+                    <input type="text" id="triggerName" required placeholder="e.g., RedTelephone.Button_1">
+                </div>
+
+                <div class="form-group">
+                    <label for="triggerType">Trigger Type *</label>
+                    <select id="triggerType" required>
+                        <option value="">Select a type</option>
+                        <option value="On/Off">On/Off</option>
+                        <option value="OneShot">OneShot</option>
+                        <option value="Discrete">Discrete</option>
+                        <option value="Continuous">Continuous</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="rangeGroup">
+                    <label for="triggerRange">Range</label>
+                    <textarea id="triggerRange" placeholder='Enter range as JSON, e.g., {"min": 0, "max": 100} or {"values": [1, 2, 3, 4, 5]}'></textarea>
+                    <div class="range-help">
+                        For Discrete: use {"values": [1, 2, 3]} or {"min": 0, "max": 10}<br>
+                        For Continuous: use {"min": 0.0, "max": 1.0}
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn">Add Trigger</button>
+                <button type="button" id="cancelBtn" style="display:none; background: #95a5a6;">Cancel</button>
+            </form>
+        </div>
+
+        <!-- Trigger List -->
+        <div class="card">
+            <h2>Current Triggers</h2>
+            <div id="triggerList" class="trigger-list">
+                <div class="empty-state">Loading triggers...</div>
+            </div>
+            <div id="lastModified" class="last-modified"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let currentTriggers = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadTriggers();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            document.getElementById('triggerForm').addEventListener('submit', handleSubmit);
+            document.getElementById('triggerType').addEventListener('change', handleTypeChange);
+            document.getElementById('cancelBtn').addEventListener('click', resetForm);
+        }
+
+        function handleTypeChange(e) {
+            const rangeGroup = document.getElementById('rangeGroup');
+            const type = e.target.value;
+            
+            if (type === 'Discrete' || type === 'Continuous') {
+                rangeGroup.style.display = 'block';
+                document.getElementById('triggerRange').required = true;
+            } else {
+                rangeGroup.style.display = 'none';
+                document.getElementById('triggerRange').required = false;
+                document.getElementById('triggerRange').value = '';
+            }
+        }
+
+        async function loadTriggers() {
+            try {
+                const response = await fetch(`${API_BASE}/triggers`);
+                const data = await response.json();
+                currentTriggers = data.triggers || [];
+                
+                displayTriggers(currentTriggers);
+                
+                if (data.last_modified) {
+                    const date = new Date(data.last_modified);
+                    document.getElementById('lastModified').textContent = 
+                        `Last modified: ${date.toLocaleString()}`;
+                }
+            } catch (error) {
+                showAlert('Failed to load triggers: ' + error.message, 'error');
+            }
+        }
+
+        function displayTriggers(triggers) {
+            const listContainer = document.getElementById('triggerList');
+            
+            if (triggers.length === 0) {
+                listContainer.innerHTML = '<div class="empty-state">No triggers configured yet. Add one above!</div>';
+                return;
+            }
+
+            listContainer.innerHTML = triggers.map(trigger => {
+                let rangeDisplay = '';
+                if (trigger.range) {
+                    rangeDisplay = `<div><strong>Range:</strong> ${JSON.stringify(trigger.range)}</div>`;
+                }
+
+                return `
+                    <div class="trigger-item">
+                        <div class="trigger-header">
+                            <div>
+                                <span class="trigger-name">${escapeHtml(trigger.name)}</span>
+                            </div>
+                            <span class="trigger-type">${escapeHtml(trigger.type)}</span>
+                        </div>
+                        <div class="trigger-details">
+                            ${rangeDisplay}
+                        </div>
+                        <div class="trigger-actions">
+                            <button class="edit" onclick="editTrigger('${escapeHtml(trigger.name)}')">Edit</button>
+                            <button class="delete" onclick="deleteTrigger('${escapeHtml(trigger.name)}')">Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function handleSubmit(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('triggerName').value.trim();
+            const type = document.getElementById('triggerType').value;
+            const rangeValue = document.getElementById('triggerRange').value.trim();
+            const editingName = document.getElementById('editingTrigger').value;
+
+            const trigger = {
+                name: name,
+                type: type
+            };
+
+            // Parse range if provided
+            if (rangeValue) {
+                try {
+                    trigger.range = JSON.parse(rangeValue);
+                } catch (error) {
+                    showAlert('Invalid JSON format for range', 'error');
+                    return;
+                }
+            }
+
+            try {
+                let response;
+                if (editingName) {
+                    // Update existing trigger
+                    response = await fetch(`${API_BASE}/triggers/${encodeURIComponent(editingName)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(trigger)
+                    });
+                } else {
+                    // Add new trigger
+                    response = await fetch(`${API_BASE}/triggers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(trigger)
+                    });
+                }
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert(data.message || 'Trigger saved successfully!', 'success');
+                    resetForm();
+                    loadTriggers();
+                } else {
+                    showAlert(data.error || 'Failed to save trigger', 'error');
+                }
+            } catch (error) {
+                showAlert('Error saving trigger: ' + error.message, 'error');
+            }
+        }
+
+        async function editTrigger(name) {
+            const trigger = currentTriggers.find(t => t.name === name);
+            if (!trigger) return;
+
+            document.getElementById('formTitle').textContent = 'Edit Trigger';
+            document.getElementById('triggerName').value = trigger.name;
+            document.getElementById('triggerType').value = trigger.type;
+            document.getElementById('editingTrigger').value = trigger.name;
+            document.getElementById('submitBtn').textContent = 'Update Trigger';
+            document.getElementById('cancelBtn').style.display = 'inline-block';
+
+            if (trigger.range) {
+                document.getElementById('triggerRange').value = JSON.stringify(trigger.range, null, 2);
+                document.getElementById('rangeGroup').style.display = 'block';
+            }
+
+            // Scroll to form
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function deleteTrigger(name) {
+            if (!confirm(`Are you sure you want to delete the trigger "${name}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/triggers/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('Trigger deleted successfully', 'success');
+                    loadTriggers();
+                } else {
+                    showAlert(data.error || 'Failed to delete trigger', 'error');
+                }
+            } catch (error) {
+                showAlert('Error deleting trigger: ' + error.message, 'error');
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('triggerForm').reset();
+            document.getElementById('formTitle').textContent = 'Add New Trigger';
+            document.getElementById('editingTrigger').value = '';
+            document.getElementById('submitBtn').textContent = 'Add Trigger';
+            document.getElementById('cancelBtn').style.display = 'none';
+            document.getElementById('rangeGroup').style.display = 'none';
+        }
+
+        function showAlert(message, type) {
+            const alertContainer = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertContainer.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>
