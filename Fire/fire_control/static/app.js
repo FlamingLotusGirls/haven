@@ -961,6 +961,9 @@ class FlameController {
             const response = await fetch(`${this.baseUrl}/flame/patterns`);
             const patterns = await response.json();
             
+            // Store patterns for later lookup of display names
+            this.availablePatternsData = patterns;
+            
             const select = document.getElementById('flame-sequence');
             select.innerHTML = '<option value="">Select a flame sequence...</option>';
             
@@ -1031,7 +1034,17 @@ class FlameController {
             }
             
             html += `<td>${valueDisplay}</td>`;
-            html += `<td>${this.escapeHtml(mapping.flame_sequence)}</td>`;
+            
+            // Look up display name for the flame sequence
+            let sequenceDisplay = this.escapeHtml(mapping.flame_sequence);
+            if (this.availablePatternsData) {
+                const pattern = this.availablePatternsData.find(p => p.name === mapping.flame_sequence);
+                if (pattern && pattern.display_name) {
+                    sequenceDisplay = this.escapeHtml(pattern.display_name);
+                }
+            }
+            
+            html += `<td>${sequenceDisplay}</td>`;
             html += `<td>${mapping.allow_override ? 'Yes' : 'No'}</td>`;
             html += `<td>`;
             html += `<button class="btn btn-primary btn-sm" onclick="flameController.editTriggerMapping(${mapping.id})">Edit</button>`;
