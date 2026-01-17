@@ -382,8 +382,22 @@ class FlameController {
         document.getElementById('systemStatus').innerHTML = statusHtml;
         
         const globalStatus = document.getElementById('globalStatus');
-        globalStatus.textContent = data.globalState ? 'Playing' : 'Paused';
+        globalStatus.textContent = `Status: ${data.globalState ? 'Playing' : 'Paused'}`;
         globalStatus.className = `status-indicator ${data.globalState ? 'enabled' : 'disabled'}`;
+        
+        // Update button visibility based on state
+        const playBtn = document.getElementById('globalPlay');
+        const pauseBtn = document.getElementById('globalPause');
+        
+        if (data.globalState) {
+            // System is playing, show pause button
+            playBtn.style.display = 'none';
+            pauseBtn.style.display = 'inline-block';
+        } else {
+            // System is paused, show play button
+            playBtn.style.display = 'inline-block';
+            pauseBtn.style.display = 'none';
+        }
     }
 
     updatePooferStatuses(poofers) {
