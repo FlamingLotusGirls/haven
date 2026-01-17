@@ -1,0 +1,13 @@
+[Unit]
+Description=FLG Haven Trigger Server
+After=network.target
+
+[Service]
+Environment="PYTHONPATH=/home/flaming/haven/util"
+ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/server.py
+WorkingDirectory=/home/flaming/haven/Triggers
+Restart=always
+User=flaming
+
+[Install]
+WantedBy=multi-user.target
