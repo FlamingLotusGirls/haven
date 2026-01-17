@@ -967,7 +967,8 @@ class FlameController {
             patterns.forEach(pattern => {
                 const option = document.createElement('option');
                 option.value = pattern.name;
-                option.textContent = pattern.name;
+                // Use display_name if available, otherwise use name
+                option.textContent = pattern.display_name || pattern.name;
                 select.appendChild(option);
             });
         } catch (error) {
@@ -1009,7 +1010,27 @@ class FlameController {
         mappings.forEach(mapping => {
             html += '<tr>';
             html += `<td>${this.escapeHtml(mapping.trigger_name)}</td>`;
-            html += `<td>${mapping.trigger_value || '<em>any</em>'}</td>`;
+            
+            // Format trigger value display based on whether it's a range or single value
+            let valueDisplay;
+            if (mapping.trigger_value_min !== undefined && mapping.trigger_value_max !== undefined) {
+                // Both min and max specified
+                valueDisplay = `${mapping.trigger_value_min} - ${mapping.trigger_value_max}`;
+            } else if (mapping.trigger_value_min !== undefined) {
+                // Only min specified
+                valueDisplay = `≥ ${mapping.trigger_value_min}`;
+            } else if (mapping.trigger_value_max !== undefined) {
+                // Only max specified
+                valueDisplay = `≤ ${mapping.trigger_value_max}`;
+            } else if (mapping.trigger_value) {
+                // Single discrete value
+                valueDisplay = this.escapeHtml(mapping.trigger_value);
+            } else {
+                // No value specified - any value
+                valueDisplay = '<em>any</em>';
+            }
+            
+            html += `<td>${valueDisplay}</td>`;
             html += `<td>${this.escapeHtml(mapping.flame_sequence)}</td>`;
             html += `<td>${mapping.allow_override ? 'Yes' : 'No'}</td>`;
             html += `<td>`;
@@ -1052,17 +1073,45 @@ class FlameController {
         
         const mappingId = document.getElementById('trigger-mapping-id').value;
         const triggerName = document.getElementById('trigger-name').value;
-        const triggerValue = document.getElementById('trigger-value').value;
         const flameSequence = document.getElementById('flame-sequence').value;
         const allowOverride = document.getElementById('allow-override').checked;
         
-        console.log('Saving mapping:', { mappingId, triggerName, triggerValue, flameSequence, allowOverride });
+        // Determine trigger type
+        const triggerSelect = document.getElementById('trigger-name');
+        const selectedOption = triggerSelect.options[triggerSelect.selectedIndex];
+        const triggerType = selectedOption?.dataset.triggerType;
         
         const formData = new FormData();
         formData.append('trigger_name', triggerName);
-        formData.append('trigger_value', triggerValue);
         formData.append('flame_sequence', flameSequence);
         formData.append('allow_override', allowOverride ? 'true' : 'false');
+        
+        // Handle continuous triggers with min/max range
+        if (triggerType === 'Continuous') {
+            const minField = document.getElementById('trigger-value-min');
+            const maxField = document.getElementById('trigger-value-max');
+            
+            if (minField && minField.value !== '') {
+                formData.append('trigger_value_min', minField.value);
+            }
+            if (maxField && maxField.value !== '') {
+                formData.append('trigger_value_max', maxField.value);
+            }
+            
+            console.log('Saving continuous trigger mapping:', { 
+                mappingId, triggerName, 
+                min: minField?.value, max: maxField?.value,
+                flameSequence, allowOverride 
+            });
+        } else {
+            // Handle discrete triggers with single value
+            const triggerValue = document.getElementById('trigger-value')?.value || '';
+            formData.append('trigger_value', triggerValue);
+            
+            console.log('Saving discrete trigger mapping:', { 
+                mappingId, triggerName, triggerValue, flameSequence, allowOverride 
+            });
+        }
         
         try {
             let url, method;
@@ -1113,7 +1162,27 @@ class FlameController {
             document.getElementById('trigger-form-title').textContent = 'Edit Mapping';
             document.getElementById('trigger-mapping-id').value = mapping.id;
             document.getElementById('trigger-name').value = mapping.trigger_name;
-            document.getElementById('trigger-value').value = mapping.trigger_value || '';
+            
+            // Trigger the field update to show proper fields for this trigger type
+            this.updateTriggerValueField();
+            
+            // Populate values based on trigger type
+            const triggerSelect = document.getElementById('trigger-name');
+            const selectedOption = triggerSelect.options[triggerSelect.selectedIndex];
+            const triggerType = selectedOption?.dataset.triggerType;
+            
+            if (triggerType === 'Continuous') {
+                // Set min/max values for continuous triggers
+                const minField = document.getElementById('trigger-value-min');
+                const maxField = document.getElementById('trigger-value-max');
+                if (minField) minField.value = mapping.trigger_value_min || '';
+                if (maxField) maxField.value = mapping.trigger_value_max || '';
+            } else {
+                // Set single value for discrete triggers
+                const valueField = document.getElementById('trigger-value');
+                if (valueField) valueField.value = mapping.trigger_value || '';
+            }
+            
             document.getElementById('flame-sequence').value = mapping.flame_sequence;
             document.getElementById('allow-override').checked = mapping.allow_override;
             document.getElementById('cancel-trigger-btn').style.display = 'inline-block';
@@ -1164,12 +1233,50 @@ class FlameController {
         const trigger = this.availableTriggersData.find(t => t.name === triggerName);
         
         const valueContainer = document.getElementById('trigger-value').parentElement;
-        const currentValue = document.getElementById('trigger-value').value;
         const label = valueContainer.querySelector('label');
         
         // Replace the input with appropriate field based on trigger type
-        if (triggerType === 'On/Off' || (triggerValues && triggerValues.length > 0)) {
+        if (triggerType === 'Continuous') {
+            // For continuous triggers, show min/max range fields
+            const currentMin = document.getElementById('trigger-value-min')?.value || '';
+            const currentMax = document.getElementById('trigger-value-max')?.value || '';
+            
+            let helpText = 'Specify min and/or max to define a range. Leave both empty to trigger on any value.';
+            if (trigger && trigger.range) {
+                const min = trigger.range.min;
+                const max = trigger.range.max;
+                if (min !== undefined && max !== undefined) {
+                    helpText = `Valid range: ${min} to ${max}. Specify min and/or max for your trigger range.`;
+                }
+            }
+            
+            valueContainer.innerHTML = '';
+            label.textContent = 'Trigger Value Range';
+            valueContainer.appendChild(label);
+            valueContainer.insertAdjacentHTML('beforeend', `
+                <div class="range-inputs">
+                    <div class="range-field">
+                        <label for="trigger-value-min">Minimum (optional):</label>
+                        <input type="number" id="trigger-value-min" step="any" placeholder="Min value" value="${currentMin}">
+                    </div>
+                    <div class="range-field">
+                        <label for="trigger-value-max">Maximum (optional):</label>
+                        <input type="number" id="trigger-value-max" step="any" placeholder="Max value" value="${currentMax}">
+                    </div>
+                </div>
+                <div class="help-text">${helpText}</div>
+            `);
+            
+            // Hide the old trigger-value field if it exists
+            const oldField = document.getElementById('trigger-value');
+            if (oldField) {
+                oldField.style.display = 'none';
+            }
+            
+        } else if (triggerType === 'On/Off' || (triggerValues && triggerValues.length > 0)) {
             // Create dropdown for discrete triggers
+            const currentValue = document.getElementById('trigger-value')?.value || '';
+            
             let selectHtml = '<select id="trigger-value" class="form-control">';
             selectHtml += '<option value="">Any value</option>';
             
@@ -1185,6 +1292,7 @@ class FlameController {
             selectHtml += '</select>';
             
             valueContainer.innerHTML = '';
+            label.textContent = 'Trigger Value (optional)';
             valueContainer.appendChild(label);
             valueContainer.insertAdjacentHTML('beforeend', selectHtml);
             valueContainer.insertAdjacentHTML('beforeend', 
@@ -1195,8 +1303,9 @@ class FlameController {
                 document.getElementById('trigger-value').value = currentValue;
             }
         } else {
-            // Text input for continuous triggers
-            // Show min/max range in help text if available
+            // Text input for other discrete triggers
+            const currentValue = document.getElementById('trigger-value')?.value || '';
+            
             let helpText = 'Leave empty to trigger on any value';
             if (trigger && trigger.range) {
                 const min = trigger.range.min;
@@ -1206,25 +1315,13 @@ class FlameController {
                 }
             }
             
-            if (document.getElementById('trigger-value').tagName !== 'INPUT') {
-                valueContainer.innerHTML = '';
-                valueContainer.appendChild(label);
-                valueContainer.insertAdjacentHTML('beforeend', 
-                    '<input type="text" id="trigger-value" placeholder="e.g., 0.5">');
-                valueContainer.insertAdjacentHTML('beforeend', 
-                    `<div class="help-text">${helpText}</div>`);
-                
-                // Set the current value if it exists
-                if (currentValue) {
-                    document.getElementById('trigger-value').value = currentValue;
-                }
-            } else {
-                // Update help text even if input already exists
-                const existingHelpText = valueContainer.querySelector('.help-text');
-                if (existingHelpText) {
-                    existingHelpText.textContent = helpText;
-                }
-            }
+            valueContainer.innerHTML = '';
+            label.textContent = 'Trigger Value (optional)';
+            valueContainer.appendChild(label);
+            valueContainer.insertAdjacentHTML('beforeend', 
+                '<input type="text" id="trigger-value" placeholder="e.g., 0.5" value="' + currentValue + '">');
+            valueContainer.insertAdjacentHTML('beforeend', 
+                `<div class="help-text">${helpText}</div>`);
         }
     }
 
@@ -1236,15 +1333,35 @@ class FlameController {
         document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Add Mapping';
         
         // Reset trigger value field to text input
-        const valueContainer = document.getElementById('trigger-value').parentElement;
-        const label = valueContainer.querySelector('label');
-        const helpText = valueContainer.querySelector('.help-text');
+        // Need to handle both continuous (min/max fields) and discrete (single value field) triggers
+        const valueField = document.getElementById('trigger-value');
+        const minField = document.getElementById('trigger-value-min');
+        const maxField = document.getElementById('trigger-value-max');
         
-        valueContainer.innerHTML = '';
-        valueContainer.appendChild(label);
-        valueContainer.insertAdjacentHTML('beforeend', 
-            '<input type="text" id="trigger-value" placeholder="e.g., On, Off, 5">');
-        if (helpText) valueContainer.appendChild(helpText);
+        let valueContainer;
+        if (valueField) {
+            valueContainer = valueField.parentElement;
+        } else if (minField) {
+            valueContainer = minField.closest('.form-group');
+        } else if (maxField) {
+            valueContainer = maxField.closest('.form-group');
+        }
+        
+        if (valueContainer) {
+            const label = valueContainer.querySelector('label');
+            
+            valueContainer.innerHTML = '';
+            if (label) {
+                label.textContent = 'Trigger Value (optional)';
+                valueContainer.appendChild(label);
+            } else {
+                valueContainer.insertAdjacentHTML('beforeend', '<label for="trigger-value">Trigger Value (optional)</label>');
+            }
+            valueContainer.insertAdjacentHTML('beforeend', 
+                '<input type="text" id="trigger-value" placeholder="e.g., On, Off, 5">');
+            valueContainer.insertAdjacentHTML('beforeend',
+                '<div class="help-text">Leave empty to trigger on any value</div>');
+        }
         
         // Hide form and show button again
         document.getElementById('trigger-mapping-form-container').style.display = 'none';
