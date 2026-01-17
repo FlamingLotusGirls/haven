@@ -126,6 +126,8 @@ class TriggerIntegration:
             if response.status_code == 200:
                 self.registered = True
                 logger.info(f"Registered with Trigger Server: {response.json()}")
+                # Immediately fetch available triggers after successful registration
+                self._fetch_available_triggers()
                 return True
             else:
                 logger.error(f"Registration failed: {response.status_code} - {response.text}")
@@ -235,8 +237,47 @@ class TriggerIntegration:
         with self.mappings_lock:
             for mapping in self.mappings:
                 if mapping['trigger_name'] == trigger_name:
-                    # Check if value matches (if specified in mapping)
-                    if mapping.get('trigger_value') and mapping['trigger_value'] != trigger_value:
+                    # Check value matching based on mapping type
+                    value_matches = False
+                    
+                    # Check if this is a range-based mapping (continuous trigger)
+                    if 'trigger_value_min' in mapping or 'trigger_value_max' in mapping:
+                        # Range-based matching for continuous triggers
+                        try:
+                            # Convert trigger value to float for comparison
+                            numeric_value = float(trigger_value) if trigger_value is not None else None
+                            
+                            if numeric_value is not None:
+                                # Check minimum bound (inclusive)
+                                if 'trigger_value_min' in mapping and mapping['trigger_value_min'] is not None:
+                                    if numeric_value < float(mapping['trigger_value_min']):
+                                        continue  # Value below minimum
+                                
+                                # Check maximum bound (inclusive)
+                                if 'trigger_value_max' in mapping and mapping['trigger_value_max'] is not None:
+                                    if numeric_value > float(mapping['trigger_value_max']):
+                                        continue  # Value above maximum
+                                
+                                # If we get here, value is within range
+                                value_matches = True
+                            else:
+                                # No value provided but range expected
+                                continue
+                        except (ValueError, TypeError):
+                            # Could not convert to numeric, skip this mapping
+                            logger.warning(f"Could not convert trigger value '{trigger_value}' to numeric for range checking")
+                            continue
+                    else:
+                        # Discrete value matching (exact match or any value)
+                        if mapping.get('trigger_value'):
+                            # Exact match required
+                            if mapping['trigger_value'] != trigger_value:
+                                continue
+                        # If no trigger_value specified, matches any value
+                        value_matches = True
+                    
+                    # Skip if value doesn't match
+                    if not value_matches:
                         continue
                     
                     flame_sequence = mapping['flame_sequence']
@@ -337,7 +378,8 @@ class TriggerIntegration:
         with self.mappings_lock:
             return self.mappings.copy()
     
-    def add_mapping(self, trigger_name, trigger_value, flame_sequence, allow_override=False):
+    def add_mapping(self, trigger_name, trigger_value, flame_sequence, allow_override=False, 
+                    trigger_value_min=None, trigger_value_max=None):
         """Add a new trigger-to-flame mapping."""
         mapping = None
         with self.mappings_lock:
@@ -347,10 +389,19 @@ class TriggerIntegration:
             mapping = {
                 'id': mapping_id,
                 'trigger_name': trigger_name,
-                'trigger_value': trigger_value,
                 'flame_sequence': flame_sequence,
                 'allow_override': allow_override
             }
+            
+            # Add range values for continuous triggers if provided
+            if trigger_value_min is not None:
+                mapping['trigger_value_min'] = float(trigger_value_min)
+            if trigger_value_max is not None:
+                mapping['trigger_value_max'] = float(trigger_value_max)
+            
+            # Add discrete value if provided (and no range values)
+            if trigger_value is not None and trigger_value_min is None and trigger_value_max is None:
+                mapping['trigger_value'] = trigger_value
             
             self.mappings.append(mapping)
         
@@ -359,7 +410,8 @@ class TriggerIntegration:
         return mapping
     
     def update_mapping(self, mapping_id, trigger_name=None, trigger_value=None, 
-                      flame_sequence=None, allow_override=None):
+                      flame_sequence=None, allow_override=None,
+                      trigger_value_min=None, trigger_value_max=None):
         """Update an existing mapping."""
         found = False
         with self.mappings_lock:
@@ -367,12 +419,47 @@ class TriggerIntegration:
                 if mapping['id'] == mapping_id:
                     if trigger_name is not None:
                         mapping['trigger_name'] = trigger_name
-                    if trigger_value is not None:
-                        mapping['trigger_value'] = trigger_value
                     if flame_sequence is not None:
                         mapping['flame_sequence'] = flame_sequence
                     if allow_override is not None:
                         mapping['allow_override'] = allow_override
+                    
+                    # Handle range values for continuous triggers
+                    # If min/max are provided, update to range-based (remove discrete value)
+                    if trigger_value_min is not None or trigger_value_max is not None:
+                        # Remove discrete value if switching to range
+                        if 'trigger_value' in mapping:
+                            del mapping['trigger_value']
+                        
+                        # Update min if provided
+                        if trigger_value_min is not None and trigger_value_min != '':
+                            mapping['trigger_value_min'] = float(trigger_value_min)
+                        elif trigger_value_min == '':
+                            # Empty string means remove the min
+                            if 'trigger_value_min' in mapping:
+                                del mapping['trigger_value_min']
+                        
+                        # Update max if provided
+                        if trigger_value_max is not None and trigger_value_max != '':
+                            mapping['trigger_value_max'] = float(trigger_value_max)
+                        elif trigger_value_max == '':
+                            # Empty string means remove the max
+                            if 'trigger_value_max' in mapping:
+                                del mapping['trigger_value_max']
+                    elif trigger_value is not None:
+                        # Discrete value update - remove range values
+                        if 'trigger_value_min' in mapping:
+                            del mapping['trigger_value_min']
+                        if 'trigger_value_max' in mapping:
+                            del mapping['trigger_value_max']
+                        
+                        if trigger_value != '':
+                            mapping['trigger_value'] = trigger_value
+                        else:
+                            # Empty string means remove the value
+                            if 'trigger_value' in mapping:
+                                del mapping['trigger_value']
+                    
                     found = True
                     break
         

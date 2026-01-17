@@ -270,11 +270,22 @@ def trigger_integration_mappings():
             return CORSResponse("'flame_sequence' must be present", 400)
         
         trigger_name = request.values["trigger_name"]
-        trigger_value = request.values.get("trigger_value", None)
         flame_sequence = request.values["flame_sequence"]
         allow_override = request.values.get("allow_override", "false").lower() == "true"
         
-        mapping = integration.add_mapping(trigger_name, trigger_value, flame_sequence, allow_override)
+        # Handle both discrete value and continuous range
+        trigger_value = request.values.get("trigger_value", None)
+        trigger_value_min = request.values.get("trigger_value_min", None)
+        trigger_value_max = request.values.get("trigger_value_max", None)
+        
+        mapping = integration.add_mapping(
+            trigger_name, 
+            trigger_value, 
+            flame_sequence, 
+            allow_override,
+            trigger_value_min,
+            trigger_value_max
+        )
         return JSONResponse(json.dumps({'message': 'Mapping created', 'mapping': mapping}))
 
 @app.route("/trigger-integration/mappings/<int:mapping_id>", methods=['GET', 'PUT', 'DELETE'])
@@ -301,8 +312,13 @@ def trigger_integration_mapping(mapping_id):
         if "allow_override" in request.values:
             allow_override = request.values["allow_override"].lower() == "true"
         
+        # Handle range values for continuous triggers
+        trigger_value_min = request.values.get("trigger_value_min", None)
+        trigger_value_max = request.values.get("trigger_value_max", None)
+        
         if integration.update_mapping(mapping_id, trigger_name, trigger_value, 
-                                      flame_sequence, allow_override):
+                                      flame_sequence, allow_override,
+                                      trigger_value_min, trigger_value_max):
             return CORSResponse("Mapping updated", 200)
         else:
             return CORSResponse("Mapping not found", 404)
