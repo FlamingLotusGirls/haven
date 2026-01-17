@@ -165,6 +165,38 @@
             margin-top: 10px;
         }
 
+        .device-info {
+            background: #e8eaf6;
+            padding: 8px 12px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .device-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .device-status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .device-status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .device-status.unknown {
+            background: #fff3cd;
+            color: #856404;
+        }
+
         .trigger-actions {
             margin-top: 10px;
         }
@@ -320,6 +352,20 @@
                     rangeDisplay = `<div><strong>Range:</strong> ${JSON.stringify(trigger.range)}</div>`;
                 }
 
+                // Device information and status
+                let deviceDisplay = '';
+                if (trigger.device) {
+                    const status = getDeviceStatus(trigger.last_seen);
+                    deviceDisplay = `
+                        <div class="device-info">
+                            <strong>Device:</strong> ${escapeHtml(trigger.device)} 
+                            (${escapeHtml(trigger.device_ip || 'unknown')})
+                            <span class="device-status ${status.class}">${status.text}</span>
+                            ${status.lastSeen ? `<br><strong>Last seen:</strong> ${status.lastSeen}` : ''}
+                        </div>
+                    `;
+                }
+
                 return `
                     <div class="trigger-item">
                         <div class="trigger-header">
@@ -331,6 +377,7 @@
                         <div class="trigger-details">
                             ${rangeDisplay}
                         </div>
+                        ${deviceDisplay}
                         <div class="trigger-actions">
                             <button class="edit" onclick="editTrigger('${escapeHtml(trigger.name)}')">Edit</button>
                             <button class="delete" onclick="deleteTrigger('${escapeHtml(trigger.name)}')">Delete</button>
@@ -338,6 +385,45 @@
                     </div>
                 `;
             }).join('');
+        }
+
+        function getDeviceStatus(lastSeen) {
+            if (!lastSeen) {
+                return { class: 'unknown', text: 'Never checked in', lastSeen: null };
+            }
+
+            const lastSeenDate = new Date(lastSeen);
+            const now = new Date();
+            const minutesAgo = (now - lastSeenDate) / 1000 / 60;
+
+            // Consider device online if seen within last 5 minutes
+            if (minutesAgo < 5) {
+                return { 
+                    class: 'online', 
+                    text: '✓ Online', 
+                    lastSeen: `${Math.floor(minutesAgo)} min ago`
+                };
+            } else if (minutesAgo < 60) {
+                return { 
+                    class: 'offline', 
+                    text: '✗ Offline', 
+                    lastSeen: `${Math.floor(minutesAgo)} min ago`
+                };
+            } else if (minutesAgo < 1440) { // Less than 24 hours
+                const hoursAgo = Math.floor(minutesAgo / 60);
+                return { 
+                    class: 'offline', 
+                    text: '✗ Offline', 
+                    lastSeen: `${hoursAgo} hour${hoursAgo > 1 ? 's' : ''} ago`
+                };
+            } else {
+                const daysAgo = Math.floor(minutesAgo / 1440);
+                return { 
+                    class: 'offline', 
+                    text: '✗ Offline', 
+                    lastSeen: `${daysAgo} day${daysAgo > 1 ? 's' : ''} ago`
+                };
+            }
         }
 
         async function handleSubmit(e) {

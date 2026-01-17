@@ -341,10 +341,19 @@ def shutdown():
 production = True
 
 if __name__ == "__main__":
+    import argparse
     from threading import Thread
     import event_manager
     import queue
     import flames_drv
+    
+    parser = argparse.ArgumentParser(description='Flame Control Web Server')
+    parser.add_argument('--port', type=int, default=PORT,
+                        help=f'Port to run the web server on (default: {PORT})')
+    args = parser.parse_args()
+    
+    httpPort = args.port
+    
     print("flame api!!")
 
     logging.basicConfig(format='%(asctime)-15s %(levelname)s %(module)s %(lineno)d: %(message)s', level=logging.DEBUG)
@@ -363,7 +372,7 @@ if __name__ == "__main__":
 
     if production:
         try:
-            serve_forever()
+            serve_forever(httpPort)
         except Exception as e:
             logger.error(f"Webserver gets exception {e}")
             shutdown()

@@ -53,6 +53,10 @@ int lastDiscreteValue = 0;
 // Trigger ID counter
 unsigned long triggerIdCounter = 0;
 
+// Registration tracking
+const unsigned long REGISTRATION_INTERVAL = 120000; // 2 minutes in milliseconds
+unsigned long lastRegistrationTime = 0;
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -95,6 +99,13 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi disconnected. Reconnecting...");
     connectToWiFi();
+  }
+  
+  // Periodic device registration (every 2 minutes)
+  unsigned long currentTime = millis();
+  if (currentTime - lastRegistrationTime >= REGISTRATION_INTERVAL) {
+    registerDevice();
+    lastRegistrationTime = currentTime;
   }
   
   // Check Button (D0)

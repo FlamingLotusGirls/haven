@@ -93,9 +93,39 @@ def index():
 
 @app.route('/api/triggers', methods=['GET'])
 def get_triggers():
-    """Get all triggers."""
+    """Get all triggers with device status."""
     config = load_config()
+    
+    # Add device status to each trigger
+    for trigger in config['triggers']:
+        if 'last_seen' in trigger:
+            trigger['device_status'] = calculate_device_status(trigger['last_seen'])
+        else:
+            trigger['device_status'] = 'unknown'
+    
     return jsonify(config)
+
+
+def calculate_device_status(last_seen):
+    """
+    Calculate device status based on last_seen timestamp.
+    Returns: 'online', 'offline', or 'unknown'
+    """
+    if not last_seen:
+        return 'unknown'
+    
+    try:
+        last_seen_dt = datetime.fromisoformat(last_seen)
+        now = datetime.now()
+        minutes_ago = (now - last_seen_dt).total_seconds() / 60
+        
+        # Consider device online if seen within last 5 minutes
+        if minutes_ago < 5:
+            return 'online'
+        else:
+            return 'offline'
+    except Exception:
+        return 'unknown'
 
 
 @app.route('/api/triggers', methods=['POST'])
@@ -186,6 +216,93 @@ def delete_trigger(trigger_name):
 def get_trigger_types():
     """Get available trigger types."""
     return jsonify({'types': TRIGGER_TYPES})
+
+
+@app.route('/api/register-device', methods=['POST'])
+def register_device():
+    """
+    Register a device and automatically create/update its triggers.
+    Expected data: {
+        name: device name,
+        ip: device IP address,
+        triggers: [{name, type, range (optional)}]
+    }
+    
+    This updates/creates triggers in trigger_config.json with device metadata.
+    """
+    data = request.get_json()
+    
+    if 'name' not in data or not data['name']:
+        return jsonify({'error': 'Device name is required'}), 400
+    
+    if 'triggers' not in data or not isinstance(data['triggers'], list):
+        return jsonify({'error': 'Triggers array is required'}), 400
+    
+    device_name = data['name']
+    device_ip = data.get('ip', 'unknown')
+    triggers_data = data['triggers']
+    
+    print(f"Device registration request from {device_name} ({device_ip})")
+    
+    # Load current trigger configuration
+    config = load_config()
+    
+    # Track created/updated triggers
+    created = []
+    updated = []
+    errors = []
+    
+    # Current timestamp for last_seen
+    last_seen = datetime.now().isoformat()
+    
+    # Process each trigger from the device
+    for trigger_data in triggers_data:
+        # Validate trigger data
+        valid, error_msg = validate_trigger(trigger_data)
+        if not valid:
+            errors.append(f"{trigger_data.get('name', 'unknown')}: {error_msg}")
+            continue
+        
+        trigger_name = trigger_data['name']
+        
+        # Add device metadata to trigger
+        trigger_data['device'] = device_name
+        trigger_data['device_ip'] = device_ip
+        trigger_data['last_seen'] = last_seen
+        
+        # Check if trigger already exists
+        existing_idx = next((i for i, t in enumerate(config['triggers']) 
+                           if t['name'] == trigger_name), None)
+        
+        if existing_idx is not None:
+            # Update existing trigger, preserving any manual edits but updating device info
+            existing = config['triggers'][existing_idx]
+            trigger_data['manually_edited'] = existing.get('manually_edited', False)
+            config['triggers'][existing_idx] = trigger_data
+            updated.append(trigger_name)
+        else:
+            # Create new trigger
+            trigger_data['manually_edited'] = False
+            config['triggers'].append(trigger_data)
+            created.append(trigger_name)
+    
+    # Save updated configuration
+    if save_config(config):
+        response = {
+            'message': 'Device registered successfully',
+            'device': device_name,
+            'ip': device_ip,
+            'triggers_created': created,
+            'triggers_updated': updated
+        }
+        
+        if errors:
+            response['errors'] = errors
+        
+        print(f"Device {device_name} registered: {len(created)} created, {len(updated)} updated")
+        return jsonify(response), 200
+    else:
+        return jsonify({'error': 'Failed to save trigger configuration'}), 500
 
 
 # Socket Connection Management
@@ -574,6 +691,15 @@ def get_trigger_status():
 
 
 if __name__ == '__main__':
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Haven Trigger Server')
+    parser.add_argument('--port', type=int, default=5002, 
+                        help='Port to run the web server on (default: 5002)')
+    args = parser.parse_args()
+    
+    port = args.port
+    
     print("Haven Trigger Server starting...")
     print(f"Configuration file: {CONFIG_FILE}")
     print(f"Registration file: {REGISTRATION_FILE}")
@@ -583,11 +709,11 @@ if __name__ == '__main__':
     load_registrations()
     print(f"Loaded {len(service_registry)} registered service(s)")
     
-    print("Web interface: http://localhost:5002")
+    print(f"Web interface: http://localhost:{port}")
     print("API endpoints:")
-    print("  - Trigger Configuration: http://localhost:5002/api/triggers")
-    print("  - Service Registration: http://localhost:5002/api/register")
-    print("  - Trigger Events: http://localhost:5002/api/trigger-event")
-    print("  - Trigger Status: http://localhost:5002/api/trigger-status")
+    print(f"  - Trigger Configuration: http://localhost:{port}/api/triggers")
+    print(f"  - Service Registration: http://localhost:{port}/api/register")
+    print(f"  - Trigger Events: http://localhost:{port}/api/trigger-event")
+    print(f"  - Trigger Status: http://localhost:{port}/api/trigger-status")
     
-    app.run(host='0.0.0.0', port=5002, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)

@@ -3,6 +3,7 @@ class FlameController {
     constructor() {
         this.baseUrl = window.location.origin;
         this.repeatTimers = new Map(); // Store active repeat timers
+        this.triggerPollInterval = null; // For periodic trigger status updates
         this.init();
     }
 
@@ -51,6 +52,12 @@ class FlameController {
         const selectedButton = document.querySelector(`[data-tab="${tabId}"]`);
         if (selectedButton) {
             selectedButton.classList.add('active');
+        }
+        
+        // Stop trigger polling if switching away from triggers tab
+        if (tabId !== 'triggers' && this.triggerPollInterval) {
+            clearInterval(this.triggerPollInterval);
+            this.triggerPollInterval = null;
         }
     }
 
@@ -914,6 +921,16 @@ class FlameController {
         await this.loadAvailableSequencesForTriggers();
         await this.loadTriggerMappings();
         this.initTriggerForm();
+        
+        // Start periodic polling for trigger status updates (every 2 minutes)
+        if (this.triggerPollInterval) {
+            clearInterval(this.triggerPollInterval);
+        }
+        this.triggerPollInterval = setInterval(async () => {
+            // Silently update trigger data in background
+            await this.loadAvailableTriggers();
+            await this.loadTriggerMappings();
+        }, 120000); // 2 minutes in milliseconds
     }
 
     async loadTriggerStatus() {
@@ -954,12 +971,30 @@ class FlameController {
                 // Extract values from range.values for discrete triggers
                 const values = trigger.range && trigger.range.values ? trigger.range.values : [];
                 console.log(`Trigger: ${trigger.name}, Type: ${trigger.type}, Range:`, trigger.range, 'Values:', values);
+                
+                // Add status indicator to trigger name
+                let statusIndicator = '';
+                if (trigger.device_status === 'online') {
+                    statusIndicator = ' ✓';
+                } else if (trigger.device_status === 'offline') {
+                    statusIndicator = ' ✗';
+                }
+                
                 const option = document.createElement('option');
                 option.value = trigger.name;
-                option.textContent = `${trigger.name} (${trigger.type})`;
+                option.textContent = `${trigger.name} (${trigger.type})${statusIndicator}`;
+                
+                // Color code based on status
+                if (trigger.device_status === 'offline') {
+                    option.style.color = '#dc3545';
+                } else if (trigger.device_status === 'online') {
+                    option.style.color = '#28a745';
+                }
+                
                 // Store trigger data for later use
                 option.dataset.triggerType = trigger.type;
                 option.dataset.triggerValues = JSON.stringify(values);
+                option.dataset.deviceStatus = trigger.device_status || 'unknown';
                 select.appendChild(option);
             });
             
@@ -1026,7 +1061,27 @@ class FlameController {
         
         mappings.forEach(mapping => {
             html += '<tr>';
-            html += `<td>${this.escapeHtml(mapping.trigger_name)}</td>`;
+            
+            // Add status indicator to trigger name
+            let triggerNameDisplay = this.escapeHtml(mapping.trigger_name);
+            const trigger = this.availableTriggersData?.find(t => t.name === mapping.trigger_name);
+            if (trigger && trigger.device_status) {
+                let statusIcon = '';
+                let statusColor = '';
+                if (trigger.device_status === 'online') {
+                    statusIcon = '✓';
+                    statusColor = '#28a745';
+                } else if (trigger.device_status === 'offline') {
+                    statusIcon = '✗';
+                    statusColor = '#dc3545';
+                } else {
+                    statusIcon = '?';
+                    statusColor = '#ffc107';
+                }
+                triggerNameDisplay = `${this.escapeHtml(mapping.trigger_name)} <span style="color: ${statusColor}; font-weight: bold;">${statusIcon}</span>`;
+            }
+            
+            html += `<td>${triggerNameDisplay}</td>`;
             
             // Format trigger value display based on whether it's a range or single value
             let valueDisplay;
