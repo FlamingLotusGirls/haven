@@ -77,16 +77,15 @@ mappings. (The definitiion of the Flame Programs is contained in a separate conf
 
 ## TODOS/OUTSTANDING QUESTIONS
 - Fix up readmes
-- Put wifi settings in local config file, where they can be updated easily(?)
+- Put wifi settings in local config file, where they can be updated easily(?).
 - There's a question of concurrency here - whether two triggers coming in at the same time
 will create a problem on the outgoing socket. Need to check that.
-- Figure out how to specify continuous. You want to be able to set a range of values for the trigger
-- Raspberry pi the thing
-- Server startup - make sure that I can start the flame server before the trigger server without losing 
-functionality
-- Specifying which pattern. Need to have configured human-readable pattern names. This is important
-for the built-in patterns.
+- * Check end to end when flame server starts before trigger server
+- * Test port changes for webserver
+- Can we use different colors?
 - Having this run on the expansion board in the box
-- Getting box expansion boards made 
+- Getting box expansion boards made (with wifi? with ethernet? I don't have a kicad with ethernet yet)
+  (do not use ethernet for this round. Extra connection which I do not want to deal with.)
 - ESP32 sleep mode. Let's see if I can get this thing working with a battery
-- Self registration for devices (and management via self-registration)
+- pretty print std_sequences.json, because having it all on one line is unreadable
+- Raspberry Pi the thing

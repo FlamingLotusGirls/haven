@@ -505,7 +505,10 @@
                 </form>
                 </div>
                 
-                <h3>Current Mappings</h3>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; margin-bottom: 10px;">
+                    <h3 style="margin: 0;">Current Mappings</h3>
+                    <button id="refresh-mappings-btn" class="btn btn-success" onclick="flameController.refreshMappings()">🔄 Refresh</button>
+                </div>
                 <div id="trigger-mappings-table"></div>
             </section>
         </div>

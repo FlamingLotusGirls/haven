@@ -29,10 +29,13 @@ const int PIN_BUTTON = D0;      // TestESP32.Button
 const int PIN_DISCRETE_D1 = D1; // TestESP32.Discrete bit 0
 const int PIN_DISCRETE_D2 = D2; // TestESP32.Discrete bit 1
 const int PIN_ONESHOT = D3;     // TestESP32.OneShot
-const int PIN_CONTINUOUS = A4;  // TestESP32.Continuous (analog)
+const int PIN_CONTINUOUS = A10;  // TestESP32.Continuous (analog)
 
 // Debounce Configuration
 const unsigned long DEBOUNCE_DELAY = 50; // milliseconds
+
+// Noise filter for analog (continuous)read
+const float ANALOG_NOISE_DELTA = 0.02;
 
 // Button State Tracking
 struct ButtonState {
@@ -50,6 +53,9 @@ ButtonState discreteD2 = {PIN_DISCRETE_D2, HIGH, HIGH, 0, HIGH};
 // Discrete value tracking
 int lastDiscreteValue = 0;
 
+// Continuous value tracking
+float lastContinuousValue = 0.0f;
+
 // Trigger ID counter
 unsigned long triggerIdCounter = 0;
 
@@ -63,12 +69,14 @@ void setup() {
   
   Serial.println("\n\n=== TestESP32 Trigger Device ===");
   
-  // Configure pins
+  // Configure pins. NB - pinMode not required for analog pins
   pinMode(PIN_BUTTON, INPUT_PULLUP);
   pinMode(PIN_DISCRETE_D1, INPUT_PULLUP);
   pinMode(PIN_DISCRETE_D2, INPUT_PULLUP);
   pinMode(PIN_ONESHOT, INPUT_PULLUP);
   pinMode(PIN_CONTINUOUS, INPUT);
+  analogReadResolution(12); // Set resolution to 12 bits (0-4095)
+  analogSetAttenuation(ADC_11db); // Set attenuation to 11dB (0-3.3V range)
   
   // Read initial states
   buttonD0.currentState = digitalRead(PIN_BUTTON);
@@ -114,7 +122,8 @@ void loop() {
   // Check Discrete (D1, D2)
   checkDiscrete();
   
-  // TODO: Add Continuous trigger monitoring here
+  // Check Continuous
+  checkContinuous();
   // TODO: Add OneShot trigger monitoring here
   
   delay(10); // Small delay to prevent excessive CPU usage
@@ -207,6 +216,14 @@ void registerDevice() {
   discreteValues.add(1);
   discreteValues.add(2);
   discreteValues.add(3);
+
+  // Continuous trigger
+  JsonObject continuous = triggers.createNestedObject();
+  continuous["name"] = String(DEVICE_NAME) + ".Continuous";
+  continuous["type"] = "Continuous";
+  JsonObject continuousRange = continuous.createNestedObject("range");
+  continuousRange["min"] = 0.0f;
+  continuousRange["max"] = 1.0f;
   
   // Serialize JSON
   String jsonPayload;
@@ -312,6 +329,26 @@ void checkDiscrete() {
   }
 }
 
+int lastTimeRead = 0;
+void checkContinuous() {
+  // reads value between 0-4095
+  int readingAnalog = analogRead(PIN_CONTINUOUS);
+
+  if (millis() > lastTimeRead + 1000) {
+    Serial.printf("Reading continuous pin, value is %d\n", readingAnalog);
+    lastTimeRead = millis();
+  }
+
+  // Convert to float between 0 and 1
+  float newValue = ((float)(readingAnalog))/4095.0f;
+
+  // If pin has changed more than the noise-reducing delta, send trigger
+  if (abs(newValue - lastContinuousValue) > ANALOG_NOISE_DELTA) {
+    sendTrigger("TestESP32.Continuous", String(newValue));
+    lastContinuousValue = newValue;
+  }
+}
+
 int calculateDiscreteValue() {
   // HIGH = 0, LOW = 1 (inverted logic with pullups)
   int bit0 = (discreteD1.currentState == LOW) ? 1 : 0;
@@ -322,6 +359,7 @@ int calculateDiscreteValue() {
 }
 
 void sendTrigger(String triggerName, String value) {
+  Serial.println("Sending Trigger!!!");
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Cannot send trigger - no WiFi connection");
     return;
@@ -362,7 +400,8 @@ void sendTrigger(String triggerName, String value) {
     }
   } else {
     Serial.print("  ✗ Send error: ");
-    Serial.println(http.errorToString(httpCode));
+    Serial.print(http.errorToString(httpCode));
+    Serial.printf(", %d\n", httpCode);
   }
   
   http.end();

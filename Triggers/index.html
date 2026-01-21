@@ -282,7 +282,10 @@
 
         <!-- Trigger List -->
         <div class="card">
-            <h2>Current Triggers</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin-bottom: 0;">Current Triggers</h2>
+                <button id="refreshBtn" onclick="refreshTriggers()" style="background: #28a745;">🔄 Refresh</button>
+            </div>
             <div id="triggerList" class="trigger-list">
                 <div class="empty-state">Loading triggers...</div>
             </div>
@@ -320,6 +323,29 @@
             }
         }
 
+        async function refreshTriggers() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const originalText = refreshBtn.textContent;
+            const originalBg = refreshBtn.style.background;
+            
+            // Disable button and show loading state
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⟳ Refreshing...';
+            refreshBtn.style.background = '#6c757d';
+            refreshBtn.style.cursor = 'not-allowed';
+            
+            await loadTriggers();
+            
+            // Re-enable button after a brief delay
+            setTimeout(() => {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = originalText;
+                refreshBtn.style.background = originalBg;
+                refreshBtn.style.cursor = 'pointer';
+                showAlert('Triggers refreshed successfully', 'success');
+            }, 500);
+        }
+
         async function loadTriggers() {
             try {
                 const response = await fetch(`${API_BASE}/triggers`);
@@ -352,16 +378,47 @@
                     rangeDisplay = `<div><strong>Range:</strong> ${JSON.stringify(trigger.range)}</div>`;
                 }
 
-                // Device information and status
+                // Use device_status from API response - server is authoritative
+                const isOffline = trigger.device_status === 'offline';
+                const offlineIndicator = isOffline ? ' <span style="color: #999;">Offline</span>' : '';
+
+                // Device information and status  
                 let deviceDisplay = '';
                 if (trigger.device) {
-                    const status = getDeviceStatus(trigger.last_seen);
+                    // Map device_status to display class and text
+                    let statusClass, statusText;
+                    if (trigger.device_status === 'online') {
+                        statusClass = 'online';
+                        statusText = '✓ Online';
+                    } else {
+                        statusClass = 'offline';
+                        statusText = '✗ Offline';
+                    }
+                    
+                    // Calculate last seen time for display only
+                    let lastSeenDisplay = '';
+                    if (trigger.last_seen) {
+                        const lastSeenDate = new Date(trigger.last_seen);
+                        const now = new Date();
+                        const minutesAgo = (now - lastSeenDate) / 1000 / 60;
+                        
+                        if (minutesAgo < 60) {
+                            lastSeenDisplay = `${Math.floor(minutesAgo)} min ago`;
+                        } else if (minutesAgo < 1440) {
+                            const hoursAgo = Math.floor(minutesAgo / 60);
+                            lastSeenDisplay = `${hoursAgo} hour${hoursAgo > 1 ? 's' : ''} ago`;
+                        } else {
+                            const daysAgo = Math.floor(minutesAgo / 1440);
+                            lastSeenDisplay = `${daysAgo} day${daysAgo > 1 ? 's' : ''} ago`;
+                        }
+                    }
+                    
                     deviceDisplay = `
                         <div class="device-info">
                             <strong>Device:</strong> ${escapeHtml(trigger.device)} 
                             (${escapeHtml(trigger.device_ip || 'unknown')})
-                            <span class="device-status ${status.class}">${status.text}</span>
-                            ${status.lastSeen ? `<br><strong>Last seen:</strong> ${status.lastSeen}` : ''}
+                            <span class="device-status ${statusClass}">${statusText}</span>
+                            ${lastSeenDisplay ? `<br><strong>Last seen:</strong> ${lastSeenDisplay}` : ''}
                         </div>
                     `;
                 }
@@ -370,7 +427,7 @@
                     <div class="trigger-item">
                         <div class="trigger-header">
                             <div>
-                                <span class="trigger-name">${escapeHtml(trigger.name)}</span>
+                                <span class="trigger-name">${escapeHtml(trigger.name)}${offlineIndicator}</span>
                             </div>
                             <span class="trigger-type">${escapeHtml(trigger.type)}</span>
                         </div>

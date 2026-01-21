@@ -101,7 +101,7 @@ def get_triggers():
         if 'last_seen' in trigger:
             trigger['device_status'] = calculate_device_status(trigger['last_seen'])
         else:
-            trigger['device_status'] = 'unknown'
+            trigger['device_status'] = 'offline'
     
     return jsonify(config)
 
@@ -109,23 +109,43 @@ def get_triggers():
 def calculate_device_status(last_seen):
     """
     Calculate device status based on last_seen timestamp.
-    Returns: 'online', 'offline', or 'unknown'
+    Returns: 'online' or 'offline'
     """
     if not last_seen:
-        return 'unknown'
+        print(f"DEBUG: No last_seen, returning offline")
+        return 'offline'
     
     try:
-        last_seen_dt = datetime.fromisoformat(last_seen)
+        # Parse the last_seen timestamp (ISO 8601 format)
+        # Handle formats like: 2026-01-17T08:44:52.088752
+        last_seen_str = last_seen.replace('Z', '').replace('T', ' ')
+        
+        # Try parsing with microseconds
+        try:
+            last_seen_dt = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S.%f')
+        except ValueError:
+            # Try without microseconds
+            last_seen_dt = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+        
+        # Calculate time difference - both timestamps are naive (no timezone)
         now = datetime.now()
-        minutes_ago = (now - last_seen_dt).total_seconds() / 60
+        time_delta = now - last_seen_dt
+        minutes_ago = time_delta.total_seconds() / 60
+        
+        print(f"DEBUG: last_seen={last_seen}, now={now.isoformat()}, minutes_ago={minutes_ago:.2f}")
         
         # Consider device online if seen within last 5 minutes
         if minutes_ago < 5:
+            print(f"DEBUG: Returning online (< 5 minutes)")
             return 'online'
         else:
+            print(f"DEBUG: Returning offline (>= 5 minutes)")
             return 'offline'
-    except Exception:
-        return 'unknown'
+    except Exception as e:
+        print(f"Error parsing last_seen '{last_seen}': {e}")
+        import traceback
+        traceback.print_exc()
+        return 'offline'
 
 
 @app.route('/api/triggers', methods=['POST'])

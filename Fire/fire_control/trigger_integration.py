@@ -320,8 +320,13 @@ class TriggerIntegration:
             
             if response.status_code == 200:
                 data = response.json()
+                triggers = data.get('triggers', [])
+                
+                # Use device_status as provided by the trigger server
+                # The trigger server is the authoritative source for device status
+                
                 with self.triggers_lock:
-                    self.available_triggers = data.get('triggers', [])
+                    self.available_triggers = triggers
                 logger.debug(f"Fetched {len(self.available_triggers)} triggers from server")
                 return True
             else:
@@ -489,6 +494,8 @@ class TriggerIntegration:
     
     def get_available_triggers(self):
         """Get list of available triggers from the trigger server."""
+        # Fetch fresh data from trigger server instead of returning cached data
+        self._fetch_available_triggers()
         with self.triggers_lock:
             return self.available_triggers.copy()
     

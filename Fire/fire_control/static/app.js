@@ -972,23 +972,14 @@ class FlameController {
                 const values = trigger.range && trigger.range.values ? trigger.range.values : [];
                 console.log(`Trigger: ${trigger.name}, Type: ${trigger.type}, Range:`, trigger.range, 'Values:', values);
                 
-                // Add status indicator to trigger name
-                let statusIndicator = '';
-                if (trigger.device_status === 'online') {
-                    statusIndicator = ' ✓';
-                } else if (trigger.device_status === 'offline') {
-                    statusIndicator = ' ✗';
-                }
-                
                 const option = document.createElement('option');
                 option.value = trigger.name;
-                option.textContent = `${trigger.name} (${trigger.type})${statusIndicator}`;
                 
-                // Color code based on status
+                // Add OFFLINE indicator to text for offline triggers
                 if (trigger.device_status === 'offline') {
-                    option.style.color = '#dc3545';
-                } else if (trigger.device_status === 'online') {
-                    option.style.color = '#28a745';
+                    option.textContent = `${trigger.name} (${trigger.type}) [OFFLINE]`;
+                } else {
+                    option.textContent = `${trigger.name} (${trigger.type})`;
                 }
                 
                 // Store trigger data for later use
@@ -1060,28 +1051,26 @@ class FlameController {
         html += '</tr></thead><tbody>';
         
         mappings.forEach(mapping => {
-            html += '<tr>';
-            
-            // Add status indicator to trigger name
-            let triggerNameDisplay = this.escapeHtml(mapping.trigger_name);
+            // Check if trigger exists and its status
             const trigger = this.availableTriggersData?.find(t => t.name === mapping.trigger_name);
-            if (trigger && trigger.device_status) {
-                let statusIcon = '';
-                let statusColor = '';
-                if (trigger.device_status === 'online') {
-                    statusIcon = '✓';
-                    statusColor = '#28a745';
-                } else if (trigger.device_status === 'offline') {
-                    statusIcon = '✗';
-                    statusColor = '#dc3545';
-                } else {
-                    statusIcon = '?';
-                    statusColor = '#ffc107';
-                }
-                triggerNameDisplay = `${this.escapeHtml(mapping.trigger_name)} <span style="color: ${statusColor}; font-weight: bold;">${statusIcon}</span>`;
+            let triggerNameDisplay;
+            let triggerStyle = '';
+            
+            if (!trigger) {
+                // Trigger not found in available triggers - red text for name only
+                triggerNameDisplay = `${this.escapeHtml(mapping.trigger_name)} [Not Found]`;
+                triggerStyle = 'color: #dc3545;';
+            } else if (trigger.device_status === 'offline') {
+                // Trigger exists but is offline - grey text with [Offline] indicator
+                triggerNameDisplay = `${this.escapeHtml(mapping.trigger_name)} [Offline]`;
+                triggerStyle = 'color: #999;';
+            } else {
+                // Trigger exists and is online
+                triggerNameDisplay = this.escapeHtml(mapping.trigger_name);
             }
             
-            html += `<td>${triggerNameDisplay}</td>`;
+            html += `<tr>`;
+            html += `<td style="${triggerStyle}">${triggerNameDisplay}</td>`;
             
             // Format trigger value display based on whether it's a range or single value
             let valueDisplay;
@@ -1405,6 +1394,32 @@ class FlameController {
             valueContainer.insertAdjacentHTML('beforeend', 
                 `<div class="help-text">${helpText}</div>`);
         }
+    }
+
+    async refreshMappings() {
+        const refreshBtn = document.getElementById('refresh-mappings-btn');
+        const originalText = refreshBtn.textContent;
+        const originalBg = refreshBtn.style.backgroundColor;
+        
+        // Disable button and show loading state
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = '⟳ Refreshing...';
+        refreshBtn.style.backgroundColor = '#6c757d';
+        refreshBtn.style.cursor = 'not-allowed';
+        
+        // Reload trigger data and mappings
+        await this.loadAvailableTriggers();
+        await this.loadTriggerMappings();
+        await this.loadTriggerStatus();
+        
+        // Re-enable button after a brief delay
+        setTimeout(() => {
+            refreshBtn.disabled = false;
+            refreshBtn.textContent = originalText;
+            refreshBtn.style.backgroundColor = originalBg || '';
+            refreshBtn.style.cursor = 'pointer';
+            this.showMessage('Trigger mappings refreshed successfully', 'success');
+        }, 500);
     }
 
     resetTriggerForm() {
