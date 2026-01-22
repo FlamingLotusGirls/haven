@@ -1,0 +1,8 @@
+{
+  "wifi_ssid_primary": "flg",
+  "wifi_pass_primary": "this is not the password",
+  "wifi_ssid_secondary": "not",
+  "wifi_pass_secondary": "set",
+  "trigger_server": "192.168.5.174",
+  "trigger_port": 5002
+}
