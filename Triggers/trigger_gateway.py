@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Haven Trigger Server
+Haven Trigger Gateway
 
 A simple web server that manages trigger configurations via REST API and web interface.
 Triggers are stored in a JSON configuration file (trigger_config.json).
@@ -27,7 +27,7 @@ REGISTRATION_FILE = 'service_registrations.json'
 TRIGGER_TYPES = ['On/Off', 'OneShot', 'Discrete', 'Continuous']
 
 # Supported protocols for trigger dispatch
-SUPPORTED_PROTOCOLS = ['OPC', 'TCP_SOCKET', 'TCP_CONNECT']
+SUPPORTED_PROTOCOLS = ['OSC', 'TCP_SOCKET', 'TCP_CONNECT']
 
 # In-memory cache of current trigger values (ID-based, not timestamp-based)
 trigger_cache = {}
@@ -573,9 +573,9 @@ def dispatch_trigger_event(trigger_event):
                 finally:
                     sock.close()
             
-            elif protocol == 'OPC':
-                # OPC protocol placeholder
-                print(f"OPC protocol not yet implemented for {service_name}")
+            elif protocol == 'OSC':
+                # OSC protocol placeholder
+                print(f"OSC protocol not yet implemented for {service_name}")
                 
         except Exception as e:
             print(f"Error dispatching to {service_name}: {e}")

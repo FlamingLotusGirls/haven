@@ -147,10 +147,10 @@ void setup() {
   if (!loadConfig()) {
     Serial.println("Using default configuration values");
     // Set defaults
-    strlcpy(config.wifi_ssid_primary, "flg-haven", sizeof(config.wifi_ssid_primary));
-    strlcpy(config.wifi_pass_primary, "fuckoffanddie", sizeof(config.wifi_pass_primary));
-    strlcpy(config.wifi_ssid_secondary, "medea", sizeof(config.wifi_ssid_secondary));
-    strlcpy(config.wifi_pass_secondary, "!medea4u", sizeof(config.wifi_pass_secondary));
+    strlcpy(config.wifi_ssid_primary, "not", sizeof(config.wifi_ssid_primary));
+    strlcpy(config.wifi_pass_primary, "set", sizeof(config.wifi_pass_primary));
+    strlcpy(config.wifi_ssid_secondary, "not", sizeof(config.wifi_ssid_secondary));
+    strlcpy(config.wifi_pass_secondary, "set", sizeof(config.wifi_pass_secondary));
     strlcpy(config.trigger_server, "192.168.5.174", sizeof(config.trigger_server));
     config.trigger_port = 5002;
   }

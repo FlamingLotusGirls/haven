@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Environment="PYTHONPATH=/home/flaming/haven/util"
-ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/server.py
+ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/trigger_gateway.py
 WorkingDirectory=/home/flaming/haven/Triggers
 Restart=always
 User=flaming
