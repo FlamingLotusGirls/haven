@@ -1,25 +1,34 @@
-//#define ARDUINO
-// #define MCP2x017
-#ifdef ARDUINO
-#include <Wire.h>
-#ifndef MCP2x017
-#include <PCA95x5.h>
-#else
-#include <MCP23017.h>
+//#define ARDUINO  // NB - predefined if in Arduino IDE
+
+// #define ESP32_DEV // Two configs - esp32 dev board, with all i/o onboard, or xiao with io on pca9555
+#ifndef ESP32_DEV 
+#define PCA_9555
 #endif
+
+#ifdef ARDUINO
+#define ESP32 1  // NB - AsyncHttp library requires this
+#include <Wire.h>
+#ifdef PCA_9555
+#include <PCA95x5.h>
+#endif // PCA9555
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <AsyncTCP.h>
+#include <AsyncHTTPRequest_Generic.h>   // https://github.com/khoih-prog/AsyncHTTPRequest_Generic
 #else
 #include <stdio.h>
 #include <cstdint>
 #include <chrono>
 #include <cstring>
 #include <unistd.h>
-#endif
+#endif // ARDUINO
+
+// I need a way to swap things over in to follower mode for basic testing.
+bool bFollowerOnly = true;
 
 // Please only define on of these (if any). They set up the special sequences on the specific
 // flame control boxes. Perhaps one day I will have an ESP32 rather than a trinketPro on the board,
-// and I'll be able to dynamically update config files. That day is not today. 
+// and I'll be able to dynamically update config files. That day is not today.
 
 
 // #define PERCH
@@ -64,8 +73,15 @@
 #endif // ~ARDUINO
 
 #ifdef ARDUINO
-const int outputs[] = {D7, D8, D9, D10, D6, D3, D2, D1}; // XXX D9 is strapping; problematic for initial output.
-const uint16_t gpioInputs[] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080, 0x0800, 0x0400, 0x0200, 0x0100};
+#ifdef ESP32_DEV
+const int outputs[] = {4, 5, 6, 7, 15, 16, 17, 18};
+const int gpioInputs[] = {1, 2, 42, 41, 40, 39, 38, 37, 36, 35, 48, 47};
+// other bits - D8, D9-D14
+#else  // ie, XIAO with PCA9555
+const int outputs[] = {D7, D8, D9, D10, D0, D3, D2, D1}; // XXX D9 is strapping; problematic for initial output.
+// Note with input mask - 0x0001 - 0x0080 are on the first port, which is completely used for input 0x0800 - 0x0100 are second port
+const uint16_t gpioInputMask[] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080, 0x0800, 0x0400, 0x0200, 0x0100};
+#endif // ESP32_DEV
 #endif // ARDUINO
 
 const int NUM_INPUT_CHANNELS = 12;
@@ -78,7 +94,7 @@ void initMillis();
 uint32_t millis();
 #endif
 bool readRawInput(int channelId, uint16_t gpioRawData, int curTimeMs);
-bool writeOutput();
+void writeOutput(int outputChannel, bool output);
 
 
 /**********  UTILITY FUNCTIONS ***************/
@@ -295,6 +311,9 @@ Program allPoofProgram(allPoofArray, "AllPoof");
 // 8 possible programs, from 3 bit switch on the board
 Program* programs[8] = {NULL, &JDVBirdProgram, &chirpChirpProgram, &chaseProgram, &allPoofProgram, &longPoofProgram, &poofProgram, &stdAndOtherProgram};
 
+// XXX Test code for trying to understand why the PCA555 can't be read
+int8_t csw_pca_read_bytes(const uint8_t reg, uint8_t* data, const uint8_t size);
+
 #ifdef ARDUINO
 // Storage for dynamically loaded sequences and programs
 struct NamedSequence {
@@ -365,6 +384,9 @@ public:
   }
 
   void setProgram(Program* program) {
+    if (bFollowerOnly) {
+      return;
+    }
     if (program != m_program) {
       if (m_state == PLAYBACK) {
 #ifdef ARDUINO
@@ -409,8 +431,8 @@ public:
         m_outputState[m_defaultOutputChannel].valid = true;
         m_outputState[m_defaultOutputChannel].buttonPressed = buttonPressed;
         if (buttonPressed) {
-            Serial.print("Button press received for program listening on channel ");
-            Serial.println(m_inputChannel);
+            // Serial.print("Button press received for program listening on channel ");
+            // Serial.println(m_inputChannel);
         }
       }
     } else {
@@ -501,119 +523,47 @@ const char* channelAlias[8] = {
 #endif
 
 #ifdef ARDUINO
-const int NUM_GPIO_CHIPS = 1;
-#ifndef MCP2x017
-const int PCA9555_ADDRESS[NUM_GPIO_CHIPS] = {0x20};
-PCA9555 ioex[NUM_GPIO_CHIPS];
-#else
-const int MCP23017_ADDRESS[NUM_GPIO_CHIPS] = {0x20};
-MCP23017 mcp[NUM_GPIO_CHIPS] = {MCP23017(MCP23017_ADDRESS[0])};
+#ifdef PCA_9555
+const int PCA9555_ADDRESS = 0x20;
+PCA9555 ioex;
 #endif
 
 void initI2C() {
   Wire.begin();
-  for (int i=0; i<NUM_GPIO_CHIPS; i++){
-#ifndef MCP2x017
-    ioex[i].attach(Wire, PCA9555_ADDRESS[i]);
-    ioex[i].polarity(PCA95x5::Polarity::ORIGINAL_ALL);
-    ioex[i].direction(PCA95x5::Direction::IN_ALL);
-    ioex[i].direction(PCA95x5::Port::P17, PCA95x5::Direction::OUT); // All input except for an LED
-#else
-    mcp[i].init();
-    mcp[i].portMode(MCP23017Port::A, 0b11111110); //Port A as input // XXX what about the LED?
-    mcp[i].portMode(MCP23017Port::B, 0b11111110); //Port B as input
-    mcp[i].writeRegister(MCP23017Register::GPIO_A, 0x00);  //Reset port A 
-    mcp[i].writeRegister(MCP23017Register::GPIO_B, 0x00);  //Reset port B
-    mcp[i].writeRegister(MCP23017Register::IPOL_A, 0x00);  // polarity same as input
-    mcp[i].writeRegister(MCP23017Register::IPOL_B, 0x00);
+#ifdef PCA_9555
+  ioex.attach(Wire, PCA9555_ADDRESS);
+  ioex.polarity(PCA95x5::Polarity::ORIGINAL_ALL);
+  ioex.direction(PCA95x5::Direction::IN_ALL);
+  ioex.direction(PCA95x5::Port::P17, PCA95x5::Direction::OUT); // All input except for an LED
 #endif
-  }
 }
 
-uint16_t readGPIOExpander() {
-#ifndef MCP2x017
-  return ioex[0].read();
+uint16_t readGPIOInput() {
+#ifdef ESP32_DEV
+  uint16_t input = 0;
+  for (int i=0; i<NUM_INPUT_CHANNELS; i++){
+    input |= digitalRead(gpioInputs[i]) << i;
+  }
+  return input;
 #else
-  return mcp[0].read();
+#ifdef PCA_9555
+  return ioex.read();
 #endif
+   return 0;
+#endif // ESP32_DEV
 }
 
 int8_t readDIPSwitch(uint16_t gpioRawData) {
+#ifdef PCA_9555
   return ((gpioRawData & 0x1000 >> 10) +
            (gpioRawData & 0x2000 >> 12) + 
            (gpioRawData & 0x4000 >> 14));
+#else 
+  return 0; // XXX Not sure what outputs I'd use for the dip switch with an ESP DEV Board
+#endif 
 }
-
-/*
-void readChannelModes(uint8_t channelModes[]) {
-  uint16_t rawData1 = ioex[0].read();
-  uint16_t rawData2 = ioex[1].read();
-
-  // I appear to be interpreting on and off incorrectly...
-  rawData1 = ~rawData1;
-  rawData2 = ~rawData2;
- 
-#ifdef DEBUG
-  Serial.print("Raw data, chip 0: ");
-  Serial.println(rawData1, BIN);
-  Serial.print("Raw data, chip 1: ");
-  Serial.println(rawData2, BIN);
-#endif
-
-  // Now interpret that data. Unfortunately I've made an unholy mess
-  // of the wiring to bit conversion.
-  channelModes[0] = ((rawData2 & 0x80) >> 7) |
-               ((rawData2 & 0x40) >> 5) | 
-               ((rawData2 & 0x20) >> 3);
-  channelModes[1] = ((rawData2 & 0x10) >> 4) |
-               ((rawData2 & 0x8) >> 2) | 
-               ((rawData2 & 0x4) >> 0);
-  channelModes[2] = ((rawData2 & 0x2) >> 1) |
-               ((rawData2 & 0x1) << 1) | 
-               ((rawData2 & 0x100) >> 6);
-  channelModes[3] = ((rawData2 & 0x200) >> 9) |
-               ((rawData2 & 0x400) >> 9) | 
-               ((rawData2 & 0x800) >> 9);
-  channelModes[4] = ((rawData1 & 0x80) >> 7) |
-               ((rawData1 & 0x40) >> 5) | 
-               ((rawData1 & 0x20) >> 3);
-  channelModes[5] = ((rawData1 & 0x10) >> 4) |
-               ((rawData1 & 0x8) >> 2) | 
-               ((rawData1 & 0x4) >> 0);
-  channelModes[6] = ((rawData1 & 0x2) >> 1) |
-               ((rawData1 & 0x1) << 1) | 
-               ((rawData1 & 0x100) >> 6);
-  channelModes[7] = ((rawData1 & 0x200) >> 9) |
-               ((rawData1 & 0x400) >> 9) | 
-               ((rawData1 & 0x800) >> 9);
-
-#ifdef DEBUG
-  for (int i=0; i<8; i++) {
-    Serial.print("Channel ");
-    Serial.print(i);
-    Serial.print(" set to ");
-    Serial.println(channelModes[i]);
-  }
-#endif
-}
-*/
 #endif // ARDUINO
 
-/*
-void initChannelControllers() {
-#ifdef ARDUINO
-  uint8_t channelModes[8]; // would be NUM_INPUT_CHANNELS, if I hadn't fucked up the wiring...
-  readChannelModes(channelModes);
-  for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
-    controllers[i].setProgram(programs[channelModes[i]]);
-  }
-#else
-  // At the moment, programs 1, 2, 6, and 7 are non-trivial
-  controllers[1].setProgram(programs[6]);
-  controllers[2].setProgram(programs[7]);
-#endif
-}
-*/
 
 /********** FAKE INPUT ********/
 // Fake input on/off
@@ -713,32 +663,29 @@ InputTest inputTest;
 // either going to be reading from a Program or getting data from the actual device
 bool readRawInput(int inputChannel, uint16_t gpioRawData, int curTimeMs) {
 #ifdef ARDUINO
-  uint16_t gpioChannel = gpioInputs[inputChannel];
-  bool input = gpioRawData & gpioChannel;
-#ifdef DEBUG
-/*
-  Serial.print("Reading value ");
-  Serial.print(input ? "HIGH " : "LOW ");
-  Serial.print("from channel ");
-  Serial.print(inputChannel);
-  Serial.print(", pin ");
-  Serial.println(inputs[inputChannel]);
-  */
-#endif // DEBUG
+#ifdef ESP32_DEV
+  bool input = gpioRawData & (1 << inputChannel);
+#else
+  uint16_t gpioChannelMask = gpioInputMask[inputChannel];
+  bool input = gpioRawData & gpioChannelMask;
+#endif // ESP32_DEV
   // NB - PRESSED is when the pin is held LOW, hence the negation
   return !input; 
-  // !digitalRead(inputs[inputChannel]);
-#else
+#else // Not arduino; running tests
   return inputTest.GetButtonState(inputChannel, curTimeMs);
 #endif
 }
 
 void setLEDState(bool onOff) {
 #ifdef ARDUINO
-#ifndef MCP2x017
-  ioex[0].write(PCA95x5::Port::P17, onOff ? PCA95x5::Level::H : PCA95x5::Level::L);
+#ifdef PCA_9555
+  bool ret = false;
+  ret = ioex.write(PCA95x5::Port::P17, onOff ? PCA95x5::Level::H : PCA95x5::Level::L);
+  if (!ret) {
+    Serial.println("SetLEDState write fails");
+  }
 #endif
-#endif
+#endif // ARDUINO
 }
 
 void writeOutput(int outputChannel, bool output) {
@@ -752,7 +699,8 @@ void writeOutput(int outputChannel, bool output) {
   Serial.print(", pin ");
   Serial.println(outputs[outputChannel]);
   */
- #endif 
+#endif 
+// XXX also need to set up the 5555 pins as output
   digitalWrite(outputs[outputChannel], output ? HIGH : LOW); // XXX 'PRESSED' seems to be pulling the wire HIGH, which is not my memory of how it works.
 #else
   // printf("WRITING %s to outputChannel %d\n", output ? "PRESSED" : "UNPRESSED",  outputChannel);
@@ -821,13 +769,12 @@ bool consolidatedOutput[NUM_OUTPUT_CHANNELS];
 
 void initIO() {
 #ifdef ARDUINO
-  // input is now on the PCA9555 - how do we initialize that?
-  // XXX initialized in the PCA initialization sequence
-  /*
+#ifdef ESP32_DEV
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
-    pinMode(inputs[i], INPUT_PULLUP);
-  }*/
-  for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {
+    pinMode(gpioInputs[i], INPUT_PULLUP);
+  }
+#endif // ESP32_DEV
+  for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {   
     digitalWrite(outputs[j], LOW); // making sure output starts low
     pinMode(outputs[j], OUTPUT);
   }
@@ -835,22 +782,47 @@ void initIO() {
   memset(consolidatedOutput, 0, NUM_OUTPUT_CHANNELS*sizeof(bool));
 }
 
+uint8_t csw_read_pca() {
+  uint16_t data = 0;
+  // 0 and 1 here are the first and second input ports
+  csw_pca_read_bytes(0, (uint8_t*)&data, 1);
+  csw_pca_read_bytes(1, ((uint8_t*)&data) + 1, 1);
+  Serial.print("PCA read returns ");
+  Serial.println(data, BIN);
+  return data;
+}
+
 uint16_t oldGpioRawData = 0xFFFF;
+int oldTimeMs = 0;
+bool ledState = true;
 void buttonLoop() {
   // Read data, send to the channel controllers.
   int curTimeMs = millis();
+  if (curTimeMs > oldTimeMs + 1000) {
+    oldTimeMs = curTimeMs;
+    ledState = !ledState;
+    setLEDState(ledState);
+    Serial.println("Blink!!!");
+    csw_read_pca();
+    uint16_t libPca = readGPIOInput();
+    Serial.print("PCA Library Reads: ");
+    Serial.println(libPca, BIN);
+  }
+  
   bool consolidatedOutputDebugCopy[NUM_OUTPUT_CHANNELS];
   memcpy(consolidatedOutputDebugCopy, consolidatedOutput, NUM_OUTPUT_CHANNELS*sizeof(bool));
   memset(consolidatedOutput, 0, NUM_OUTPUT_CHANNELS*sizeof(bool));
 
-  uint16_t gpioRawData = readGPIOExpander();
+  uint16_t gpioRawData = readGPIOInput();
   if (gpioRawData != oldGpioRawData) {
-  #ifdef DEBUG
+  // #ifdef DEBUG
     Serial.print("Data change! Old data was ");
     Serial.print(oldGpioRawData, BIN);
     Serial.print(", new data is ");
     Serial.println(gpioRawData, BIN);
-  #endif
+  // #endif
+    // Send async http post to main pi...
+
     oldGpioRawData = gpioRawData;
   }
   readInputButtonStates(gpioRawData, curTimeMs);
@@ -1145,9 +1117,11 @@ void loadPatternsFromFile() {
 #endif
 
 void buttonSetup() {
+  sleep(1);
   initMillis();
   initIO();
 #ifdef ARDUINO
+  Serial.println("Trying to set up i2c");
   initI2C();
   // Try to load configuration from files first, fallback to hardcoded
   if (LittleFS.begin()) {
@@ -1166,6 +1140,30 @@ void buttonSetup() {
 #endif
 #endif // ARDUINO
 }
+
+
+// XXX Test code for trying to understand why the PCA555 can't be read
+int8_t csw_pca_read_bytes(const uint8_t reg, uint8_t* data, const uint8_t size) {
+  const uint8_t addr =  PCA9555_ADDRESS;
+  int ret;
+  // Single byte write to the device - register addr
+  Wire.beginTransmission(addr);
+  ret = Wire.write(reg);
+  if (ret != 1) {
+    Serial.print("Wire write register returns unexpected value: ");
+    Serial.println(ret);
+  }
+  ret = Wire.endTransmission(false);
+  if (ret != 0) {
+    Serial.print("End transmission returns error: ");
+    Serial.println(ret);
+  }
+  Wire.requestFrom(addr, size);
+  int8_t count = 0;
+  while (Wire.available()) data[count++] = Wire.read();
+  return count;
+}
+
 
 #ifndef ARDUINO
 int main(int argc, char** argv){

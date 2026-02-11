@@ -47,6 +47,16 @@ A simple web-based interface for managing flame effect patterns and channel mapp
 - `patterns.json` - Sequences, patterns, and button mappings
 - `configurationREADME.md` - Technical specification
 
+## Uploading Files
+Initially, you will have to upload the files in the data directory to the ESP32. To do this,
+you must do the following:
+- Get the uploader plugin for the Arduino IDE - https://randomnerdtutorials.com/arduino-ide-2-install-esp32-littlefs/
+- Change the name in the netname file. For haven, we use haven-perch, haven-osprey, haven-magpie, haven-cockatoo1, haven-cockatoo2, and haven-standalone. You do not want to have two devices with the same netname on the network.
+- Use the palette in the Arduino IDE (command-shift-P (Mac) or ctl-shift-P to select the Upload LittleFS option.
+This should upload the files in the data directory.
+If you have problems, make sure that any serial monitors are disconnected.
+
+
 ## Data Format
 
 ### channels.json

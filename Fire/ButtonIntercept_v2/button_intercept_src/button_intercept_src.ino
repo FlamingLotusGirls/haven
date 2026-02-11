@@ -34,16 +34,16 @@ void setupWebServer() {
     Serial.println("Webserver running on Core: " + String(xPortGetCoreID()));
     request->send(LittleFS, "/index.html", "text/html");
   });
-  
+
   server.on("/app.js", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(LittleFS, "/app.js", "application/javascript");
   });
-  
+
   // API endpoints
   server.on("/api/channels", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(LittleFS, "/channels.json", "application/json");
   });
-  
+
   server.on("/api/channels", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       // Save channels data
@@ -56,11 +56,11 @@ void setupWebServer() {
         request->send(500, "application/json", "{\"error\":\"Failed to save channels\"}");
       }
     });
-  
+
   server.on("/api/patterns", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(LittleFS, "/patterns.json", "application/json");
   });
-  
+
   server.on("/api/patterns", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
     [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
       // Save patterns data
@@ -75,7 +75,7 @@ void setupWebServer() {
         request->send(500, "application/json", "{\"error\":\"Failed to save patterns\"}");
       }
     });
-  
+
   server.begin();
   Serial.println("HTTP server started on port 8000");
 }
@@ -105,6 +105,8 @@ void wifiLoopCheck() {
       Serial.println();
       Serial.print("Connected to WiFi! IP address: ");
       Serial.println(WiFi.localIP());
+      Serial.print("RSSI: ");
+      Serial.println(WiFi.RSSI());
 
       File file = LittleFS.open("/netname.txt", "r");
       if (!file){
@@ -126,11 +128,14 @@ void wifiLoopCheck() {
 }
 
 void setup() {
-  Serial.begin(115200);  
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("starting...");
+  delay(1000);
   setupLittleFS();
   buttonSetup();
   initWiFi();
-  
+
   Serial.println("Setup running on Core: " + String(xPortGetCoreID()));
 
   Serial.println("System ready!");
