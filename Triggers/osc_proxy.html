@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haven OSC Proxy</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .status-bar {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .status-bar h2 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 1.2em;
+        }
+
+        .status-item {
+            display: inline-block;
+            margin-right: 20px;
+            padding: 5px 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .status-item.online {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-item.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #333;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        button.primary {
+            background: #667eea;
+            color: white;
+        }
+
+        button.primary:hover {
+            background: #5568d3;
+        }
+
+        button.secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        button.secondary:hover {
+            background: #5a6268;
+        }
+
+        button.danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        button.danger:hover {
+            background: #c82333;
+        }
+
+        button.success {
+            background: #28a745;
+            color: white;
+        }
+
+        button.success:hover {
+            background: #218838;
+        }
+
+        .mappings-list {
+            margin-top: 20px;
+        }
+
+        .mapping-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            border-left: 4px solid #667eea;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .mapping-item.disabled {
+            opacity: 0.6;
+            border-left-color: #6c757d;
+        }
+
+        .mapping-info {
+            flex: 1;
+        }
+
+        .mapping-trigger {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .mapping-osc {
+            color: #667eea;
+            font-family: 'Courier New', monospace;
+        }
+
+        .mapping-args {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 3px;
+        }
+
+        .mapping-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .mapping-actions button {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h2 {
+            color: #333;
+        }
+
+        .close-btn {
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+        }
+
+        .close-btn:hover {
+            color: #000;
+        }
+
+        .arg-list {
+            margin-top: 10px;
+        }
+
+        .arg-item {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .arg-item input {
+            flex: 1;
+        }
+
+        .arg-item button {
+            padding: 5px 10px;
+        }
+
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+
+        .info-box strong {
+            color: #1976D2;
+        }
+
+        .two-column {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .alert.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Haven OSC Proxy</h1>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <h2>Status</h2>
+            <span class="status-item" id="socketStatus">Socket: Loading...</span>
+            <span class="status-item" id="oscStatus">OSC: Loading...</span>
+            <span class="status-item" id="mappingCount">Mappings: 0</span>
+        </div>
+
+        <!-- OSC Client Configuration -->
+        <div class="card">
+            <h2>OSC Client Configuration</h2>
+            <div class="two-column">
+                <div class="form-group">
+                    <label for="oscHost">OSC Host/IP</label>
+                    <input type="text" id="oscHost" placeholder="127.0.0.1">
+                </div>
+                <div class="form-group">
+                    <label for="oscPort">OSC Port</label>
+                    <input type="number" id="oscPort" placeholder="8000">
+                </div>
+            </div>
+            <div class="button-group">
+                <button class="primary" onclick="updateOscConfig()">Update OSC Client</button>
+                <button class="secondary" onclick="testOscConnection()">Test Connection</button>
+            </div>
+        </div>
+
+        <!-- Trigger to OSC Mappings -->
+        <div class="card">
+            <h2>Trigger to OSC Mappings</h2>
+            <button class="success" onclick="openAddMappingModal()">➕ Add New Mapping</button>
+            
+            <div id="mappingsList" class="mappings-list">
+                <!-- Mappings will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Mapping Modal -->
+    <div id="mappingModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close-btn" onclick="closeMappingModal()">&times;</span>
+                <h2 id="modalTitle">Add New Mapping</h2>
+            </div>
+
+            <div id="modalAlert"></div>
+
+            <div class="form-group">
+                <label for="modalTrigger">Trigger</label>
+                <select id="modalTrigger">
+                    <option value="">Select a trigger...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="modalOscAddress">OSC Address</label>
+                <input type="text" id="modalOscAddress" placeholder="/example/address">
+            </div>
+
+            <div class="form-group">
+                <label>OSC Arguments</label>
+                <div class="info-box">
+                    <strong>Variable substitution:</strong><br>
+                    • <code>${value}</code> - Insert trigger value as string<br>
+                    • <code>${value:int}</code> - Convert to integer<br>
+                    • <code>${value:float}</code> - Convert to float
+                </div>
+                <div id="argsList" class="arg-list">
+                    <!-- Arguments will be added here -->
+                </div>
+                <button class="secondary" onclick="addArgument()">Add Argument</button>
+            </div>
+
+            <div class="button-group">
+                <button class="primary" onclick="saveMappingModal()">Save Mapping</button>
+                <button class="secondary" onclick="closeMappingModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let config = {};
+        let triggers = [];
+        let currentEditingId = null;
+
+        // Load initial data
+        async function loadData() {
+            await Promise.all([
+                loadConfig(),
+                loadTriggers(),
+                loadMappings()
+            ]);
+            updateStatus();
+        }
+
+        async function loadConfig() {
+            try {
+                const response = await fetch('/api/config');
+                config = await response.json();
+                
+                document.getElementById('oscHost').value = config.osc_client.host;
+                document.getElementById('oscPort').value = config.osc_client.port;
+            } catch (error) {
+                console.error('Error loading config:', error);
+            }
+        }
+
+        async function loadTriggers() {
+            try {
+                const response = await fetch('/api/triggers');
+                const data = await response.json();
+                triggers = data.triggers;
+                
+                // Update trigger dropdown
+                const select = document.getElementById('modalTrigger');
+                select.innerHTML = '<option value="">Select a trigger...</option>';
+                
+                triggers.forEach(trigger => {
+                    const option = document.createElement('option');
+                    option.value = trigger.name;
+                    option.textContent = `${trigger.name} (${trigger.type})`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading triggers:', error);
+            }
+        }
+
+        async function loadMappings() {
+            try {
+                const response = await fetch('/api/mappings');
+                const data = await response.json();
+                
+                const listDiv = document.getElementById('mappingsList');
+                
+                if (data.mappings.length === 0) {
+                    listDiv.innerHTML = '<p style="color: #6c757d; text-align: center; padding: 20px;">No mappings configured yet. Click "Add New Mapping" to get started.</p>';
+                    return;
+                }
+                
+                listDiv.innerHTML = '';
+                
+                data.mappings.forEach(mapping => {
+                    const item = document.createElement('div');
+                    item.className = 'mapping-item' + (mapping.enabled ? '' : ' disabled');
+                    
+                    const argsText = mapping.osc_args.length > 0 
+                        ? `Args: [${mapping.osc_args.join(', ')}]`
+                        : 'No arguments';
+                    
+                    item.innerHTML = `
+                        <div class="mapping-info">
+                            <div class="mapping-trigger">🎯 ${mapping.trigger_name}</div>
+                            <div class="mapping-osc">➜ ${mapping.osc_address}</div>
+                            <div class="mapping-args">${argsText}</div>
+                        </div>
+                        <div class="mapping-actions">
+                            <button class="secondary" onclick="toggleMapping(${mapping.id})">${mapping.enabled ? '⏸ Disable' : '▶️ Enable'}</button>
+                            <button class="primary" onclick="editMapping(${mapping.id})">✏️ Edit</button>
+                            <button class="danger" onclick="deleteMapping(${mapping.id})">🗑️ Delete</button>
+                        </div>
+                    `;
+                    
+                    listDiv.appendChild(item);
+                });
+            } catch (error) {
+                console.error('Error loading mappings:', error);
+            }
+        }
+
+        async function updateStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const status = await response.json();
+                
+                const socketStatus = document.getElementById('socketStatus');
+                socketStatus.className = 'status-item ' + (status.socket_server_running ? 'online' : 'offline');
+                socketStatus.textContent = `Socket: ${status.socket_server_running ? 'Running on :' + status.socket_server_port : 'Offline'}`;
+                
+                const oscStatus = document.getElementById('oscStatus');
+                oscStatus.className = 'status-item ' + (status.osc_client_initialized ? 'online' : 'offline');
+                oscStatus.textContent = `OSC: ${status.osc_client_initialized ? status.osc_client_config.host + ':' + status.osc_client_config.port : 'Not Configured'}`;
+                
+                document.getElementById('mappingCount').textContent = `Mappings: ${status.mappings_count}`;
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
+        }
+
+        async function updateOscConfig() {
+            const host = document.getElementById('oscHost').value;
+            const port = parseInt(document.getElementById('oscPort').value);
+            
+            if (!host || !port) {
+                alert('Please enter both host and port');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/config/osc-client', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ host, port })
+                });
+                
+                if (response.ok) {
+                    alert('OSC client configuration updated successfully');
+                    await loadConfig();
+                    updateStatus();
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.error);
+                }
+            } catch (error) {
+                console.error('Error updating OSC config:', error);
+                alert('Failed to update OSC configuration');
+            }
+        }
+
+        async function testOscConnection() {
+            try {
+                const response = await fetch('/api/test-osc', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        osc_address: '/test',
+                        osc_args: ['Hello from OSC Proxy']
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('Test OSC message sent to /test with message "Hello from OSC Proxy"');
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + error.error);
+                }
+            } catch (error) {
+                console.error('Error testing OSC:', error);
+                alert('Failed to send test message');
+            }
+        }
+
+        function openAddMappingModal() {
+            currentEditingId = null;
+            document.getElementById('modalTitle').textContent = 'Add New Mapping';
+            document.getElementById('modalTrigger').value = '';
+            document.getElementById('modalOscAddress').value = '';
+            document.getElementById('argsList').innerHTML = '';
+            document.getElementById('modalAlert').innerHTML = '';
+            document.getElementById('mappingModal').classList.add('active');
+        }
+
+        async function editMapping(id) {
+            try {
+                const response = await fetch('/api/mappings');
+                const data = await response.json();
+                const mapping = data.mappings.find(m => m.id === id);
+                
+                if (!mapping) return;
+                
+                currentEditingId = id;
+                document.getElementById('modalTitle').textContent = 'Edit Mapping';
+                document.getElementById('modalTrigger').value = mapping.trigger_name;
+                document.getElementById('modalOscAddress').value = mapping.osc_address;
+                document.getElementById('modalAlert').innerHTML = '';
+                
+                // Load arguments
+                document.getElementById('argsList').innerHTML = '';
+                mapping.osc_args.forEach(arg => {
+                    addArgument(arg);
+                });
+                
+                document.getElementById('mappingModal').classList.add('active');
+            } catch (error) {
+                console.error('Error loading mapping:', error);
+            }
+        }
+
+        function closeMappingModal() {
+            document.getElementById('mappingModal').classList.remove('active');
+        }
+
+        function addArgument(value = '') {
+            const argsList = document.getElementById('argsList');
+            const argItem = document.createElement('div');
+            argItem.className = 'arg-item';
+            
+            argItem.innerHTML = `
+                <input type="text" class="arg-value" placeholder="e.g., \${value:int}, 100, hello" value="${value}">
+                <button class="danger" onclick="this.parentElement.remove()">Remove</button>
+            `;
+            
+            argsList.appendChild(argItem);
+        }
+
+        async function saveMappingModal() {
+            const trigger = document.getElementById('modalTrigger').value;
+            const oscAddress = document.getElementById('modalOscAddress').value;
+            
+            if (!trigger || !oscAddress) {
+                showModalAlert('Please fill in all required fields', 'error');
+                return;
+            }
+            
+            // Collect arguments
+            const argInputs = document.querySelectorAll('.arg-value');
+            const oscArgs = Array.from(argInputs).map(input => input.value).filter(v => v);
+            
+            const mapping = {
+                trigger_name: trigger,
+                osc_address: oscAddress,
+                osc_args: oscArgs,
+                enabled: true
+            };
+            
+            try {
+                let response;
+                if (currentEditingId) {
+                    response = await fetch(`/api/mappings/${currentEditingId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(mapping)
+                    });
+                } else {
+                    response = await fetch('/api/mappings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(mapping)
+                    });
+                }
+                
+                if (response.ok) {
+                    closeMappingModal();
+                    await loadMappings();
+                    updateStatus();
+                } else {
+                    const error = await response.json();
+                    showModalAlert('Error: ' + error.error, 'error');
+                }
+            } catch (error) {
+                console.error('Error saving mapping:', error);
+                showModalAlert('Failed to save mapping', 'error');
+            }
+        }
+
+        async function deleteMapping(id) {
+            if (!confirm('Are you sure you want to delete this mapping?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/mappings/${id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadMappings();
+                    updateStatus();
+                } else {
+                    alert('Failed to delete mapping');
+                }
+            } catch (error) {
+                console.error('Error deleting mapping:', error);
+                alert('Failed to delete mapping');
+            }
+        }
+
+        async function toggleMapping(id) {
+            try {
+                const response = await fetch(`/api/mappings/${id}/toggle`, {
+                    method: 'POST'
+                });
+                
+                if (response.ok) {
+                    await loadMappings();
+                } else {
+                    alert('Failed to toggle mapping');
+                }
+            } catch (error) {
+                console.error('Error toggling mapping:', error);
+                alert('Failed to toggle mapping');
+            }
+        }
+
+        function showModalAlert(message, type) {
+            const alertDiv = document.getElementById('modalAlert');
+            alertDiv.innerHTML = `<div class="alert ${type}">${message}</div>`;
+            setTimeout(() => {
+                alertDiv.innerHTML = '';
+            }, 5000);
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('mappingModal');
+            if (event.target === modal) {
+                closeMappingModal();
+            }
+        }
+
+        // Auto-refresh status every 5 seconds
+        setInterval(updateStatus, 5000);
+
+        // Load data on page load
+        loadData();
+    </script>
+</body>
+</html>
