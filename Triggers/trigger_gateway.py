@@ -504,8 +504,8 @@ def unregister_service(service_name):
     return jsonify({'message': 'Service unregistered successfully'})
 
 
-@app.route('/api/registrations', methods=['GET'])
-def get_registrations():
+@app.route('/api/services', methods=['GET'])
+def get_services():
     """Get all registered services with socket status."""
     services_with_status = []
     
