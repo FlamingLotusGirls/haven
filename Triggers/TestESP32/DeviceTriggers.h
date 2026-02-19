@@ -1,7 +1,13 @@
+#include <WiFi.h>
+#include <ETH.h>
+#include <HTTPClient.h>
+
 // HTTP Request Queue Structure with timestamp
+// Using fixed-size char arrays instead of String to avoid dangling pointer issues
+// when passing through FreeRTOS queue
 struct HTTPRequest {
-  String url;
-  String payload;
+  char url[256];          // Fixed size to safely copy through queue
+  char payload[512];      // Fixed size for JSON payload
   bool isRegistration;
   unsigned long timestamp;  // millis() when queued
 };
@@ -130,6 +136,7 @@ public:
     params.httpQueue = m_httpQueue;
     
     // Create HTTP worker task (runs on Core 0, main loop runs on Core 1)
+    // (NB - esp32c3 only has one core)
     xTaskCreatePinnedToCore(
       httpWorkerTask,        // Task function
       "HTTP_Worker",         // Task name
@@ -215,9 +222,20 @@ public:
     Serial.println(jsonPayload);
 
     // Queue the request for the HTTP worker thread
+    // Check if strings fit in fixed-size buffers
+    if (url.length() >= sizeof(HTTPRequest::url)) {
+      Serial.printf("ERROR: URL too long (%d bytes, max %d)\n", url.length(), sizeof(HTTPRequest::url) - 1);
+      return;
+    }
+    if (jsonPayload.length() >= sizeof(HTTPRequest::payload)) {
+      Serial.printf("ERROR: Payload too long (%d bytes, max %d)\n", jsonPayload.length(), sizeof(HTTPRequest::payload) - 1);
+      return;
+    }
+    
     HTTPRequest request;
-    request.url = url;
-    request.payload = jsonPayload;
+    // Safe to copy - we checked the sizes above
+    strcpy(request.url, url.c_str());
+    strcpy(request.payload, jsonPayload.c_str());
     request.isRegistration = true;
     request.timestamp = millis();  // Add timestamp
     
@@ -268,7 +286,7 @@ public:
         
         Serial.printf("[HTTP Thread] Processing %s request to %s (age: %lu ms)\n", 
                       request.isRegistration ? "registration" : "trigger", 
-                      request.url.c_str(), age);
+                      request.url, age);
         
         http.begin(request.url);
         http.addHeader("Content-Type", "application/json");
@@ -336,9 +354,22 @@ private:
     Serial.println("Queueing trigger: " + jsonPayload);
 
     // Queue the request for the HTTP worker thread
+    String url = String("http://") + m_triggerServerURL + ":" + m_triggerServerPort + "/api/trigger-event";
+    
+    // Check if strings fit in fixed-size buffers
+    if (url.length() >= sizeof(HTTPRequest::url)) {
+      Serial.printf("ERROR: URL too long (%d bytes, max %d)\n", url.length(), sizeof(HTTPRequest::url) - 1);
+      return false;
+    }
+    if (jsonPayload.length() >= sizeof(HTTPRequest::payload)) {
+      Serial.printf("ERROR: Payload too long (%d bytes, max %d)\n", jsonPayload.length(), sizeof(HTTPRequest::payload) - 1);
+      return false;
+    }
+    
     HTTPRequest request;
-    request.url = String("http://") + m_triggerServerURL + ":" + m_triggerServerPort + "/api/trigger-event";
-    request.payload = jsonPayload;
+    // Safe to copy - we checked the sizes above
+    strcpy(request.url, url.c_str());
+    strcpy(request.payload, jsonPayload.c_str());
     request.isRegistration = false;
     request.timestamp = millis();  // Add timestamp
     
