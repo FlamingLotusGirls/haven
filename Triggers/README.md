@@ -100,31 +100,34 @@ runs on port 5001.
 
 ## TODOS/OUTSTANDING QUESTIONS
 - Servers:
-    - Fix up readmes
-    - There's a question of concurrency here - whether two triggers coming in at the same time
+    - * There's a question of concurrency here - whether two triggers coming in at the same time
 will create a problem on the outgoing socket. Need to check that.
     - * Check end to end when flame server starts before trigger server
     - * Test port changes for webservers
-    - Set up modes on Flame Server - Show, Day, Night (could add others, these should be arbitrary)
-        - What I want here is a way of setting the sculpture mode, and having the other services
-          respect that. The question is - what service controls this? We have - sound, flame, trigger
-          _gateway, and chromatik. None of these really is allowed to be the system orchestrator.
-          So I create a sculpture service that provides the mode, as well as pointers to the other web services
+    - Trigger gateway. Allow registration for specific events, filter on the gateway. 
+      Registration for a specific event is of the form:
+        - Trigger Name + range 
+           POST /listen_trigger {name:triggerName, value: [set of values], or value: {max: , min: }}
+    - * Trigger gateway. What happens if multiple triggers have the same name? (Seems unfortunate but legitimate, actually. Check concurrency in this situation.)
 - Expansion Boards
     - Having this run on the expansion board in the box
     - Getting box expansion boards made (with wifi? with ethernet? I don't have a kicad with ethernet yet)
   (do not use ethernet for this round. Extra connection which I do not want to deal with.)
 - Misc
-    - Can we use different colors in the webpage
-    - pretty print std_sequences.json, because having it all on one line is unreadable
+    - ? Can we use different colors in the webpage
+    - ? pretty print std_sequences.json, because having it all on one line is unreadable
     - Raspberry Pi the services
+- Mode service
+    - * Test mode service
+    - * Test mode service integration with flame server
+    - Create mode box? Or something that can change the mode (and maybe show the current mode)?
 - Esp32:
-    - * Async http requests
-    - Use multi wifi
-    - * ESP32 sleep mode. Let's see if I can get this thing working with a battery
-        - Don't sleep if not registered!
-    - Ping/listener?
+    - ? multi wifi
+    - ? Ping/listener?
+    - ? Don't sleep if not registered!
     - * Put library stuff into library files
+    - * Async http requests
+    - * ESP32 sleep mode. Let's see if I can get this thing working with a battery
 
 
 
