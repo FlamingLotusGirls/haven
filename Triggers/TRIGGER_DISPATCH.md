@@ -86,6 +86,177 @@ Register your service to receive trigger events from the Trigger Server.
 }
 ```
 
+## Device Registration
+
+### Register a Device
+Devices can auto-register themselves with the Trigger Server, automatically creating and updating their trigger definitions.
+
+**Endpoint:** `POST /api/register-device`
+
+**Request Body:**
+```json
+{
+  "name": "RedTelephone",
+  "ip": "192.168.1.100",
+  "triggers": [
+    {
+      "name": "Button_1",
+      "type": "On/Off"
+    },
+    {
+      "name": "Button_2",
+      "type": "OneShot"
+    },
+    {
+      "name": "Dial",
+      "type": "Discrete",
+      "range": {
+        "values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      }
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Device registered successfully",
+  "device": "RedTelephone",
+  "ip": "192.168.1.100",
+  "triggers_created": ["Button_2"],
+  "triggers_updated": ["Button_1", "Dial"]
+}
+```
+
+**Behavior:**
+1. Creates triggers in the format `{device_name}.{trigger_name}` (e.g., `RedTelephone.Button_1`)
+2. If trigger already exists, updates it with new metadata
+3. Adds device metadata to each trigger:
+   - `device`: Device name
+   - `device_ip`: Device IP address
+   - `last_seen`: Current timestamp (for device health monitoring)
+4. Preserves `manually_edited` flag if trigger was previously edited manually
+5. Returns list of created and updated triggers
+
+**Trigger Naming:**
+- Single trigger device: `{device_name}` (e.g., `RedTelephone`)
+- Multi-trigger device: `{device_name}.{trigger_name}` (e.g., `RedTelephone.Button_1`)
+
+**Device Health Monitoring:**
+- Each registration updates the `last_seen` timestamp
+- Devices should register periodically (e.g., on startup and every 5 minutes)
+- Triggers show as "online" if seen within last 5 minutes, "offline" otherwise
+
+**Trigger Types:**
+- **On/Off**: Binary state (no range needed)
+- **OneShot**: Single event (no range needed)
+- **Discrete**: Integer values with either:
+  - `values`: Array of valid values (e.g., `[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]`)
+  - `min` and `max`: Range of valid values (e.g., `{"min": 1, "max": 5}`)
+- **Continuous**: Float values with `min` and `max` (e.g., `{"min": 0.0, "max": 1.0}`)
+
+**Example: ESP32/Arduino Device Registration**
+```cpp
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+void registerDevice() {
+  HTTPClient http;
+  http.begin("http://192.168.1.10:5002/api/register-device");
+  http.addHeader("Content-Type", "application/json");
+  
+  StaticJsonDocument<512> doc;
+  doc["name"] = "RedTelephone";
+  doc["ip"] = WiFi.localIP().toString();
+  
+  JsonArray triggers = doc.createNestedArray("triggers");
+  
+  JsonObject button1 = triggers.createNestedObject();
+  button1["name"] = "Button_1";
+  button1["type"] = "On/Off";
+  
+  JsonObject dial = triggers.createNestedObject();
+  dial["name"] = "Dial";
+  dial["type"] = "Discrete";
+  JsonObject dialRange = dial.createNestedObject("range");
+  JsonArray dialValues = dialRange.createNestedArray("values");
+  for (int i = 0; i <= 9; i++) {
+    dialValues.add(i);
+  }
+  
+  String jsonPayload;
+  serializeJson(doc, jsonPayload);
+  
+  int httpCode = http.POST(jsonPayload);
+  
+  if (httpCode == 200) {
+    Serial.println("Device registered successfully");
+  } else {
+    Serial.printf("Registration failed: %d\n", httpCode);
+  }
+  
+  http.end();
+}
+```
+
+**Example: Python Device Registration**
+```python
+import requests
+import json
+
+def register_device(server_url, device_name, ip_address, triggers):
+    """Register device with trigger server."""
+    data = {
+        "name": device_name,
+        "ip": ip_address,
+        "triggers": triggers
+    }
+    
+    response = requests.post(
+        f"{server_url}/api/register-device",
+        json=data
+    )
+    
+    if response.status_code == 200:
+        result = response.json()
+        print(f"Device registered: {result['device']}")
+        print(f"  Created: {result['triggers_created']}")
+        print(f"  Updated: {result['triggers_updated']}")
+    else:
+        print(f"Registration failed: {response.status_code}")
+        print(response.text)
+
+# Example usage
+triggers = [
+    {"name": "Button_1", "type": "On/Off"},
+    {"name": "Button_2", "type": "OneShot"},
+    {
+        "name": "Slider",
+        "type": "Continuous",
+        "range": {"min": 0.0, "max": 1.0}
+    }
+]
+
+register_device(
+    "http://192.168.1.10:5002",
+    "TestDevice",
+    "192.168.1.100",
+    triggers
+)
+```
+
+**Best Practices:**
+1. Register on device startup
+2. Re-register periodically (every 5 minutes) to update `last_seen`
+3. Use descriptive trigger names (e.g., `Button_Red`, `Dial_Phone`)
+4. Include all triggers in each registration (even if unchanged)
+5. Use consistent trigger types across registrations
+
+**Error Responses:**
+- 400: Missing required fields or invalid trigger data
+- 500: Failed to save configuration
+
 ## Trigger Events
 
 ### Send a Trigger Event (from Device)
