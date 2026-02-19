@@ -3,12 +3,13 @@
  * Device: Xiao ESP32s3
  * 
  * Triggers:
- * - TestESP32.Button (On/Off) - D0 pin
+ * - TestESP32.Button (On/Off) - D10 pin
  * - TestESP32.Discrete - D1 and D2 pins (binary combination)
  * - TestESP32.Continuous - A0 analog pin (placeholder)
  * - TestESP32.OneShot - D3 pin (placeholder)
  */
 
+#define SLEEP_ON_IDLE  // NB - some esp32 variants, notably the c3, use different ways of sleeping. Comment this out if you have compilation problems
 #include <WiFi.h>
 #include <ETH.h>
 #include <HTTPClient.h>
@@ -121,11 +122,11 @@ bool saveConfig() {
 const char* DEVICE_NAME = "TestESP32";
 
 // Pin Definitions
-const int PIN_BUTTON = D0;      // TestESP32.Button
+const int PIN_CONTINUOUS = D0;  // TestESP32.Continuous (analog)
+const int PIN_BUTTON = D10;      // TestESP32.Button
 const int PIN_DISCRETE_D1 = D1; // TestESP32.Discrete bit 0
 const int PIN_DISCRETE_D2 = D2; // TestESP32.Discrete bit 1
 const int PIN_ONESHOT = D3;     // TestESP32.OneShot
-const int PIN_CONTINUOUS = A10;  // TestESP32.Continuous (analog)
 
 // Registration tracking
 const unsigned long REGISTRATION_INTERVAL = 120000; // 2 minutes in milliseconds
@@ -190,6 +191,7 @@ void setup() {
   triggerDevice->RegisterDevice();
   lastRegistrationTime = millis();
   
+#ifdef SLEEP_ON_IDLE
   // Configure light sleep wakeup sources
   // Wake on digital input pin changes (any level change)
   esp_sleep_enable_ext1_wakeup(
@@ -206,6 +208,7 @@ void setup() {
   
   // Configure timer wakeup - wake every 10 seconds
   esp_sleep_enable_timer_wakeup(10 * 1000000);  // 10 seconds in microseconds
+#endif // SLEEP_ON_IDLE
   
   Serial.println("Light sleep enabled:");
   Serial.println("  - Wake on digital pin changes");
@@ -241,9 +244,11 @@ void loop() {
   discreteTrigger->CheckForEventAndSend(discreteValue);
   
   // Check Continuous
+  /*  // XXX having trouble with continuous read on c3; seems to be floating. (using different pin from s3)
   int readingAnalog = analogRead(PIN_CONTINUOUS);
   float continuousValue = ((float)readingAnalog) / 4095.0f;
   continuousTrigger->CheckForEventAndSend(continuousValue);
+  */
   
   // Wait for HTTP queue to be empty before sleeping
   // This gives the HTTP worker thread time to process pending requests
@@ -258,6 +263,7 @@ void loop() {
     Serial.printf("Warning: HTTP queue still has %d requests pending\n", triggerDevice->GetNumberRequestsPending());
   }
   
+#ifdef SLEEP_ON_IDLE
   // Enter light sleep mode
   // Will wake on pin changes or after 10 seconds timer
   // Note: The HTTP worker task will be suspended during sleep
@@ -281,6 +287,7 @@ void loop() {
       Serial.printf("Woke from other reason: %d\n", wakeup_reason);
       break;
   }
+#endif // SLEEP_ON_IDLE
 }
 
 void connectToWiFi() {
