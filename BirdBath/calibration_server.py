@@ -531,12 +531,10 @@ class CalibrationHandler(BaseHTTPRequestHandler):
         elif data_header[0] == CalibrationHandler.DATA_FRAME:
             packet_data.append(CalibrationHandler.DATA_FRAME)
             data_header_len = 1
-        
         # Data length (2 bytes per tuple: 1 byte bool + 1 byte for float as byte)
         data_length = struct.pack(">H", (len(data) * 2) + data_header_len)  # Big endian
         
         # Pack data as series of [bool, float] where bool is always 0 and float is converted to byte
-        packet_data = bytearray()
         for bool_val, float_val in data:
             packet_data.append(0)  # Bool is always 0 (false)
             # Convert float to byte (0-255 range)
