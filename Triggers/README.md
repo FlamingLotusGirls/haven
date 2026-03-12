@@ -7,6 +7,13 @@ to various services that cause changes to the sculpture (such as poof a flame, m
 change the lights). These events are called TriggerEvents, and the system as a whole is 
 called the Trigger System
 
+## TL;DR
+
+Run the Trigger server with:
+```
+python trigger_gateway.py
+```
+
 ## Trigger System - Core Architecture
 There are three main parts of the Trigger System:
 - DeviceTriggerManager. These objects are responsible for detecting the events that cause
