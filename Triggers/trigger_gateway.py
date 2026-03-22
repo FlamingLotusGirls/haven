@@ -455,20 +455,49 @@ def register_service():
         'registered_at': datetime.now().isoformat()
     }
     
-    # For TCP_SOCKET, establish persistent connection
+    # For TCP_SOCKET, manage persistent connection
     if protocol == 'TCP_SOCKET':
-        # Close existing connection if any
         if existing:
-            close_socket_connection(data['name'])
-        
-        sock = establish_socket_connection(data['name'], host, data['port'])
-        if sock:
-            with socket_lock:
-                service_sockets[data['name']] = sock
-            registration['socket_status'] = 'connected'
+            existing_host = existing.get('host', 'localhost')
+            existing_port = existing.get('port')
+
+            if host == existing_host and data['port'] == existing_port:
+                # Same endpoint — keep the existing healthy connection
+                with socket_lock:
+                    sock = service_sockets.get(data['name'])
+                if sock:
+                    registration['socket_status'] = 'connected'
+                else:
+                    # No live socket despite existing registration — reconnect
+                    sock = establish_socket_connection(data['name'], host, data['port'])
+                    if sock:
+                        with socket_lock:
+                            service_sockets[data['name']] = sock
+                        registration['socket_status'] = 'connected'
+                    else:
+                        registration['socket_status'] = 'failed'
+                        return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
+            else:
+                # Different endpoint — close stale connection, open new one
+                close_socket_connection(data['name'])
+                sock = establish_socket_connection(data['name'], host, data['port'])
+                if sock:
+                    with socket_lock:
+                        service_sockets[data['name']] = sock
+                    registration['socket_status'] = 'connected'
+                else:
+                    registration['socket_status'] = 'failed'
+                    return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
         else:
-            registration['socket_status'] = 'failed'
-            return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
+            # Brand new registration
+            sock = establish_socket_connection(data['name'], host, data['port'])
+            if sock:
+                with socket_lock:
+                    service_sockets[data['name']] = sock
+                registration['socket_status'] = 'connected'
+            else:
+                registration['socket_status'] = 'failed'
+                return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
     
     if existing:
         # Update existing registration
