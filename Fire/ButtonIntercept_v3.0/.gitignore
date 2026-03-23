@@ -1,0 +1,8 @@
+esp32s3_dev/buttons2_esp32s3_dev/buttons2_esp32s3_dev-backups/*
+*kicad_sch-bak
+*kicad_prl
+esp32s3_dev/buttons2_esp32s3_dev/haven_buttons2.kicad_pro-backups/*
+*.prl
+fp-info-cache
+waveshare_eth_esp32s3/buttons2_waveshare_eth_esp32s3/buttons2_waveshare_eth_esp32s3-backups/*
+waveshare_eth_esp32s3/buttons2_waveshare_eth_esp32s3/haven_buttons2.kicad_pro-backups/*
