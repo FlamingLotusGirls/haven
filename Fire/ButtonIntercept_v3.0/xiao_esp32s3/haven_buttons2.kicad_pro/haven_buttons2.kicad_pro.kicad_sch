@@ -4508,7 +4508,7 @@
 		)
 		(uuid "35927c87-be5d-4fd1-b439-2000a5a3cea4")
 	)
-	(label "OUT 8"
+	(label "OUT 5"
 		(at 133.35 83.82 0)
 		(effects
 			(font
@@ -4718,7 +4718,7 @@
 		)
 		(uuid "87907bbb-c824-4ba4-b0f3-fc25f7b9561a")
 	)
-	(label "OUT 6"
+	(label "OUT 7"
 		(at 133.35 88.9 0)
 		(effects
 			(font
@@ -4828,7 +4828,7 @@
 		)
 		(uuid "9d99a9d4-d6a0-4326-9473-4160b55cfc88")
 	)
-	(label "OUT 5"
+	(label "OUT 8"
 		(at 133.35 91.44 0)
 		(effects
 			(font
@@ -4888,7 +4888,7 @@
 		)
 		(uuid "aa521226-ee91-4b8d-9fe8-60f94aac2c6d")
 	)
-	(label "OUT 7"
+	(label "OUT 6"
 		(at 133.35 86.36 0)
 		(effects
 			(font
@@ -5282,6 +5282,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C39828"
+			(at 255.27 109.22 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "51403333-b05d-4305-adf3-9d0d87c4aa00")
 		)
@@ -5481,6 +5490,15 @@
 			)
 		)
 		(property "Description" "0.8A Ic, 45V Vce, NPN Transistor, SOT-23"
+			(at 215.9 144.78 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C39828"
 			(at 215.9 144.78 0)
 			(effects
 				(font
@@ -5822,6 +5840,15 @@
 			)
 		)
 		(property "Description" "0.8A Ic, 45V Vce, NPN Transistor, SOT-23"
+			(at 255.27 144.78 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C39828"
 			(at 255.27 144.78 0)
 			(effects
 				(font
@@ -6701,6 +6728,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C39828"
+			(at 215.9 109.22 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "9230e3b9-e83d-4d47-9316-43a0e0b7a649")
 		)
@@ -7344,6 +7380,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C39828"
+			(at 255.27 72.39 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "dd823993-ae55-4b0e-9602-6c05de0e49fe")
 		)
@@ -7409,6 +7454,15 @@
 			)
 		)
 		(property "Description" "IO expander 16 GPIO, I2C 400kHz, Interrupt, 2.3 - 5.5V, TSSOP-24"
+			(at 101.6 151.13 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C1542495"
 			(at 101.6 151.13 0)
 			(effects
 				(font
@@ -7625,6 +7679,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C39828"
+			(at 215.9 72.39 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "855d2c17-9d13-4a86-ad6e-42e649d83f78")
 		)
@@ -7738,7 +7801,7 @@
 				)
 			)
 		)
-		(property "Footprint" "LED_SMD:LED_0201_0603Metric"
+		(property "Footprint" "LED_SMD:LED_0603_1608Metric"
 			(at 104.14 36.83 0)
 			(effects
 				(font
@@ -8474,6 +8537,15 @@
 			)
 		)
 		(property "Description" "0.8A Ic, 45V Vce, NPN Transistor, SOT-23"
+			(at 215.9 36.83 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C39828"
 			(at 215.9 36.83 0)
 			(effects
 				(font
@@ -9444,6 +9516,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C39828"
+			(at 255.27 36.83 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "1"
 			(uuid "800dd0ac-13da-4c90-9e6f-e553a56c36b5")
 		)
@@ -10011,6 +10092,15 @@
 				(hide yes)
 			)
 		)
+		(property "LCSC" "C695629"
+			(at 50.8 64.77 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
 		(pin "2"
 			(uuid "ff1bbe29-0e51-4c77-967d-67d17dfc37f0")
 		)
@@ -10206,6 +10296,15 @@
 			)
 		)
 		(property "Description" "3x DIP Switch, Single Pole Single Throw (SPST) switch, small symbol"
+			(at 36.83 34.29 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(hide yes)
+			)
+		)
+		(property "LCSC" "C7421520"
 			(at 36.83 34.29 0)
 			(effects
 				(font
