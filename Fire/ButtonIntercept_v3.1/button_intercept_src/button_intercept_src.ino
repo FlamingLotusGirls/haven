@@ -9,21 +9,22 @@
 
 
 // WiFi credentials - read out of little FS
-String ssid = "not";
-String password = "set";
-String netName = "foobar";
+String g_ssid = "not";
+String g_password = "set";
+String g_netName = "foobar";
 
 AsyncWebServer server(8000);
 
 void initWiFi(const char* ssid, const char* password) {
   WiFi.mode(WIFI_STA);
+  Serial.printf("Connecting to wifi, ssid: %s, pwd %s\n", ssid, password);
   WiFi.begin(ssid, password);
   WiFi.setAutoReconnect(true);
   Serial.println("Connecting to WiFi");
 }
 
 void setupLittleFS() {
-  if (!LittleFS.begin()) {
+  if (!LittleFS.begin(true)) {
     Serial.println("An error occurred while mounting LittleFS");
     return;
   }
@@ -84,48 +85,18 @@ void setupWebServer() {
 
 int numWifiDisconnectedChecks = 0;
 #define WIFI_PRINT_THRESHOLD 20
+
+// Server setup, mDNS, and trigger registration are all handled by WiFiEvent (event-driven).
+// This function just prints a dot periodically while waiting for a connection, so there is
+// visible feedback on the serial console without blocking anything.
 void wifiLoopCheck() {
-  int wifiStatus = WiFi.status();
-  if (wifiStatus != WL_CONNECTED) {
-    numWifiDisconnectedChecks++;
-    if (numWifiDisconnectedChecks >= WIFI_PRINT_THRESHOLD) {
-      Serial.print(wifiStatus);
+  if (WiFi.status() != WL_CONNECTED) {
+    if (++numWifiDisconnectedChecks >= WIFI_PRINT_THRESHOLD) {
+      Serial.print(WiFi.status());
       Serial.print(".");
       numWifiDisconnectedChecks = 0;
     }
   }
-/*
-
- else {
-    // Wifi connection established. Set up mDNS, setup webserver
-    if (!wifiConnected) {
-      wifiConnected = true;
-      Serial.println();
-      Serial.print("Connected to WiFi! IP address: ");
-      Serial.println(WiFi.localIP());
-      Serial.print("RSSI: ");
-      Serial.println(WiFi.RSSI());
-
-
-      File file = LittleFS.open("/netname.txt", "r");
-      if (!file){
-        Serial.println("Failed to open netname file");
-      } else {
-        String netName = file.readStringUntil('\n');
-        Serial.print("mdns name is ");
-        Serial.print(netName);
-        Serial.print(".local");
-        if (!MDNS.begin(netName.c_str())) { // Set the hostname
-          Serial.println("Error starting mDNS");
-        } else {
-          Serial.println("mDNS responder started");
-        }
-      }
-
-      setupWebServer();
-    }
-  }
-*/
 }
 
 // Get wifi username and password out of LittleFS configuration
@@ -135,13 +106,15 @@ void retrieveWifiCredentials(String& ssid, String& netPass, String& netName)
   // FIRST: Get SSID and password
   if (!LittleFS.exists("/network.json")) {
     Serial.println("network.json not found, using default network credentials");
-  
+  } else {
     File file = LittleFS.open("/network.json", "r");
     if (!file) {
       Serial.println("Failed to open network.json, using default network credentials");
-    } else { 
+    } else {
       // Read file into string
       String jsonString = file.readString();
+      Serial.print("Json string is ");
+      Serial.println(jsonString);
       file.close();
 
       // Parse JSON
@@ -153,17 +126,20 @@ void retrieveWifiCredentials(String& ssid, String& netPass, String& netName)
         Serial.println(error.c_str());
       } else {
         if (doc.containsKey("ssid")) {
-          JsonObject jsonSsid = doc["ssid"];
-          serializeJson(jsonSsid, ssid);
+          ssid = doc["ssid"].as<String>();
+        } else {
+          Serial.println("Document does not contain ssid!");
         }
 
         if (doc.containsKey("password")) {
-          JsonObject jsonPassword = doc["password"];
-          serializeJson(jsonPassword, netPass);
+          netPass = doc["password"].as<String>();
+        } else {
+          Serial.println("Document does not contain password!");
         }
       }
     }
   }
+  Serial.printf("Attempting to connect to network %s, pwd %s\n", ssid.c_str(), netPass.c_str());
 
   // SECOND - Get netname
   File file = LittleFS.open("/netname.txt", "r");
@@ -172,31 +148,46 @@ void retrieveWifiCredentials(String& ssid, String& netPass, String& netName)
     } else {
       netName = file.readStringUntil('\n');  // XXX will this overwrite my string address or change the internal data??
       file.close();
-      Serial.printf("mdns name is %s\n", netName + ".local");
+      Serial.print("mdns name is ");
+      Serial.println(netName + ".local");
   }
 }
 
-void WiFiEvent(WiFiEvent_t event) {
+void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t event_info) {
   switch (event) {
     case ARDUINO_EVENT_WIFI_STA_GOT_IP:
       Serial.print("IP Address: ");
       Serial.println(WiFi.localIP());
 
-      // 1. Restart mDNS
-      if (MDNS.begin(netName)) {
-          Serial.println("mDNS responder started");
+      // MDNS and the web server must only be started once — calling server.begin() or
+      // MDNS.begin() on an already-running instance crashes or leaks resources.
+      // Use a static flag so subsequent reconnects skip re-init but still re-register.
+      {
+        static bool s_serverStarted = false;
+        if (!s_serverStarted) {
+          if (!MDNS.begin(g_netName.c_str())) {
+            Serial.println("Error starting mDNS");
+          } else {
+            Serial.println("mDNS responder started");
+          }
+          setupWebServer();
+          s_serverStarted = true;
+        } else {
+          Serial.println("WiFi reconnected — web server already running, skipping re-init");
+        }
       }
 
-      // 2. Start/Restart Webserver
-      setupWebServer();
-      Serial.println("HTTP server started");
+      // Always re-register on every (re)connect so the trigger server gets the current IP.
+      registerTriggerDevice();
       break;
 
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-      Serial.println("!!! WiFi lost. Attempting to reconnect...");
-      // The ESP32 handles reconnection automatically if WiFi.setAutoReconnect(true) is set
+      Serial.print("!!! WiFi lost. Reconnecting automatically. Reason: ");
+      Serial.println(event_info.wifi_sta_disconnected.reason);
+
+      // ESP32 handles reconnection automatically because WiFi.setAutoReconnect(true) is set.
       break;
-        
+
     default: break;
   }
 }
@@ -213,10 +204,10 @@ void setup() {
   // Register the Wifi event handler before connecting
   WiFi.onEvent(WiFiEvent);
 
-  // 
+  // Connect to buttons, load button configuration
   buttonSetup();
-  retrieveWifiCredentials(ssid, password, netName);
-  initWiFi(ssid.c_str(), password.c_str());
+  retrieveWifiCredentials(g_ssid, g_password, g_netName);
+  initWiFi(g_ssid.c_str(), g_password.c_str());
 
   Serial.println("Setup running on Core: " + String(xPortGetCoreID()));
 

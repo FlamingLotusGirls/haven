@@ -1,4 +1,5 @@
 //#define ARDUINO  // NB - predefined if in Arduino IDE
+#include "button_sequence.h"
 
 // #define ESP32_DEV // Two configs - esp32 dev board, with all i/o onboard, or xiao with io on pca9555
 #ifndef ESP32_DEV 
@@ -17,12 +18,14 @@
 #include <AsyncHTTPRequest_Generic.h>   // https://github.com/khoih-prog/AsyncHTTPRequest_Generic
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <string>   // std::string used in Program::m_name (available in ESP32 GCC toolchain)
 #include "DeviceTriggers.h"
 #else
 #include <stdio.h>
 #include <cstdint>
 #include <chrono>
 #include <cstring>
+#include <string>   // std::string used in Program::m_name
 #include <unistd.h>
 #endif // ARDUINO
 
@@ -93,19 +96,19 @@ static constexpr int INVALID_OUTPUT_CHANNEL = -1;
 
 #ifdef ARDUINO
 // Trigger system globals
-TriggerDevice* triggerDevice = nullptr;
-std::shared_ptr<ButtonTrigger> channelTriggers[NUM_INPUT_CHANNELS];
-bool triggerEnabled[NUM_INPUT_CHANNELS];
-String triggerNames[NUM_INPUT_CHANNELS];
+static TriggerDevice* triggerDevice = nullptr;
+static std::shared_ptr<ButtonTrigger> channelTriggers[NUM_INPUT_CHANNELS];
+static bool triggerEnabled[NUM_INPUT_CHANNELS];
+static String triggerNames[NUM_INPUT_CHANNELS];
 #endif
 
 // Forward declarations
-void initMillis();
+static void initMillis();
 #ifndef ARDUINO
 uint32_t millis();
 #endif
-bool readRawInput(int channelId, uint16_t gpioRawData, int curTimeMs);
-void writeOutput(int outputChannel, bool output);
+static bool readRawInput(int channelId, uint16_t gpioRawData, int curTimeMs);
+static void writeOutput(int outputChannel, bool output);
 
 
 /**********  UTILITY FUNCTIONS ***************/
@@ -113,11 +116,11 @@ void writeOutput(int outputChannel, bool output);
 // milliseconds since the board booted/program started. Create a version of this for
 // the non-embedded debug environment.
 #ifdef ARDUINO
-void initMillis() {
+static void initMillis() {
 }
 #else 
 std::chrono::steady_clock::time_point start_time;
-void initMillis() {
+static void initMillis() {
   start_time = std::chrono::steady_clock::now();
 }
 uint32_t millis() {
@@ -213,12 +216,14 @@ class Program {
     }
 
     const char* GetName() {
-      return m_name;
+      return m_name.c_str();
     }
 
   private:
     ChannelSequence** m_sequences;
-    const char* m_name;
+    // std::string owns a copy of the name, preventing the dangling-pointer bug
+    // that occurs when Program is constructed from a local String's c_str().
+    std::string m_name;
     int m_totalPlayTime;
 };
 
@@ -281,7 +286,7 @@ ChannelSequence chaseFourthOnFour(3, 1500, poof);
 ChannelSequence chaseFifthOnFive(4, 2000, poof);
 ChannelSequence chaseSixthOnSix(5, 2500, poof);
 ChannelSequence chaseSeventhOnSeven(6, 3000, poof);
-ChannelSequence chaseEigthOnEight(7, 3500, poof);
+ChannelSequence chaseEighthOnEight(7, 3500, poof);
 
 ChannelSequence poof1(0, 0, poof);
 ChannelSequence poof2(1, 0, poof);
@@ -336,7 +341,10 @@ struct NamedSequence {
 struct NamedProgram {
   String name;
   Program* program;
-  NamedProgram() : program(nullptr) {}
+  // Owned ChannelSequence objects so loadPatternsFromFile() can free them on reload.
+  ChannelSequence** channelSeqs;   // the null-terminated pointer array passed to Program
+  int channelSeqCount;             // number of live (non-null) entries in channelSeqs
+  NamedProgram() : program(nullptr), channelSeqs(nullptr), channelSeqCount(0) {}
 };
 
 const int MAX_DYNAMIC_SEQUENCES = 16;
@@ -396,6 +404,17 @@ public:
 
   void setProgram(Program* program) {
     if (bFollowerOnly) {
+      return;
+    }
+    // nullptr means "reset to Follower immediately".  Never defer this through the
+    // m_nextProgram queuing path — the caller (loadPatternsFromFile) will delete the
+    // old Program object right after this call, so m_program must not be left pointing
+    // at it in any state, including PLAYBACK.
+    if (program == nullptr) {
+      m_program     = nullptr;
+      m_nextProgram = nullptr;
+      m_mode  = ChannelControllerMode::Follower;
+      m_state = WAIT_FOR_UNPRESS;  // require button release before any new press is accepted
       return;
     }
     if (program != m_program) {
@@ -526,6 +545,12 @@ int ChannelController::s_inputChannel = 0;
 
 ChannelController controllers[NUM_INPUT_CHANNELS];
 
+#ifdef ARDUINO
+// Mutex to protect controllers[] from concurrent access between the main loop
+// (Core 1) and the ESPAsyncWebServer task (which calls setProgram via loadPatternsFromFile).
+SemaphoreHandle_t g_controllersMutex = NULL;
+#endif
+
 // Global channel aliases - initialized with default names, loaded from file
 #ifdef ARDUINO
 String channelAlias[8] = {
@@ -555,7 +580,7 @@ void initI2C() {
 #endif
 }
 
-uint16_t readGPIOInput() {
+static uint16_t readGPIOInput() {
 #ifdef ESP32_DEV
   uint16_t input = 0;
   for (int i=0; i<NUM_INPUT_CHANNELS; i++){
@@ -571,15 +596,18 @@ uint16_t readGPIOInput() {
 #endif // ESP32_DEV
 }
 
-int8_t readDIPSwitch(uint16_t gpioRawData) {
+static int8_t readDIPSwitch(uint16_t gpioRawData) {
 #ifdef PCA_9555
-  return ((gpioRawData & 0x1000 >> 10) +
-           (gpioRawData & 0x2000 >> 12) + 
-           (gpioRawData & 0x4000 >> 14));
+  // NB: parentheses are critical here — & has lower precedence than >>, so without
+  // them the shifts apply to the constants, not to the masked result.
+  return (((gpioRawData & 0x1000) >> 10) +
+          ((gpioRawData & 0x2000) >> 12) + 
+          ((gpioRawData & 0x4000) >> 14));
 #else 
   return 0; // XXX Not sure what outputs I'd use for the dip switch with an ESP DEV Board
 #endif 
 }
+
 #endif // ARDUINO
 
 
@@ -679,7 +707,7 @@ InputTest inputTest;
 /************** IO **************/
 
 // either going to be reading from a Program or getting data from the actual device
-bool readRawInput(int inputChannel, uint16_t gpioRawData, int curTimeMs) {
+static bool readRawInput(int inputChannel, uint16_t gpioRawData, int curTimeMs) {
 #ifdef ARDUINO
 #ifdef ESP32_DEV
   bool input = gpioRawData & (1 << inputChannel);
@@ -706,7 +734,7 @@ void setLEDState(bool onOff) {
 #endif // ARDUINO
 }
 
-void writeOutput(int outputChannel, bool output) {
+static void writeOutput(int outputChannel, bool output) {
 #ifdef ARDUINO
 #ifdef DEBUG
 /*
@@ -769,7 +797,7 @@ class Debouncer {
 Debouncer debouncer;
 bool inputButtonStates[NUM_INPUT_CHANNELS];
 
-void readInputButtonStates(uint16_t gpioRawData, int curTimeMs, bool testMode) {
+static void readInputButtonStates(uint16_t gpioRawData, int curTimeMs, bool testMode) {
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
     bool oldButtonState = inputButtonStates[i];
     bool buttonState = readRawInput(i, gpioRawData, curTimeMs);
@@ -793,7 +821,7 @@ void readInputButtonStates(uint16_t gpioRawData, int curTimeMs, bool testMode) {
 
 bool consolidatedOutput[NUM_OUTPUT_CHANNELS];
 
-void initIO() {
+static void initIO() {
 #ifdef ARDUINO
 #ifdef ESP32_DEV
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
@@ -822,84 +850,86 @@ uint8_t csw_read_pca() {
 }
 */
 
-uint16_t oldGpioRawData = 0xFFFF;
-uint8_t oldDipSwitch = 0;
-int oldTimeMs = 0;
-bool ledState = true;
+static uint16_t g_oldGpioRawData = 0xFFFF;
+static uint8_t g_oldDipSwitch = 0;
 void buttonLoop() {
   // Read data, send to the channel controllers.
   int curTimeMs = millis();
-  /*
-  if (curTimeMs > oldTimeMs + 1000) {
-    oldTimeMs = curTimeMs;
-    ledState = !ledState;
-    setLEDState(ledState);
-    Serial.println("Blink!!!");
-    csw_read_pca();
-    uint16_t libPca = readGPIOInput();
-    Serial.print("PCA Library Reads: ");
-    Serial.println(libPca, HEX);
-  }
-  */
   
   bool consolidatedOutputDebugCopy[NUM_OUTPUT_CHANNELS];
   memcpy(consolidatedOutputDebugCopy, consolidatedOutput, NUM_OUTPUT_CHANNELS*sizeof(bool));
   memset(consolidatedOutput, 0, NUM_OUTPUT_CHANNELS*sizeof(bool));
 
   uint16_t gpioRawData = readGPIOInput();
-  if (curTimeMs > oldTimeMs + 1000) {
-      oldTimeMs = curTimeMs;
-      Serial.print("PCA Library Reads: ");
-      Serial.println(gpioRawData, HEX);
-  }
-  if (gpioRawData != oldGpioRawData) {
+  if (gpioRawData != g_oldGpioRawData) {
   // #ifdef DEBUG
     Serial.print("Data change! Old data was ");
-    Serial.print(oldGpioRawData, BIN);
+    Serial.print(g_oldGpioRawData, BIN);
     Serial.print(", new data is ");
     Serial.println(gpioRawData, BIN);
   // #endif
 
-    oldGpioRawData = gpioRawData;
+    g_oldGpioRawData = gpioRawData;
   }
+  // Read DIP switch to determine operating mode.
+  // DIP switch value 7 = test mode: all channels follow input directly (follower behaviour),
+  // no programs run, and no trigger events are sent to the network.
+  // Detect transitions so active programs are canceled exactly once on entry.
   uint8_t dipSwitch = readDIPSwitch(gpioRawData);
-  bool testMode = false;
-  if (oldDipSwitch != dipSwitch) {
-    // set internal mode from dip switch
-    if (dipSwitch == 7) {
-      testMode = true;
-    } else {
-      testMode = false;
+  static bool s_testMode = false;
+  if (g_oldDipSwitch != dipSwitch) {
+    bool newTestMode = (dipSwitch == 7);
+    if (newTestMode && !s_testMode) {
+      // Entering test mode: cancel any in-flight programs immediately so they
+      // don't continue driving outputs while test mode is active.
+      Serial.println("TEST MODE: entered — all programs canceled");
+#ifdef ARDUINO
+      if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
+#endif
+      for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+        controllers[i].cancel();
+      }
+#ifdef ARDUINO
+      if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
+#endif
+    } else if (!newTestMode && s_testMode) {
+      Serial.println("TEST MODE: exited — normal operation resumed");
     }
+    s_testMode = newTestMode;
+    g_oldDipSwitch = dipSwitch;
   }
-  // just a test..
-  readInputButtonStates(gpioRawData, curTimeMs, testMode);  // XXX - Side effect - sends triggers. Should refactor.
 
+  // readInputButtonStates suppresses trigger sends when testMode is true.
+  readInputButtonStates(gpioRawData, curTimeMs, s_testMode);
+
+  // Take the mutex before accessing controllers[]. The web server task may call
+  // setProgram() concurrently; portMAX_DELAY is safe here because the web handler
+  // holds the mutex only for the brief setProgram() calls.
+#ifdef ARDUINO
+  if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
+#endif
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
-    if (testMode) {
+    if (s_testMode) {
+      // Test mode: output directly mirrors input state, bypassing all program logic.
+      // Programs were already canceled on the transition into test mode.
       if (i < NUM_OUTPUT_CHANNELS) {
-        // Test mode - output follows input. 
         consolidatedOutput[i] = inputButtonStates[i];
       }
-      controllers[i].cancel();
     } else {
       controllers[i].update(inputButtonStates[i], curTimeMs);
       PlayState* playState = controllers[i].getPlayState();
       for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {
         // For the moment, if any program says that the button is pressed, it's pressed.
         if (playState->valid && playState->buttonPressed) {
-          // Serial.print("Consolidated button press on output channel ");
-          // Serial.println(j);
           consolidatedOutput[j] = true;
         }
         playState++;
       }
     }
   }
-
-  // If we're in test mode, we *completely* ignore what the controllers tell us to do.
-  // Consolidated output follows the button state. 
-  if (testMode)
+#ifdef ARDUINO
+  if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
+#endif
 
   for (int k=0; k<NUM_OUTPUT_CHANNELS; k++) {
     if (consolidatedOutput[k] != consolidatedOutputDebugCopy[k]) {
@@ -978,6 +1008,39 @@ void loadChannelsFromFile() {
 
 // Dynamic sequence and pattern loading from JSON files
 void loadPatternsFromFile() {
+  // Free any data allocated by a previous call so we don't leak on hot-reload.
+  // Reset controllers to follower mode first so they don't hold dangling Program pointers.
+  if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
+  for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+    controllers[i].setProgram(nullptr);
+  }
+  if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
+
+  // Free dynamic sequences (Section[] arrays)
+  for (int i = 0; i < dynamicSequenceCount; i++) {
+    delete[] dynamicSequences[i].sections;
+    dynamicSequences[i].sections = nullptr;
+    dynamicSequences[i].name = "";
+  }
+  dynamicSequenceCount = 0;
+
+  // Free dynamic programs: each ChannelSequence*, the pointer array, and the Program
+  for (int i = 0; i < dynamicProgramCount; i++) {
+    if (dynamicPrograms[i].channelSeqs != nullptr) {
+      for (int j = 0; j < dynamicPrograms[i].channelSeqCount; j++) {
+        delete dynamicPrograms[i].channelSeqs[j];
+        dynamicPrograms[i].channelSeqs[j] = nullptr;
+      }
+      delete[] dynamicPrograms[i].channelSeqs;
+      dynamicPrograms[i].channelSeqs = nullptr;
+      dynamicPrograms[i].channelSeqCount = 0;
+    }
+    delete dynamicPrograms[i].program;
+    dynamicPrograms[i].program = nullptr;
+    dynamicPrograms[i].name = "";
+  }
+  dynamicProgramCount = 0;
+
   if (!LittleFS.exists("/patterns.json")) {
     Serial.println("patterns.json not found, using hardcoded patterns");
     return;
@@ -1015,10 +1078,12 @@ void loadPatternsFromFile() {
       String sequenceName = sequencePair.key().c_str();
       JsonArray sequenceData = sequencePair.value().as<JsonArray>();
       
-      // Count sections to allocate memory
-      int sectionCount = sequenceData.size();  
-      Section* dynamicSection = new Section[sectionCount];
-      
+      // Count sections to allocate memory.
+      // Allocate sectionCount + 1 so we can always write the {false, -1} sentinel that
+      // Program's constructor and GetButtonStates() require to know where the array ends.
+      int sectionCount = sequenceData.size();
+      Section* dynamicSection = new Section[sectionCount + 1];
+
       int index = 0;
       for (JsonArray::iterator it = sequenceData.begin(); it != sequenceData.end(); ++it) {
         JsonArray sectionData = *it;
@@ -1028,7 +1093,9 @@ void loadPatternsFromFile() {
           index++;
         }
       }
-      
+      // Write the required sentinel so Program's traversal loops terminate safely.
+      dynamicSection[index] = {false, -1};
+
       // Store in the dynamic sequences array
       dynamicSequences[dynamicSequenceCount].name = sequenceName;
       dynamicSequences[dynamicSequenceCount].sections = dynamicSection;
@@ -1052,9 +1119,11 @@ void loadPatternsFromFile() {
       Serial.print("Loading pattern: ");
       Serial.println(patternName);
       
-      // Create channel sequences for this pattern
+      // Create channel sequences for this pattern.
+      // Named channelSeqArray (not dynamicSequences) to avoid shadowing the global
+      // NamedSequence dynamicSequences[] array declared above.
       int sequenceCount = patternData.size();
-      ChannelSequence** dynamicSequences = new ChannelSequence*[sequenceCount + 1];
+      ChannelSequence** channelSeqArray = new ChannelSequence*[sequenceCount + 1];
       
       int index = 0;
       for (JsonArray::iterator it = patternData.begin(); it != patternData.end(); ++it) {
@@ -1090,7 +1159,7 @@ void loadPatternsFromFile() {
             
             if (sequenceSection != nullptr) {
               ChannelSequence* channelSeq = new ChannelSequence(channelIndex, delayMs, sequenceSection);
-              dynamicSequences[index] = channelSeq;
+              channelSeqArray[index] = channelSeq;
               index++;
               
               Serial.print("  Channel: ");
@@ -1114,21 +1183,27 @@ void loadPatternsFromFile() {
         }
       }
       
-      dynamicSequences[index] = nullptr; // Null terminate
-      
-      // Create program from dynamic sequences
+      channelSeqArray[index] = nullptr; // Null-terminate
+
+      // Create program from the channel sequences
       if (index > 0 && dynamicProgramCount < MAX_DYNAMIC_PROGRAMS) {
-        Program* dynamicProgram = new Program(dynamicSequences, patternName.c_str());
-        
-        // Store it in the dynamic programs array
+        Program* dynamicProgram = new Program(channelSeqArray, patternName.c_str());
+
+        // Store program and ownership of channelSeqArray so it can be freed on reload
         dynamicPrograms[dynamicProgramCount].name = patternName;
         dynamicPrograms[dynamicProgramCount].program = dynamicProgram;
+        dynamicPrograms[dynamicProgramCount].channelSeqs = channelSeqArray;
+        dynamicPrograms[dynamicProgramCount].channelSeqCount = index;
         dynamicProgramCount++;
-        
+
         Serial.print("Created dynamic program: ");
         Serial.println(patternName);
-      } else if (dynamicProgramCount >= MAX_DYNAMIC_PROGRAMS) {
-        Serial.println("Warning: Maximum dynamic programs reached");
+      } else {
+        // No valid channels or programs array full — free the pointer array now
+        delete[] channelSeqArray;
+        if (dynamicProgramCount >= MAX_DYNAMIC_PROGRAMS) {
+          Serial.println("Warning: Maximum dynamic programs reached");
+        }
       }
     }
   }
@@ -1156,9 +1231,12 @@ void loadPatternsFromFile() {
         selectedProgram = findDynamicProgram(patternName);
       }
       
-      // Set the program for this button
+      // Set the program for this button — take mutex since buttonLoop() may be
+      // reading controllers[] on Core 1 at the same time.
       if (buttonIndex < NUM_INPUT_CHANNELS && selectedProgram != nullptr) {
+        if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
         controllers[buttonIndex].setProgram(selectedProgram);
+        if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
         Serial.print("Mapped button ");
         Serial.print(buttonIndex);
         Serial.print(" to pattern ");
@@ -1177,6 +1255,17 @@ void loadPatternsFromFile() {
 
 // Load trigger mappings from trigger_mappings.json
 void loadTriggerMappingsFromFile() {
+  // Clean up any previous TriggerDevice.
+  // Clear channelTriggers[] shared_ptrs first: each ButtonTrigger holds a reference
+  // to its TriggerDevice, so we must release those refs before deleting the device.
+  for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+    channelTriggers[i].reset();  // releases shared_ptr, may delete ButtonTrigger
+  }
+  if (triggerDevice != nullptr) {
+    delete triggerDevice;        // kills HTTP task + queue, then destroys m_triggers
+    triggerDevice = nullptr;
+  }
+
   // Initialize trigger enabled array
   for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
     triggerEnabled[i] = false;
@@ -1237,8 +1326,11 @@ void loadTriggerMappingsFromFile() {
         triggerNames[channel] = triggerName;
         
         if (enabled) {
-          // Create ButtonTrigger for this channel
-          channelTriggers[channel] = triggerDevice->AddButtonTrigger(triggerName, false, 100);
+          // Create ButtonTrigger for this channel.
+          // debounceTimeMs=0: hardware debounce in readInputButtonStates() already ensures
+          // CheckForEventAndSend is only called on stable state changes, so no additional
+          // software debounce is needed here.
+          channelTriggers[channel] = triggerDevice->AddButtonTrigger(triggerName, false, 0);
           Serial.print("Channel ");
           Serial.print(channel);
           Serial.print(" -> Trigger: ");
@@ -1249,20 +1341,30 @@ void loadTriggerMappingsFromFile() {
   }
   
   // Register device with trigger server
-  if (triggerDevice != nullptr) {
-    triggerDevice->RegisterDevice();
-    Serial.println("Trigger device registered");
-  }
-  
+  registerTriggerDevice();
+
   Serial.println("=== Trigger Configuration Complete ===");
 }
 #endif
+
+bool registerTriggerDevice() {
+  bool registrationSent = false;
+  if (triggerDevice != nullptr) {
+    registrationSent = triggerDevice->RegisterDevice();
+    Serial.printf("Trigger device registration sent: %s\n", registrationSent ? "TRUE" : "FALSE");
+  }
+  return registrationSent;
+}
 
 void buttonSetup() {
   sleep(1);
   initMillis();
   initIO();
 #ifdef ARDUINO
+  g_controllersMutex = xSemaphoreCreateMutex();
+  if (g_controllersMutex == NULL) {
+    Serial.println("ERROR: Failed to create controllers mutex!");
+  }
   Serial.println("Trying to set up i2c");
   initI2C();
   // Try to load configuration from files first, fallback to hardcoded
@@ -1273,11 +1375,17 @@ void buttonSetup() {
   } else {
     // initChannelControllers(); // Use hardcoded patterns
   }
-#ifdef DEBUG
-  Serial.println("Starting...");
-#endif // DEBUG
+  // Initial read of DIP switches and buttons...
+  g_oldGpioRawData = readGPIOInput();
+  g_oldDipSwitch = readDIPSwitch(g_oldGpioRawData);
+  Serial.println("Buttons Starting...");
+  Serial.print("  Initial DIP switch read is ");
+  Serial.println(g_oldDipSwitch, BIN);
+  Serial.print("  Initial GPIO read is ");
+  Serial.println(g_oldGpioRawData, BIN);
+
 #else // ~ARDUINO
-  printf("Starting...\n");
+  printf("Buttons Starting...\n");
 #ifdef MOCK_INPUT
   inputTest.Start();
 #endif
