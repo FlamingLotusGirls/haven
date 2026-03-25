@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <ETH.h>
 #include <HTTPClient.h>
+#include <ArduinoJson.h>
 
 // HTTP Request Queue Structure with timestamp
 // Using fixed-size char arrays instead of String to avoid dangling pointer issues
@@ -130,10 +131,12 @@ public:
       return;
     }
 
-    HttpWorkerParameters params;
-    params.httpTimeoutMs = m_httpTimeout;
-    params.maxAgeMs = 3000;
-    params.httpQueue = m_httpQueue;
+    // Heap-allocate params so they remain valid when the task starts up.
+    // The task is responsible for deleting this after reading the values.
+    HttpWorkerParameters* params = new HttpWorkerParameters();
+    params->httpTimeoutMs = m_httpTimeout;
+    params->maxAgeMs = 3000;
+    params->httpQueue = m_httpQueue;
     
     // Create HTTP worker task (runs on Core 0, main loop runs on Core 1)
     // (NB - esp32c3 only has one core)
@@ -141,7 +144,7 @@ public:
       httpWorkerTask,        // Task function
       "HTTP_Worker",         // Task name
       8192,                  // Stack size (bytes)
-      (void *)&params,       // Task parameters
+      (void *)params,        // Task parameters (heap-allocated, task will delete)
       1,                     // Priority (1 = low, higher numbers = higher priority)
       &m_httpTaskHandle,     // Task handle
       0                      // Core ID (0 = Core 0, 1 = Core 1)
@@ -153,6 +156,18 @@ public:
   };
   
   ~TriggerDevice() {
+    // Kill the HTTP worker task before releasing the queue.
+    // The task is normally blocked on xQueueReceive, so vTaskDelete is safe here.
+    if (m_httpTaskHandle != NULL) {
+      vTaskDelete(m_httpTaskHandle);
+      m_httpTaskHandle = NULL;
+    }
+    // Release any pending requests and delete the queue.
+    if (m_httpQueue != NULL) {
+      vQueueDelete(m_httpQueue);
+      m_httpQueue = NULL;
+    }
+    // m_triggers (vector of shared_ptr<Trigger>) is destroyed automatically.
   }
   
   std::shared_ptr<ButtonTrigger> AddButtonTrigger(String name, bool initialValue, int debounceTimeMs=50) {
@@ -176,17 +191,17 @@ public:
     return oneShotTrigger;
   };
 
-  void RegisterDevice() {
+  bool RegisterDevice() {
     if (m_usesWifi) {
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Cannot register - no WiFi connection");
-        return;
+        return false;
       }
     } else {
       // Check Ethernet connection
       if (!ETH.linkUp()) {
         Serial.println("Cannot register - no Ethernet connection");
-        return;
+        return false;
       }
     }
 
@@ -225,11 +240,11 @@ public:
     // Check if strings fit in fixed-size buffers
     if (url.length() >= sizeof(HTTPRequest::url)) {
       Serial.printf("ERROR: URL too long (%d bytes, max %d)\n", url.length(), sizeof(HTTPRequest::url) - 1);
-      return;
+      return false;
     }
     if (jsonPayload.length() >= sizeof(HTTPRequest::payload)) {
       Serial.printf("ERROR: Payload too long (%d bytes, max %d)\n", jsonPayload.length(), sizeof(HTTPRequest::payload) - 1);
-      return;
+      return false;
     }
     
     HTTPRequest request;
@@ -239,8 +254,9 @@ public:
     request.isRegistration = true;
     request.timestamp = millis();  // Add timestamp
     
-    if (xQueueSend(m_httpQueue, &request, pdMS_TO_TICKS(100)) != pdTRUE) {
+    if (xQueueSend(m_httpQueue, &request, pdMS_TO_TICKS(50)) != pdTRUE) {
       Serial.println("Failed to queue registration request - queue full");
+      return false;
     }
   };
 
@@ -267,9 +283,10 @@ public:
     int httpTimeoutMs = params->httpTimeoutMs;
     int maxAgeMs = params->maxAgeMs;
     QueueHandle_t httpQueue = params->httpQueue;
-
+    delete params;  // Free heap-allocated params now that we've copied the values
 
     if (httpQueue == NULL) {
+      vTaskDelete(NULL);
       return;
     }
     
@@ -373,7 +390,7 @@ private:
     request.isRegistration = false;
     request.timestamp = millis();  // Add timestamp
     
-    if (xQueueSend(m_httpQueue, &request, pdMS_TO_TICKS(100)) != pdTRUE) {
+    if (xQueueSend(m_httpQueue, &request, pdMS_TO_TICKS(50)) != pdTRUE) {
       Serial.println("Failed to queue trigger request - queue full");
       return false;
     }
@@ -399,7 +416,10 @@ bool ButtonTrigger::CheckForEventAndSend(bool onOff) {
     m_lastChangeTime = millis();
     m_lastReading = onOff;
   }
-  if (m_lastReading != m_currentState && millis() > m_lastChangeTime + m_debounceTimeMs) {
+  // Use >= so that debounceTimeMs=0 fires on the same call (handles the case where
+  // CheckForEventAndSend is called once per hardware-debounced state change rather than
+  // every loop iteration).
+  if (m_lastReading != m_currentState && millis() >= m_lastChangeTime + m_debounceTimeMs) {
     m_currentState = onOff;
     triggerSent = m_device.sendTriggerEvent(*this);
   }
@@ -450,4 +470,3 @@ bool ContinuousTrigger::CheckForEventAndSend(float value) {
 
 OneShotTrigger::OneShotTrigger(TriggerDevice& device, String name) : Trigger(device, name) {};
 // END TRIGGER LIBRARY
-
