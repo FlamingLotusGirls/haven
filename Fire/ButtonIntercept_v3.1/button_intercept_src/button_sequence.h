@@ -9,6 +9,5 @@
 void buttonSetup(String& netname);
 void buttonLoop();
 void loadPatternsFromFile();
-bool registerTriggerDevice();
 
 #endif // BUTTON_SEQUENCE_H

@@ -872,6 +872,10 @@ static uint16_t g_oldGpioRawData = 0xFFFF;
 static uint8_t g_oldDipSwitch = 0;
 static bool g_testMode = false;
 void buttonLoop() {
+  // Update connection to trigger gateway
+  if (triggerDevice != nullptr) {
+    triggerDevice->Update();
+  }
   // Read data, send to the channel controllers.
   int curTimeMs = millis();
   
@@ -1356,22 +1360,11 @@ void loadTriggerMappingsFromFile(String& deviceName) {
       }
     }
   }
-  
-  // Register device with trigger server
-  registerTriggerDevice();
 
   Serial.println("=== Trigger Configuration Complete ===");
 }
 #endif
 
-bool registerTriggerDevice() {
-  bool registrationSent = false;
-  if (triggerDevice != nullptr) {
-    registrationSent = triggerDevice->RegisterDevice();
-    Serial.printf("Trigger device registration sent: %s\n", registrationSent ? "TRUE" : "FALSE");
-  }
-  return registrationSent;
-}
 
 void buttonSetup(String& netName) {
   sleep(1);

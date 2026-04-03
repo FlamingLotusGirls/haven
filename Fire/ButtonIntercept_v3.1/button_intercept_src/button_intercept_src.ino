@@ -177,8 +177,6 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t event_info) {
         }
       }
 
-      // Always re-register on every (re)connect so the trigger server gets the current IP.
-      registerTriggerDevice();
       break;
 
     case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
