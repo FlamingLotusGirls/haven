@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
 import socket
+import tempfile
 import threading
 import requests
 from datetime import datetime
@@ -43,6 +44,11 @@ socket_server = None
 socket_server_thread = None
 server_running = False
 
+# Protects all read-modify-write operations on the config dict.
+# Flask threads mutate config['mappings'] and config['osc_client'];
+# the socket-server thread reads config['mappings'] in process_trigger_event.
+config_lock = threading.Lock()
+
 
 def load_config():
     """Load configuration from file."""
@@ -65,13 +71,25 @@ def load_config():
 
 
 def save_config():
-    """Save configuration to file."""
+    """Save configuration to file atomically.
+
+    Callers must hold config_lock for the full load→modify→save cycle.
+    """
+    tmpname = None
     try:
-        with open(CONFIG_FILE, 'w') as f:
+        config_dir = os.path.dirname(os.path.abspath(CONFIG_FILE)) or '.'
+        with tempfile.NamedTemporaryFile('w', dir=config_dir, suffix='.tmp', delete=False) as f:
+            tmpname = f.name
             json.dump(config, f, indent=2)
+        os.replace(tmpname, CONFIG_FILE)
         return True
     except Exception as e:
         print(f"Error saving config: {e}")
+        if tmpname:
+            try:
+                os.unlink(tmpname)
+            except OSError:
+                pass
         return False
 
 
@@ -219,9 +237,15 @@ def process_trigger_event(trigger_event):
     
     print(f"Processing trigger event: {trigger_name} = {trigger_value}")
     
+    # Take a snapshot of the current mappings under the lock so mutations from
+    # Flask threads do not race with our iteration (which may call send_osc_message,
+    # an operation we do not want to hold the lock across).
+    with config_lock:
+        current_mappings = list(config['mappings'])
+    
     # Find matching mappings
     matched = False
-    for mapping in config['mappings']:
+    for mapping in current_mappings:
         if mapping.get('trigger_name') == trigger_name:
             # Check if this mapping is enabled
             if not mapping.get('enabled', True):
@@ -242,6 +266,7 @@ def handle_client_connection(client_socket, client_address):
     """Handle a single client connection."""
     print(f"Client connected from {client_address}")
     buffer = ""
+    MAX_BUFFER = 65536  # 64 KB — close connection if no newline arrives by then
     
     try:
         while server_running:
@@ -251,6 +276,11 @@ def handle_client_connection(client_socket, client_address):
             
             # Decode and add to buffer
             buffer += data.decode('utf-8')
+            
+            # Guard against unbounded buffer growth from malformed / run-away clients
+            if len(buffer) > MAX_BUFFER:
+                print(f"Buffer limit exceeded from {client_address}, closing connection")
+                break
             
             # Process complete JSON messages (newline-delimited)
             while '\n' in buffer:
@@ -353,19 +383,23 @@ def update_osc_client():
     """Update OSC client configuration."""
     data = request.get_json()
     
-    if 'host' in data:
-        config['osc_client']['host'] = data['host']
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
     
-    if 'port' in data:
-        try:
-            config['osc_client']['port'] = int(data['port'])
-        except ValueError:
-            return jsonify({'error': 'Invalid port number'}), 400
-    
-    # Reinitialize OSC client
-    init_osc_client()
-    
-    save_config()
+    with config_lock:
+        if 'host' in data:
+            config['osc_client']['host'] = data['host']
+        
+        if 'port' in data:
+            try:
+                config['osc_client']['port'] = int(data['port'])
+            except ValueError:
+                return jsonify({'error': 'Invalid port number'}), 400
+        
+        # Reinitialize OSC client
+        init_osc_client()
+        
+        save_config()
     
     return jsonify({
         'message': 'OSC client configuration updated',
@@ -408,15 +442,17 @@ def add_mapping():
     mapping['enabled'] = mapping.get('enabled', True)
     mapping['created_at'] = datetime.now().isoformat()
     
-    # Assign ID
-    if config['mappings']:
-        max_id = max(m.get('id', 0) for m in config['mappings'])
-        mapping['id'] = max_id + 1
-    else:
-        mapping['id'] = 1
-    
-    config['mappings'].append(mapping)
-    save_config()
+    with config_lock:
+        # Assign ID atomically — two concurrent POSTs would otherwise compute
+        # the same max_id and produce duplicate IDs.
+        if config['mappings']:
+            max_id = max(m.get('id', 0) for m in config['mappings'])
+            mapping['id'] = max_id + 1
+        else:
+            mapping['id'] = 1
+        
+        config['mappings'].append(mapping)
+        save_config()
     
     return jsonify({
         'message': 'Mapping added successfully',
@@ -429,13 +465,7 @@ def update_mapping(mapping_id):
     """Update an existing mapping."""
     updated_mapping = request.get_json()
     
-    # Find the mapping
-    mapping_idx = next((i for i, m in enumerate(config['mappings']) if m.get('id') == mapping_id), None)
-    
-    if mapping_idx is None:
-        return jsonify({'error': 'Mapping not found'}), 404
-    
-    # Validate required fields
+    # Validate required fields (no config access — safe outside the lock)
     if 'trigger_name' not in updated_mapping or not updated_mapping['trigger_name']:
         return jsonify({'error': 'trigger_name is required'}), 400
     
@@ -448,14 +478,21 @@ def update_mapping(mapping_id):
     elif not isinstance(updated_mapping['osc_args'], list):
         return jsonify({'error': 'osc_args must be an array'}), 400
     
-    # Preserve metadata
-    updated_mapping['id'] = mapping_id
-    updated_mapping['created_at'] = config['mappings'][mapping_idx].get('created_at', datetime.now().isoformat())
-    updated_mapping['updated_at'] = datetime.now().isoformat()
-    updated_mapping['enabled'] = updated_mapping.get('enabled', True)
-    
-    config['mappings'][mapping_idx] = updated_mapping
-    save_config()
+    with config_lock:
+        # Find the mapping
+        mapping_idx = next((i for i, m in enumerate(config['mappings']) if m.get('id') == mapping_id), None)
+        
+        if mapping_idx is None:
+            return jsonify({'error': 'Mapping not found'}), 404
+        
+        # Preserve metadata
+        updated_mapping['id'] = mapping_id
+        updated_mapping['created_at'] = config['mappings'][mapping_idx].get('created_at', datetime.now().isoformat())
+        updated_mapping['updated_at'] = datetime.now().isoformat()
+        updated_mapping['enabled'] = updated_mapping.get('enabled', True)
+        
+        config['mappings'][mapping_idx] = updated_mapping
+        save_config()
     
     return jsonify({
         'message': 'Mapping updated successfully',
@@ -466,26 +503,28 @@ def update_mapping(mapping_id):
 @app.route('/api/mappings/<int:mapping_id>', methods=['DELETE'])
 def delete_mapping(mapping_id):
     """Delete a mapping."""
-    original_length = len(config['mappings'])
-    config['mappings'] = [m for m in config['mappings'] if m.get('id') != mapping_id]
-    
-    if len(config['mappings']) < original_length:
-        save_config()
-        return jsonify({'message': 'Mapping deleted successfully'})
-    else:
-        return jsonify({'error': 'Mapping not found'}), 404
+    with config_lock:
+        original_length = len(config['mappings'])
+        config['mappings'] = [m for m in config['mappings'] if m.get('id') != mapping_id]
+        
+        if len(config['mappings']) < original_length:
+            save_config()
+            return jsonify({'message': 'Mapping deleted successfully'})
+        else:
+            return jsonify({'error': 'Mapping not found'}), 404
 
 
 @app.route('/api/mappings/<int:mapping_id>/toggle', methods=['POST'])
 def toggle_mapping(mapping_id):
     """Toggle a mapping enabled/disabled."""
-    mapping = next((m for m in config['mappings'] if m.get('id') == mapping_id), None)
-    
-    if not mapping:
-        return jsonify({'error': 'Mapping not found'}), 404
-    
-    mapping['enabled'] = not mapping.get('enabled', True)
-    save_config()
+    with config_lock:
+        mapping = next((m for m in config['mappings'] if m.get('id') == mapping_id), None)
+        
+        if not mapping:
+            return jsonify({'error': 'Mapping not found'}), 404
+        
+        mapping['enabled'] = not mapping.get('enabled', True)
+        save_config()
     
     return jsonify({
         'message': 'Mapping toggled',
@@ -575,7 +614,8 @@ if __name__ == '__main__':
     
     try:
         app.run(host='0.0.0.0', port=args.port, debug=False)
-    except KeyboardInterrupt:
-        cleanup()
     finally:
+        # Single cleanup path — covers both Ctrl-C (KeyboardInterrupt) and
+        # SIGTERM from systemd (raises SystemExit).  A separate
+        # except-KeyboardInterrupt block would cause a double-cleanup.
         cleanup()

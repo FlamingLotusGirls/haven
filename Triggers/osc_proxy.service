@@ -1,0 +1,26 @@
+[Unit]
+Description=FLG Haven OSC Proxy Service
+# Start after the network is up and after the trigger gateway is running,
+# since osc_proxy registers with the gateway on startup.
+After=network-online.target trigger.service
+Wants=network-online.target
+# We want the gateway running but can tolerate it being absent at first
+# (the code retries registration up to 3 times).
+
+[Service]
+Environment="PYTHONPATH=/home/flaming/haven/util"
+# --port 5004: avoids collision with mode_service which uses 5003.
+# --service-port 5100: TCP socket port used by the trigger gateway to push events.
+ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/osc_proxy.py \
+    --port 5004 \
+    --service-port 5100 \
+    --gateway http://localhost:5002
+WorkingDirectory=/home/flaming/haven/Triggers
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+User=flaming
+
+[Install]
+WantedBy=multi-user.target

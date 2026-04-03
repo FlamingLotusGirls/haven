@@ -16,6 +16,8 @@ Endpoints:
 from flask import Flask, request, jsonify
 import json
 import os
+import tempfile
+import threading
 import logging
 import argparse
 from datetime import datetime
@@ -41,6 +43,8 @@ class ModeManager:
         self.filename = filename
         self.modes = set()
         self.active_mode = None
+        # Protects all check+modify+save sequences against concurrent Flask threads.
+        self._lock = threading.Lock()
         self.load_modes()
     
     def load_modes(self):
@@ -63,18 +67,33 @@ class ModeManager:
             self.save_modes()
     
     def save_modes(self):
-        """Save modes to JSON file"""
+        """Save modes to JSON file atomically.
+
+        Writes to a temp file in the same directory then os.replace()-swaps it
+        in, so a crash mid-write never leaves modes.json in a corrupt/empty state.
+        Must be called with self._lock already held (or from __init__ before any
+        threads exist).
+        """
+        tmpname = None
         try:
             data = {
                 'modes': list(self.modes),
                 'active_mode': self.active_mode,
                 'last_updated': datetime.now().isoformat()
             }
-            with open(self.filename, 'w') as f:
+            save_dir = os.path.dirname(os.path.abspath(self.filename)) or '.'
+            with tempfile.NamedTemporaryFile('w', dir=save_dir, suffix='.tmp', delete=False) as f:
+                tmpname = f.name
                 json.dump(data, f, indent=2)
+            os.replace(tmpname, self.filename)
             logger.info(f"Saved {len(self.modes)} modes to {self.filename}")
         except Exception as e:
             logger.error(f"Error saving modes: {e}")
+            if tmpname:
+                try:
+                    os.unlink(tmpname)
+                except OSError:
+                    pass
     
     def create_mode(self, name):
         """Create a new mode"""
@@ -85,27 +104,31 @@ class ModeManager:
         if not name:
             return False, "Mode name cannot be empty"
         
-        if name in self.modes:
-            return False, f"Mode '{name}' already exists"
+        with self._lock:
+            if name in self.modes:
+                return False, f"Mode '{name}' already exists"
+            
+            self.modes.add(name)
+            self.save_modes()
         
-        self.modes.add(name)
-        self.save_modes()
         logger.info(f"Created mode: {name}")
         return True, f"Mode '{name}' created"
     
     def delete_mode(self, name):
         """Delete a mode"""
-        if name not in self.modes:
-            return False, f"Mode '{name}' does not exist"
+        with self._lock:
+            if name not in self.modes:
+                return False, f"Mode '{name}' does not exist"
+            
+            self.modes.discard(name)  # discard is safe even if already gone
+            
+            # If deleting the active mode, clear it
+            if self.active_mode == name:
+                self.active_mode = None
+                logger.info(f"Cleared active mode (was '{name}')")
+            
+            self.save_modes()
         
-        self.modes.remove(name)
-        
-        # If deleting the active mode, clear it
-        if self.active_mode == name:
-            self.active_mode = None
-            logger.info(f"Cleared active mode (was '{name}')")
-        
-        self.save_modes()
         logger.info(f"Deleted mode: {name}")
         return True, f"Mode '{name}' deleted"
     
@@ -115,18 +138,20 @@ class ModeManager:
     
     def set_active_mode(self, name):
         """Set the active mode"""
-        if name is None:
-            # Allow clearing the active mode
-            self.active_mode = None
+        with self._lock:
+            if name is None:
+                # Allow clearing the active mode
+                self.active_mode = None
+                self.save_modes()
+                logger.info("Cleared active mode")
+                return True, "Active mode cleared"
+            
+            if name not in self.modes:
+                return False, f"Mode '{name}' does not exist"
+            
+            self.active_mode = name
             self.save_modes()
-            logger.info("Cleared active mode")
-            return True, "Active mode cleared"
         
-        if name not in self.modes:
-            return False, f"Mode '{name}' does not exist"
-        
-        self.active_mode = name
-        self.save_modes()
         logger.info(f"Set active mode: {name}")
         return True, f"Active mode set to '{name}'"
     
