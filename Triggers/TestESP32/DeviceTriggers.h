@@ -3,14 +3,35 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
+// Callback invoked by the HTTP worker task (Core 0) after an HTTP request completes
+// or is discarded.
+//   succeeded  - true for HTTP 200/201; false otherwise
+//   httpCode   - raw HTTP status code (positive), negative HTTPClient error code,
+//                or 0 if the request was discarded as stale (never sent)
+//   userData   - the pointer passed alongside the callback
+// NOTE: This fires on Core 0; callers are responsible for any cross-core safety.
+typedef void (*HttpResultCallback)(bool succeeded, int httpCode, void* userData);
+
+// Gateway connection status as managed by TriggerDevice::Update().
+//   DISCONNECTED - last registration failed (or never attempted); retries at RECONNECT_INTERVAL_MS
+//   PENDING      - registration request is in-flight; trigger events are gated
+//   CONNECTED    - last registration succeeded; trigger events are sent normally
+// Written on Core 0 (callback), read on Core 1 (Update / sendTriggerEvent).
+// On Xtensa LX7 (ESP32-S3), aligned 32-bit accesses are atomic at the hardware level;
+// volatile prevents the compiler from caching the value in a register.
+enum class GatewayStatus { DISCONNECTED, PENDING, CONNECTED };
+
 // HTTP Request Queue Structure with timestamp
 // Using fixed-size char arrays instead of String to avoid dangling pointer issues
-// when passing through FreeRTOS queue
+// when passing through FreeRTOS queue.
+// 'callback' and 'callbackData' are plain values — no heap allocation, no ownership.
 struct HTTPRequest {
-  char url[256];          // Fixed size to safely copy through queue
-  char payload[512];      // Fixed size for JSON payload
+  char url[256];            // Fixed size to safely copy through queue
+  char payload[512];        // Fixed size for JSON payload
   bool isRegistration;
   unsigned long timestamp;  // millis() when queued
+  HttpResultCallback callback;    // nullable; called by HTTP worker on completion
+  void*              callbackData; // passed as userData to callback
 };
 
 // START TRIGGER LIBRARY (moved to top for proper compilation order)
@@ -21,7 +42,8 @@ public:
   String GetName() {
       return m_name;
   };
-  bool SendTriggerEvent();
+  // SendTriggerEvent: optional callback is called on Core 0 with result.
+  bool SendTriggerEvent(HttpResultCallback callback = nullptr, void* callbackData = nullptr);
   virtual ~Trigger() {};
 
   friend class TriggerDevice;
@@ -121,7 +143,11 @@ protected:
 };
 
 class TriggerDevice {
-public: 
+public:
+  // Registration cadence constants
+  static const unsigned long KEEPALIVE_INTERVAL_MS = 120000;  // re-register when CONNECTED
+  static const unsigned long RECONNECT_INTERVAL_MS  =  3000; // retry when DISCONNECTED
+
   TriggerDevice(String name, String triggerServerURL, int16_t triggerServerPort, int16_t listenerPort=5000, bool useWifi=true, int httpTimeout=5000) 
   : m_name(name), m_triggerServerURL(triggerServerURL), m_triggerServerPort(triggerServerPort), m_listenerPort(listenerPort), m_usesWifi(useWifi), m_httpTimeout(httpTimeout) {
     // Create HTTP request queue (holds up to 10 requests)
@@ -152,7 +178,6 @@ public:
     
     Serial.println("HTTP worker thread started on Core 0");
     Serial.println("  - Requests older than 3 seconds will be discarded");
-    
   };
   
   ~TriggerDevice() {
@@ -191,17 +216,81 @@ public:
     return oneShotTrigger;
   };
 
-  void RegisterDevice() {
+  // Call from the main loop to drive registration, keepalive, and reconnect logic.
+  //
+  // State machine:
+  //   DISCONNECTED: queues RegisterDevice() every RECONNECT_INTERVAL_MS → PENDING
+  //   PENDING:      waits for registration callback; no further queuing
+  //   CONNECTED:    queues RegisterDevice() every KEEPALIVE_INTERVAL_MS (stays CONNECTED
+  //                 until a keepalive fails, which transitions back to DISCONNECTED)
+  //
+  // If network is down, resets to DISCONNECTED immediately.
+  // If network just came back up, registers immediately without waiting for the interval.
+  void Update() {
+    bool networkUp = m_usesWifi ? (WiFi.status() == WL_CONNECTED) : ETH.linkUp();
+    if (!networkUp) {
+      if (m_gatewayStatus != GatewayStatus::DISCONNECTED) {
+        Serial.println("[Gateway] Network down - disconnected from gateway, status DISCONNECTED");
+        m_gatewayStatus = GatewayStatus::DISCONNECTED;
+      }
+      m_networkWasUp = false;
+      return;
+    }
+
+    // Network is up.  If it just came back, reset the registration timer so the
+    // interval check below fires immediately rather than waiting for the next cadence.
+    if (!m_networkWasUp) {
+      Serial.println("[Gateway] Network came up - registering immediately");
+      m_lastRegistrationAttemptMs = 0;
+      m_networkWasUp = true;
+    }
+
+    // While a registration is in-flight, wait for the callback
+    if (m_gatewayStatus == GatewayStatus::PENDING) {
+      return;
+    }
+
+    unsigned long now = millis();
+    unsigned long interval = (m_gatewayStatus == GatewayStatus::CONNECTED) ?
+                             KEEPALIVE_INTERVAL_MS : RECONNECT_INTERVAL_MS;
+
+    // m_lastRegistrationAttemptMs == 0 means we've never attempted; register immediately
+    if (m_lastRegistrationAttemptMs == 0 || (now - m_lastRegistrationAttemptMs >= interval)) {
+      // Only go to PENDING for reconnection attempts, not keepalives.
+      // During keepalive we stay CONNECTED until we hear back.
+      if (m_gatewayStatus == GatewayStatus::DISCONNECTED) {
+        m_gatewayStatus = GatewayStatus::PENDING;
+        Serial.println("[Gateway] Attempting registration..., status PENDING");
+      } else {
+        Serial.println("[Gateway] Sending keepalive registration...");
+      }
+      m_lastRegistrationAttemptMs = now;
+      if (!RegisterDevice(onRegistrationResult, this)) {
+        // Queue was full; reset so we retry on the next Update()
+        Serial.println("[Gateway] Queue full, status DISCONNECTED");
+        m_gatewayStatus = GatewayStatus::DISCONNECTED;
+      }
+    }
+  }
+
+  // Returns current gateway connection status.
+  GatewayStatus GetGatewayStatus() const { return m_gatewayStatus; }
+
+  // RegisterDevice: manually queue a registration POST.
+  // Returns true if the request was successfully queued.
+  // Optional callback invoked on Core 0 when the HTTP response arrives.
+  // callbackData is passed through as userData to the callback.
+  // Note: Update() calls this internally with its own callback to manage gateway state.
+  bool RegisterDevice(HttpResultCallback callback = nullptr, void* callbackData = nullptr) {
     if (m_usesWifi) {
       if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Cannot register - no WiFi connection");
-        return;
+        return false;
       }
     } else {
-      // Check Ethernet connection
       if (!ETH.linkUp()) {
         Serial.println("Cannot register - no Ethernet connection");
-        return;
+        return false;
       }
     }
 
@@ -218,7 +307,6 @@ public:
     if (m_usesWifi) {
       doc["ip"] = WiFi.localIP().toString();
     } else {
-      // Get IP address from Ethernet
       doc["ip"] = ETH.localIP().toString();
     }
 
@@ -229,41 +317,41 @@ public:
       trigger->addTriggerRegistrationJson(triggerObject);
     }
 
-    // Serialize JSON
     String jsonPayload;
     serializeJson(doc, jsonPayload);
 
     Serial.println("Registration payload:");
     Serial.println(jsonPayload);
 
-    // Queue the request for the HTTP worker thread
-    // Check if strings fit in fixed-size buffers
     if (url.length() >= sizeof(HTTPRequest::url)) {
       Serial.printf("ERROR: URL too long (%d bytes, max %d)\n", url.length(), sizeof(HTTPRequest::url) - 1);
-      return;
+      return false;
     }
     if (jsonPayload.length() >= sizeof(HTTPRequest::payload)) {
       Serial.printf("ERROR: Payload too long (%d bytes, max %d)\n", jsonPayload.length(), sizeof(HTTPRequest::payload) - 1);
-      return;
+      return false;
     }
     
     HTTPRequest request;
-    // Safe to copy - we checked the sizes above
     strcpy(request.url, url.c_str());
     strcpy(request.payload, jsonPayload.c_str());
     request.isRegistration = true;
-    request.timestamp = millis();  // Add timestamp
+    request.timestamp = millis();
+    request.callback = callback;
+    request.callbackData = callbackData;
     
     if (xQueueSend(m_httpQueue, &request, pdMS_TO_TICKS(50)) != pdTRUE) {
       Serial.println("Failed to queue registration request - queue full");
+      return false;
     }
+    return true;
   };
 
   String GetName() {
     return m_name;
   };
   
-  // Check if HTTP queue has space (for sleep coordination)
+  // Check if HTTP queue is empty (for sleep coordination)
   bool IsHttpQueueEmpty() {
     return uxQueueMessagesWaiting(m_httpQueue) == 0;
   };
@@ -272,11 +360,10 @@ public:
     return uxQueueMessagesWaiting(m_httpQueue);
   };
 
-  // HTTP Worker Task - runs in separate thread
+  // HTTP Worker Task - runs in separate thread on Core 0
   static void httpWorkerTask(void* parameter) {
     HTTPRequest request;
     HTTPClient http;
-    const unsigned long MAX_AGE_MS = 3000;  // 3 seconds - discard older requests
 
     HttpWorkerParameters *params = (HttpWorkerParameters *)(parameter);
     int httpTimeoutMs = params->httpTimeoutMs;
@@ -290,14 +377,17 @@ public:
     }
     
     while (true) {
-      // Wait for requests in queue (blocks until available)
       if (xQueueReceive(httpQueue, &request, portMAX_DELAY) == pdTRUE) {
         // Check if request is too old
         unsigned long age = millis() - request.timestamp;
-        if (age > MAX_AGE_MS) {
+        if (age > (unsigned long)maxAgeMs) {
           Serial.printf("[HTTP Thread] Discarding stale %s request (age: %lu ms)\n",
                         request.isRegistration ? "registration" : "trigger", age);
-          continue;  // Skip this request
+          // httpCode = 0 signals "discarded before sending" — see HttpResultCallback docs
+          if (request.callback != nullptr) {
+            request.callback(false, 0, request.callbackData);
+          }
+          continue;
         }
         
         Serial.printf("[HTTP Thread] Processing %s request to %s (age: %lu ms)\n", 
@@ -310,8 +400,9 @@ public:
         
         int httpCode = http.POST(request.payload);
         
+        bool succeeded = (httpCode == 200 || httpCode == 201);
         if (httpCode > 0) {
-          if (httpCode == 200 || httpCode == 201) {
+          if (succeeded) {
             Serial.printf("[HTTP Thread] %s successful (code %d)\n", 
                           request.isRegistration ? "Registration" : "Trigger", 
                           httpCode);
@@ -327,6 +418,11 @@ public:
         }
         
         http.end();
+
+        // Invoke callback on Core 0; caller is responsible for any cross-core safety
+        if (request.callback != nullptr) {
+          request.callback(succeeded, httpCode, request.callbackData);
+        }
       }
     }
   };
@@ -343,18 +439,56 @@ private:
     int maxAgeMs;
     QueueHandle_t httpQueue;
   };
+
   String m_name;
   String m_triggerServerURL;
   int16_t m_triggerServerPort;
   int16_t m_listenerPort;
   std::vector<std::shared_ptr<Trigger>> m_triggers;
   bool m_usesWifi;
-  // Using free RTOS task/queue to prevent blocking on http calls
   QueueHandle_t m_httpQueue = NULL;
   TaskHandle_t m_httpTaskHandle = NULL;
   int m_httpTimeout;
-  
-  bool sendTriggerEvent(Trigger& trigger) {
+
+  // Gateway state — written on Core 0 (callback), read on Core 1 (Update/sendTriggerEvent).
+  // volatile prevents register-caching; hardware guarantees 32-bit access atomicity on Xtensa.
+  volatile GatewayStatus m_gatewayStatus = GatewayStatus::DISCONNECTED;
+  volatile unsigned long m_lastRegistrationAttemptMs = 0;  // 0 = never attempted
+
+  // Tracks whether the network was up on the previous Update() call.
+  // Used to detect the down→up transition and trigger immediate registration.
+  // Only accessed from Core 1 (Update); no synchronization needed.
+  bool m_networkWasUp = false;
+
+  // Internal registration-result callback used by Update().
+  // Runs on Core 0. Only touches the two volatile state fields.
+  static void onRegistrationResult(bool succeeded, int httpCode, void* userData) {
+    TriggerDevice* self = static_cast<TriggerDevice*>(userData);
+    if (succeeded) {
+      if (self->m_gatewayStatus != GatewayStatus::CONNECTED) {
+        Serial.println("[Gateway] Connected to trigger server");
+      }
+      self->m_gatewayStatus = GatewayStatus::CONNECTED;
+      Serial.println("Registration successful, status CONNECTED");
+    } else {
+      if (self->m_gatewayStatus != GatewayStatus::DISCONNECTED) {
+        Serial.printf("[Gateway] Lost connection to trigger server (httpCode=%d), consider DISCONNECTED\n", httpCode);
+      }
+      self->m_gatewayStatus = GatewayStatus::DISCONNECTED;
+    }
+    // Reset the timer from callback time so the next interval is measured from
+    // when we got the result, not from when we queued the request.
+    self->m_lastRegistrationAttemptMs = millis();
+  }
+
+  // sendTriggerEvent: gates on CONNECTED; drops the event if PENDING or DISCONNECTED.
+  bool sendTriggerEvent(Trigger& trigger, HttpResultCallback callback = nullptr, void* callbackData = nullptr) {
+    if (m_gatewayStatus != GatewayStatus::CONNECTED) {
+      Serial.printf("Trigger '%s' dropped - gateway %s\n",
+                    trigger.m_name.c_str(),
+                    m_gatewayStatus == GatewayStatus::PENDING ? "PENDING" : "DISCONNECTED");
+      return false;
+    }
     if (m_httpQueue == NULL) {
       Serial.println("Could not create queue, will not send trigger");
       return false;
@@ -369,10 +503,8 @@ private:
 
     Serial.println("Queueing trigger: " + jsonPayload);
 
-    // Queue the request for the HTTP worker thread
     String url = String("http://") + m_triggerServerURL + ":" + m_triggerServerPort + "/api/trigger-event";
     
-    // Check if strings fit in fixed-size buffers
     if (url.length() >= sizeof(HTTPRequest::url)) {
       Serial.printf("ERROR: URL too long (%d bytes, max %d)\n", url.length(), sizeof(HTTPRequest::url) - 1);
       return false;
@@ -383,24 +515,25 @@ private:
     }
     
     HTTPRequest request;
-    // Safe to copy - we checked the sizes above
     strcpy(request.url, url.c_str());
     strcpy(request.payload, jsonPayload.c_str());
     request.isRegistration = false;
-    request.timestamp = millis();  // Add timestamp
+    request.timestamp = millis();
+    request.callback = callback;
+    request.callbackData = callbackData;
     
     if (xQueueSend(m_httpQueue, &request, pdMS_TO_TICKS(50)) != pdTRUE) {
       Serial.println("Failed to queue trigger request - queue full");
       return false;
     }
     
-    return true;  // Request was queued
+    return true;
   }
 };
 
 // Implementations
-bool Trigger::SendTriggerEvent() {
-  return m_device.sendTriggerEvent(*this);
+bool Trigger::SendTriggerEvent(HttpResultCallback callback, void* callbackData) {
+  return m_device.sendTriggerEvent(*this, callback, callbackData);
 }
 
 ButtonTrigger::ButtonTrigger(TriggerDevice& device, String name, bool initialValue, int debounceTimeMs) : Trigger(device, name), 

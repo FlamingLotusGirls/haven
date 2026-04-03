@@ -9,7 +9,7 @@
  * - TestESP32.OneShot - D3 pin (placeholder)
  */
 
-#define SLEEP_ON_IDLE  // NB - some esp32 variants, notably the c3, use different ways of sleeping. Comment this out if you have compilation problems
+// #define SLEEP_ON_IDLE  // NB - some esp32 variants, notably the c3, use different ways of sleeping. Comment this out if you have compilation problems
 #include <WiFi.h>
 #include <ETH.h>
 #include <HTTPClient.h>
@@ -17,6 +17,7 @@
 #include <esp_sleep.h>
 #include <LittleFS.h>
 #include "DeviceTriggers.h"
+#include "esp_wifi.h"
 
 // Configuration structure stored in LittleFS
 struct DeviceConfig {
@@ -128,10 +129,6 @@ const int PIN_DISCRETE_D1 = D1; // TestESP32.Discrete bit 0
 const int PIN_DISCRETE_D2 = D2; // TestESP32.Discrete bit 1
 const int PIN_ONESHOT = D3;     // TestESP32.OneShot
 
-// Registration tracking
-const unsigned long REGISTRATION_INTERVAL = 120000; // 2 minutes in milliseconds
-unsigned long lastRegistrationTime = 0;
-
 // Trigger device and triggers (will be initialized in setup after loading config)
 TriggerDevice* triggerDevice = nullptr;
 std::shared_ptr<ButtonTrigger> buttonTrigger;
@@ -141,6 +138,15 @@ std::shared_ptr<ContinuousTrigger> continuousTrigger;
 void setup() {
   Serial.begin(115200);
   delay(1000);
+
+  WiFi.setAutoReconnect(true);
+  delay(500);
+
+  // Force station mode and clear any ghost state.
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true, true);
+  delay(1000);
+  WiFi.mode(WIFI_STA);
   
   Serial.println("\n\n=== TestESP32 Trigger Device ===");
   
@@ -186,11 +192,7 @@ void setup() {
   
   // Connect to WiFi
   connectToWiFi();
-  
-  // Register device with trigger server
-  triggerDevice->RegisterDevice();
-  lastRegistrationTime = millis();
-  
+
 #ifdef SLEEP_ON_IDLE
   // Configure light sleep wakeup sources
   // Wake on digital input pin changes (any level change)
@@ -217,19 +219,16 @@ void setup() {
 }
 
 void loop() {
-  // Check WiFi connection
+  // Check WiFi connection; Update() will gate gateway traffic on network status
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi disconnected. Reconnecting...");
     connectToWiFi();
   }
-  
-  // Periodic device registration (every 2 minutes)
-  unsigned long currentTime = millis();
-  if (currentTime - lastRegistrationTime >= REGISTRATION_INTERVAL) {
-    triggerDevice->RegisterDevice();
-    lastRegistrationTime = currentTime;
-  }
-  
+
+  // Drive registration, keepalive, and reconnect logic.
+  // Handles all registration cadence internally; trigger events will be gated until CONNECTED.
+  triggerDevice->Update();
+
   // Check Button (D0) - LOW = On, HIGH = Off
   int reading = digitalRead(PIN_BUTTON);
   bool buttonState = (reading == LOW);
@@ -294,35 +293,36 @@ void connectToWiFi() {
   Serial.println("\n--- WiFi Connection ---");
   
   // Try primary network first
-  Serial.print("Attempting to connect to ");
-  Serial.print(config.wifi_ssid_primary);
-  Serial.println("...");
-  
+  Serial.printf("Attempting connection to Primary (%s)...\n", config.wifi_ssid_primary);
+
   WiFi.begin(config.wifi_ssid_primary, config.wifi_pass_primary);
   
   // Wait up to 10 seconds for connection
   int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+  while (WiFi.status() != WL_CONNECTED && WiFi.status() != WL_CONNECT_FAILED && attempts < 100) {
     delay(500);
     Serial.print(".");
+    Serial.print(WiFi.status());
     attempts++;
   }
   
   // If primary failed, try secondary
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("\nPrimary network not available.");
-    Serial.print("Attempting to connect to ");
-    Serial.print(config.wifi_ssid_secondary);
-    Serial.println("...");
+    Serial.printf("Attempting connection to Secondary (%s)...\n", config.wifi_ssid_secondary);
 
-    WiFi.mode(WIFI_OFF);
+    WiFi.disconnect();
+    delay(500);  // let the stack finish tearing down before starting a new connection
+    WiFi.mode(WIFI_STA);
+    delay(500);
     
     WiFi.begin(config.wifi_ssid_secondary, config.wifi_pass_secondary);
     
     attempts = 0;
-    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    while (WiFi.status() != WL_CONNECTED && WiFi.status() != WL_CONNECT_FAILED && attempts < 100) {
       delay(500);
       Serial.print(".");
+      Serial.print(WiFi.status());
       attempts++;
     }
   }
@@ -333,6 +333,7 @@ void connectToWiFi() {
     Serial.println(WiFi.SSID());
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
+    Serial.printf("BSSID: %s  Channel: %d\n", WiFi.BSSIDstr().c_str(), WiFi.channel());
     Serial.print("Signal Strength: ");
     Serial.print(WiFi.RSSI());
     Serial.println(" dBm");
