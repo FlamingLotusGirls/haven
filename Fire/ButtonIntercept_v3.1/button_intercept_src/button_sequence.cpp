@@ -29,8 +29,7 @@
 #include <unistd.h>
 #endif // ARDUINO
 
-// I need a way to swap things over in to follower mode for basic testing.
-bool bFollowerOnly = true;
+bool bFollowerOnly = false;  // Used by test mode, to override the dynamic program
 
 // Please only define on of these (if any). They set up the special sequences on the specific
 // flame control boxes. Perhaps one day I will have an ESP32 rather than a trinketPro on the board,
@@ -86,7 +85,7 @@ const int gpioInputs[] = {1, 2, 42, 41, 40, 39, 38, 37, 36, 35, 48, 47};
 #else  // ie, XIAO with PCA9555
 const int outputs[] = {D7, D8, D9, D10, D0, D3, D2, D1}; // XXX D9 is strapping; problematic for initial output.
 // Note with input mask - 0x0001 - 0x0080 are on the first port, which is completely used for input 0x0800 - 0x0100 are second port
-const uint16_t gpioInputMask[] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080, 0x0800, 0x0400, 0x0200, 0x0100};
+const uint16_t gpioInputMask[] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0080, 0x0040, 0x0020, 0x0800, 0x0400, 0x0200, 0x0100};
 #endif // ESP32_DEV
 #endif // ARDUINO
 
@@ -179,10 +178,16 @@ class Program {
         i++;
         curSequence = m_sequences[i];
       }
-      // printf("Total play time is %d\n", m_totalPlayTime);
+      Serial.printf("!!! Total play time for program %s is %d\n", name, m_totalPlayTime);
     }
 
     bool IsFinished(uint32_t playTime) {
+      static int s_count = 0;
+      if (s_count >= 100) {
+        Serial.printf("TripleBurst isFinished called, playTime %ul, m_totalPlayTime %ul\n", playTime, m_totalPlayTime);
+        s_count = 0;
+      }
+      s_count++;
       return playTime > m_totalPlayTime;
     }
 
@@ -404,6 +409,7 @@ public:
 
   void setProgram(Program* program) {
     if (bFollowerOnly) {
+      Serial.println("Channel Controller Set program - follower only!");
       return;
     }
     // nullptr means "reset to Follower immediately".  Never defer this through the
@@ -453,6 +459,13 @@ public:
     memset(m_outputState, 0, NUM_OUTPUT_CHANNELS*sizeof(PlayState));
   }
 
+  void setTestMode(bool tf) {
+    if (tf) {
+      cancel();
+    }
+    bFollowerOnly = tf;
+  }
+
   void update(bool buttonPressed, uint32_t curTimeMs) {
     if (buttonPressed) {
       /*
@@ -462,7 +475,7 @@ public:
       Serial.println((int)m_mode);
       */
     }
-    if (m_mode == ChannelControllerMode::Follower) {
+    if (m_mode == ChannelControllerMode::Follower || bFollowerOnly) {
       if (m_defaultOutputChannel != INVALID_OUTPUT_CHANNEL) {
         m_outputState[m_defaultOutputChannel].valid = true;
         m_outputState[m_defaultOutputChannel].buttonPressed = buttonPressed;
@@ -486,6 +499,7 @@ public:
             printf("Channel: %d, Transition Pressed -> PLAYBACK %d\n", m_inputChannel, curTimeMs);
 #endif // ARDUINO
             m_state = PLAYBACK;
+            Serial.printf("Channel %d, start PLAYBACK\n", m_inputChannel);
             m_playbackStartMs = curTimeMs; // XXX next loop, so 50 ms delay. Fixme
           }
           break;
@@ -496,6 +510,9 @@ public:
           break;
         case PLAYBACK:
           {
+            // Zero outputs at the top so both the "finished" and "still playing"
+            // paths start from a clean slate — no stale buttonPressed values linger.
+            memset(m_outputState, 0, NUM_OUTPUT_CHANNELS*sizeof(PlayState));
             int playheadTimeMs = curTimeMs - m_playbackStartMs;
             if (m_program->IsFinished(playheadTimeMs)) {
 #ifdef ARDUINO
@@ -505,16 +522,16 @@ public:
               Serial.print(", PLAYBACK FINISHED, ");
               Serial.println(curTimeMs);
 #endif
+              Serial.printf("Channel: %d, PLAYBACK FINISHED, %d\n", m_inputChannel, curTimeMs);
 #else
               printf("Channel: %d, PLAYBACK FINISHED, %d\n", m_inputChannel, curTimeMs);
 #endif // ARDUINO
-              m_state = WAIT_FOR_UNPRESS;     
+              m_state = WAIT_FOR_UNPRESS;
               if (m_nextProgram != NULL) {
                 m_program = m_nextProgram;
                 m_nextProgram = NULL;
-                }
+              }
             } else {
-              memset(m_outputState, 0, NUM_OUTPUT_CHANNELS*sizeof(PlayState));
               m_program->GetButtonStates(playheadTimeMs, m_outputState, m_defaultOutputChannel);
             }
           }
@@ -745,6 +762,7 @@ static void writeOutput(int outputChannel, bool output) {
   Serial.print(", pin ");
   Serial.println(outputs[outputChannel]);
   */
+  Serial.printf("WRITING %s to outputChannel %d\n", output ? "PRESSED" : "UNPRESSED",  outputChannel);
 #endif 
 // XXX also need to set up the 5555 pins as output
   digitalWrite(outputs[outputChannel], output ? HIGH : LOW); // XXX 'PRESSED' seems to be pulling the wire HIGH, which is not my memory of how it works.
@@ -852,6 +870,7 @@ uint8_t csw_read_pca() {
 
 static uint16_t g_oldGpioRawData = 0xFFFF;
 static uint8_t g_oldDipSwitch = 0;
+static bool g_testMode = false;
 void buttonLoop() {
   // Read data, send to the channel controllers.
   int curTimeMs = millis();
@@ -876,31 +895,28 @@ void buttonLoop() {
   // no programs run, and no trigger events are sent to the network.
   // Detect transitions so active programs are canceled exactly once on entry.
   uint8_t dipSwitch = readDIPSwitch(gpioRawData);
-  static bool s_testMode = false;
   if (g_oldDipSwitch != dipSwitch) {
     bool newTestMode = (dipSwitch == 7);
-    if (newTestMode && !s_testMode) {
-      // Entering test mode: cancel any in-flight programs immediately so they
+    if (newTestMode != g_testMode) {
+      // Enter test mode: cancel any in-flight programs immediately so they
       // don't continue driving outputs while test mode is active.
-      Serial.println("TEST MODE: entered — all programs canceled");
+      Serial.printf("TEST MODE: %s\n", newTestMode ? "ENTERED" : "EXITED");
 #ifdef ARDUINO
       if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
 #endif
       for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
-        controllers[i].cancel();
+        controllers[i].setTestMode(newTestMode);
       }
 #ifdef ARDUINO
       if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
 #endif
-    } else if (!newTestMode && s_testMode) {
-      Serial.println("TEST MODE: exited — normal operation resumed");
     }
-    s_testMode = newTestMode;
+    g_testMode = newTestMode;
     g_oldDipSwitch = dipSwitch;
   }
 
   // readInputButtonStates suppresses trigger sends when testMode is true.
-  readInputButtonStates(gpioRawData, curTimeMs, s_testMode);
+  readInputButtonStates(gpioRawData, curTimeMs, g_testMode);
 
   // Take the mutex before accessing controllers[]. The web server task may call
   // setProgram() concurrently; portMAX_DELAY is safe here because the web handler
@@ -909,7 +925,7 @@ void buttonLoop() {
   if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
 #endif
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
-    if (s_testMode) {
+    if (g_testMode) {
       // Test mode: output directly mirrors input state, bypassing all program logic.
       // Programs were already canceled on the transition into test mode.
       if (i < NUM_OUTPUT_CHANNELS) {
@@ -921,6 +937,7 @@ void buttonLoop() {
       for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {
         // For the moment, if any program says that the button is pressed, it's pressed.
         if (playState->valid && playState->buttonPressed) {
+          // Serial.printf("Controller %d, output active %d\n", i, j);
           consolidatedOutput[j] = true;
         }
         playState++;
@@ -1254,7 +1271,7 @@ void loadPatternsFromFile() {
 }
 
 // Load trigger mappings from trigger_mappings.json
-void loadTriggerMappingsFromFile() {
+void loadTriggerMappingsFromFile(String& deviceName) {
   // Clean up any previous TriggerDevice.
   // Clear channelTriggers[] shared_ptrs first: each ButtonTrigger holds a reference
   // to its TriggerDevice, so we must release those refs before deleting the device.
@@ -1300,7 +1317,7 @@ void loadTriggerMappingsFromFile() {
   // Get trigger server configuration
   String triggerServerURL = doc["trigger_server"]["url"].as<String>();
   int triggerServerPort = doc["trigger_server"]["port"].as<int>();
-  String deviceName = doc["device_name"].as<String>();
+  // String deviceName = doc["device_name"].as<String>(); // NB - I'm going to use the passed-in netname, rather than the device name read here, as the core id here
   
   Serial.println("=== Trigger Configuration ===");
   Serial.print("Server: ");
@@ -1356,7 +1373,7 @@ bool registerTriggerDevice() {
   return registrationSent;
 }
 
-void buttonSetup() {
+void buttonSetup(String& netName) {
   sleep(1);
   initMillis();
   initIO();
@@ -1371,7 +1388,7 @@ void buttonSetup() {
   if (LittleFS.begin()) {
     loadChannelsFromFile();  // Load channel aliases
     loadPatternsFromFile();  // Load pattern mappings
-    loadTriggerMappingsFromFile(); // Load trigger mappings
+    loadTriggerMappingsFromFile(netName); // Load trigger mappings
   } else {
     // initChannelControllers(); // Use hardcoded patterns
   }
@@ -1383,6 +1400,8 @@ void buttonSetup() {
   Serial.println(g_oldDipSwitch, BIN);
   Serial.print("  Initial GPIO read is ");
   Serial.println(g_oldGpioRawData, BIN);
+
+  g_testMode = (g_oldDipSwitch == 7);
 
 #else // ~ARDUINO
   printf("Buttons Starting...\n");

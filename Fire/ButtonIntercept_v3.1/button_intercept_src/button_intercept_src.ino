@@ -84,7 +84,7 @@ void setupWebServer() {
 }
 
 int numWifiDisconnectedChecks = 0;
-#define WIFI_PRINT_THRESHOLD 20
+#define WIFI_PRINT_THRESHOLD 100
 
 // Server setup, mDNS, and trigger registration are all handled by WiFiEvent (event-driven).
 // This function just prints a dot periodically while waiting for a connection, so there is
@@ -146,7 +146,7 @@ void retrieveWifiCredentials(String& ssid, String& netPass, String& netName)
   if (!file){
       Serial.println("Failed to open netname file");
     } else {
-      netName = file.readStringUntil('\n');  // XXX will this overwrite my string address or change the internal data??
+      netName = file.readStringUntil('\n');
       file.close();
       Serial.print("mdns name is ");
       Serial.println(netName + ".local");
@@ -185,6 +185,8 @@ void WiFiEvent(WiFiEvent_t event, WiFiEventInfo_t event_info) {
       Serial.print("!!! WiFi lost. Reconnecting automatically. Reason: ");
       Serial.println(event_info.wifi_sta_disconnected.reason);
 
+      Serial.printf("  Wifi RSSI %d\n", WiFi.RSSI());
+
       // ESP32 handles reconnection automatically because WiFi.setAutoReconnect(true) is set.
       break;
 
@@ -204,9 +206,11 @@ void setup() {
   // Register the Wifi event handler before connecting
   WiFi.onEvent(WiFiEvent);
 
-  // Connect to buttons, load button configuration
-  buttonSetup();
+  // Connect to buttons, load button configuration, and then load wifi
+  // Note that we're using the netName as the unique identifier for both the mDNS system
+  // and the trigger system.
   retrieveWifiCredentials(g_ssid, g_password, g_netName);
+  buttonSetup(g_netName);
   initWiFi(g_ssid.c_str(), g_password.c_str());
 
   Serial.println("Setup running on Core: " + String(xPortGetCoreID()));

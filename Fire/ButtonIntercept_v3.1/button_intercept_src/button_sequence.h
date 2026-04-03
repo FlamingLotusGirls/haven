@@ -6,7 +6,7 @@
 #endif
 
 // Function declarations for button_sequence.cpp
-void buttonSetup();
+void buttonSetup(String& netname);
 void buttonLoop();
 void loadPatternsFromFile();
 bool registerTriggerDevice();
