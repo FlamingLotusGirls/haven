@@ -15,6 +15,7 @@ from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
 import socket
+import tempfile
 import threading
 from datetime import datetime
 
@@ -38,8 +39,18 @@ service_registry = []
 # Persistent socket connections for TCP_SOCKET services
 service_sockets = {}
 
-# Lock for thread-safe socket operations
+# Lock for thread-safe access to service_sockets dict
 socket_lock = threading.Lock()
+
+# Per-service send locks: prevents two threads from writing to the same socket
+# concurrently, which would interleave their messages.  The dict is protected by
+# socket_lock; individual per-service locks are never deleted (they are tiny).
+service_send_locks = {}
+
+# Lock protecting all read-modify-write operations on trigger_config.json.
+# Every endpoint that calls load_config() + save_config() must hold this lock
+# for the full duration to prevent concurrent requests from losing each other's writes.
+config_lock = threading.Lock()
 
 
 def load_config():
@@ -56,14 +67,29 @@ def load_config():
 
 
 def save_config(config):
-    """Save trigger configuration to file."""
+    """Save trigger configuration to file atomically.
+
+    Writes to a temporary file in the same directory, then uses os.replace()
+    to swap it in.  This guarantees that a crash mid-write can never leave
+    trigger_config.json in a partial/empty state.
+    Callers must hold config_lock for the full load→modify→save cycle.
+    """
     config['last_modified'] = datetime.now().isoformat()
+    tmpname = None
     try:
-        with open(CONFIG_FILE, 'w') as f:
+        config_dir = os.path.dirname(os.path.abspath(CONFIG_FILE)) or '.'
+        with tempfile.NamedTemporaryFile('w', dir=config_dir, suffix='.tmp', delete=False) as f:
+            tmpname = f.name
             json.dump(config, f, indent=2)
+        os.replace(tmpname, CONFIG_FILE)
         return True
     except Exception as e:
         print(f"Error saving config: {e}")
+        if tmpname:
+            try:
+                os.unlink(tmpname)
+            except OSError:
+                pass
         return False
 
 
@@ -153,23 +179,24 @@ def add_trigger():
     """Add a new trigger."""
     trigger = request.get_json()
     
-    # Validate trigger
+    # Validate trigger (no config access — safe outside the lock)
     valid, error_msg = validate_trigger(trigger)
     if not valid:
         return jsonify({'error': error_msg}), 400
     
-    config = load_config()
-    
-    # Check if trigger with same name already exists
-    if any(t['name'] == trigger['name'] for t in config['triggers']):
-        return jsonify({'error': 'Trigger with this name already exists'}), 400
-    
-    config['triggers'].append(trigger)
-    
-    if save_config(config):
-        return jsonify({'message': 'Trigger added successfully', 'trigger': trigger}), 201
-    else:
-        return jsonify({'error': 'Failed to save configuration'}), 500
+    with config_lock:
+        config = load_config()
+        
+        # Check if trigger with same name already exists
+        if any(t['name'] == trigger['name'] for t in config['triggers']):
+            return jsonify({'error': 'Trigger with this name already exists'}), 400
+        
+        config['triggers'].append(trigger)
+        
+        if save_config(config):
+            return jsonify({'message': 'Trigger added successfully', 'trigger': trigger}), 201
+        else:
+            return jsonify({'error': 'Failed to save configuration'}), 500
 
 
 @app.route('/api/triggers/<trigger_name>', methods=['GET'])
@@ -189,47 +216,49 @@ def update_trigger(trigger_name):
     """Update an existing trigger."""
     updated_trigger = request.get_json()
     
-    # Validate trigger
+    # Validate trigger (no config access — safe outside the lock)
     valid, error_msg = validate_trigger(updated_trigger)
     if not valid:
         return jsonify({'error': error_msg}), 400
     
-    config = load_config()
-    
-    # Find and update the trigger
-    for i, trigger in enumerate(config['triggers']):
-        if trigger['name'] == trigger_name:
-            # If name is being changed, check for conflicts
-            if updated_trigger['name'] != trigger_name:
-                if any(t['name'] == updated_trigger['name'] for t in config['triggers']):
-                    return jsonify({'error': 'Trigger with new name already exists'}), 400
-            
-            config['triggers'][i] = updated_trigger
-            
-            if save_config(config):
-                return jsonify({'message': 'Trigger updated successfully', 'trigger': updated_trigger})
-            else:
-                return jsonify({'error': 'Failed to save configuration'}), 500
-    
-    return jsonify({'error': 'Trigger not found'}), 404
+    with config_lock:
+        config = load_config()
+        
+        # Find and update the trigger
+        for i, trigger in enumerate(config['triggers']):
+            if trigger['name'] == trigger_name:
+                # If name is being changed, check for conflicts
+                if updated_trigger['name'] != trigger_name:
+                    if any(t['name'] == updated_trigger['name'] for t in config['triggers']):
+                        return jsonify({'error': 'Trigger with new name already exists'}), 400
+                
+                config['triggers'][i] = updated_trigger
+                
+                if save_config(config):
+                    return jsonify({'message': 'Trigger updated successfully', 'trigger': updated_trigger})
+                else:
+                    return jsonify({'error': 'Failed to save configuration'}), 500
+        
+        return jsonify({'error': 'Trigger not found'}), 404
 
 
 @app.route('/api/triggers/<trigger_name>', methods=['DELETE'])
 def delete_trigger(trigger_name):
     """Delete a trigger."""
-    config = load_config()
-    
-    # Find and remove the trigger
-    original_length = len(config['triggers'])
-    config['triggers'] = [t for t in config['triggers'] if t['name'] != trigger_name]
-    
-    if len(config['triggers']) < original_length:
-        if save_config(config):
-            return jsonify({'message': 'Trigger deleted successfully'})
+    with config_lock:
+        config = load_config()
+        
+        # Find and remove the trigger
+        original_length = len(config['triggers'])
+        config['triggers'] = [t for t in config['triggers'] if t['name'] != trigger_name]
+        
+        if len(config['triggers']) < original_length:
+            if save_config(config):
+                return jsonify({'message': 'Trigger deleted successfully'})
+            else:
+                return jsonify({'error': 'Failed to save configuration'}), 500
         else:
-            return jsonify({'error': 'Failed to save configuration'}), 500
-    else:
-        return jsonify({'error': 'Trigger not found'}), 404
+            return jsonify({'error': 'Trigger not found'}), 404
 
 
 @app.route('/api/trigger-types', methods=['GET'])
@@ -263,66 +292,68 @@ def register_device():
     triggers_data = data['triggers']
     
     print(f"Device registration request from {device_name} ({device_ip})")
-    
-    # Load current trigger configuration
-    config = load_config()
-    
-    # Track created/updated triggers
-    created = []
-    updated = []
-    errors = []
-    
-    # Current timestamp for last_seen
+
+    # Stamp last_seen before waiting for the lock so the timestamp reflects when
+    # the request arrived, not when the lock was eventually granted.
     last_seen = datetime.now().isoformat()
-    
-    # Process each trigger from the device
-    for trigger_data in triggers_data:
-        # Validate trigger data
-        valid, error_msg = validate_trigger(trigger_data)
-        if not valid:
-            errors.append(f"{trigger_data.get('name', 'unknown')}: {error_msg}")
-            continue
-        
-        trigger_name = trigger_data['name']
-        
-        # Add device metadata to trigger
-        trigger_data['device'] = device_name
-        trigger_data['device_ip'] = device_ip
-        trigger_data['last_seen'] = last_seen
-        
-        # Check if trigger already exists
-        existing_idx = next((i for i, t in enumerate(config['triggers']) 
-                           if t['name'] == trigger_name), None)
-        
-        if existing_idx is not None:
-            # Update existing trigger, preserving any manual edits but updating device info
-            existing = config['triggers'][existing_idx]
-            trigger_data['manually_edited'] = existing.get('manually_edited', False)
-            config['triggers'][existing_idx] = trigger_data
-            updated.append(trigger_name)
+
+    with config_lock:
+        # Load current trigger configuration
+        config = load_config()
+
+        # Track created/updated triggers
+        created = []
+        updated = []
+        errors = []
+
+        # Process each trigger from the device
+        for trigger_data in triggers_data:
+            # Validate trigger data
+            valid, error_msg = validate_trigger(trigger_data)
+            if not valid:
+                errors.append(f"{trigger_data.get('name', 'unknown')}: {error_msg}")
+                continue
+
+            trigger_name = trigger_data['name']
+
+            # Add device metadata to trigger
+            trigger_data['device'] = device_name
+            trigger_data['device_ip'] = device_ip
+            trigger_data['last_seen'] = last_seen
+
+            # Check if trigger already exists
+            existing_idx = next((i for i, t in enumerate(config['triggers'])
+                               if t['name'] == trigger_name), None)
+
+            if existing_idx is not None:
+                # Update existing trigger, preserving any manual edits but updating device info
+                existing = config['triggers'][existing_idx]
+                trigger_data['manually_edited'] = existing.get('manually_edited', False)
+                config['triggers'][existing_idx] = trigger_data
+                updated.append(trigger_name)
+            else:
+                # Create new trigger
+                trigger_data['manually_edited'] = False
+                config['triggers'].append(trigger_data)
+                created.append(trigger_name)
+
+        # Save updated configuration
+        if save_config(config):
+            response = {
+                'message': 'Device registered successfully',
+                'device': device_name,
+                'ip': device_ip,
+                'triggers_created': created,
+                'triggers_updated': updated
+            }
+
+            if errors:
+                response['errors'] = errors
+
+            print(f"Device {device_name} registered: {len(created)} created, {len(updated)} updated")
+            return jsonify(response), 200
         else:
-            # Create new trigger
-            trigger_data['manually_edited'] = False
-            config['triggers'].append(trigger_data)
-            created.append(trigger_name)
-    
-    # Save updated configuration
-    if save_config(config):
-        response = {
-            'message': 'Device registered successfully',
-            'device': device_name,
-            'ip': device_ip,
-            'triggers_created': created,
-            'triggers_updated': updated
-        }
-        
-        if errors:
-            response['errors'] = errors
-        
-        print(f"Device {device_name} registered: {len(created)} created, {len(updated)} updated")
-        return jsonify(response), 200
-    else:
-        return jsonify({'error': 'Failed to save trigger configuration'}), 500
+            return jsonify({'error': 'Failed to save trigger configuration'}), 500
 
 
 # Socket Connection Management
@@ -412,13 +443,22 @@ def load_registrations():
 
 
 def save_registrations():
-    """Save service registrations to file."""
+    """Save service registrations to file atomically."""
+    tmpname = None
     try:
-        with open(REGISTRATION_FILE, 'w') as f:
+        reg_dir = os.path.dirname(os.path.abspath(REGISTRATION_FILE)) or '.'
+        with tempfile.NamedTemporaryFile('w', dir=reg_dir, suffix='.tmp', delete=False) as f:
+            tmpname = f.name
             json.dump(service_registry, f, indent=2)
+        os.replace(tmpname, REGISTRATION_FILE)
         return True
     except Exception as e:
         print(f"Error saving registrations: {e}")
+        if tmpname:
+            try:
+                os.unlink(tmpname)
+            except OSError:
+                pass
         return False
 
 
@@ -561,32 +601,41 @@ def dispatch_trigger_event(trigger_event):
             service_name = service['name']
             
             if protocol == 'TCP_SOCKET':
-                # Use persistent socket
+                # Acquire a per-service send lock so concurrent dispatches to the
+                # same service are serialised — two threads writing to the same socket
+                # simultaneously would interleave their JSON messages.
+                # Lock ordering is always:  send_lock → socket_lock (never reversed).
                 with socket_lock:
-                    sock = service_sockets.get(service_name)
-                
-                if sock:
-                    success = send_via_persistent_socket(service_name, sock, event_data)
-                    if success:
-                        print(f"Sent trigger event to {service_name} via persistent socket")
+                    if service_name not in service_send_locks:
+                        service_send_locks[service_name] = threading.Lock()
+                    send_lock = service_send_locks[service_name]
+
+                with send_lock:
+                    with socket_lock:
+                        sock = service_sockets.get(service_name)
+
+                    if sock:
+                        success = send_via_persistent_socket(service_name, sock, event_data)
+                        if success:
+                            print(f"Sent trigger event to {service_name} via persistent socket")
+                        else:
+                            # Attempt reconnection
+                            if reconnect_socket(service_name, host, port):
+                                with socket_lock:
+                                    sock = service_sockets.get(service_name)
+                                if sock and send_via_persistent_socket(service_name, sock, event_data):
+                                    print(f"Sent trigger event to {service_name} after reconnection")
+                                else:
+                                    print(f"Failed to send after reconnection to {service_name}")
+                            else:
+                                print(f"Failed to reconnect to {service_name}")
                     else:
-                        # Attempt reconnection
+                        print(f"No socket connection for {service_name}, attempting to establish...")
                         if reconnect_socket(service_name, host, port):
                             with socket_lock:
                                 sock = service_sockets.get(service_name)
                             if sock and send_via_persistent_socket(service_name, sock, event_data):
-                                print(f"Sent trigger event to {service_name} after reconnection")
-                            else:
-                                print(f"Failed to send after reconnection to {service_name}")
-                        else:
-                            print(f"Failed to reconnect to {service_name}")
-                else:
-                    print(f"No socket connection for {service_name}, attempting to establish...")
-                    if reconnect_socket(service_name, host, port):
-                        with socket_lock:
-                            sock = service_sockets.get(service_name)
-                        if sock and send_via_persistent_socket(service_name, sock, event_data):
-                            print(f"Sent trigger event to {service_name} after establishing connection")
+                                print(f"Sent trigger event to {service_name} after establishing connection")
             
             elif protocol == 'TCP_CONNECT':
                 # Create new connection for each event
@@ -741,28 +790,39 @@ def get_trigger_status():
 
 if __name__ == '__main__':
     import argparse
-    
+
     parser = argparse.ArgumentParser(description='Haven Trigger Server')
-    parser.add_argument('--port', type=int, default=5002, 
+    parser.add_argument('--port', type=int, default=5002,
                         help='Port to run the web server on (default: 5002)')
+    parser.add_argument('--debug', action='store_true', default=False,
+                        help='Enable Flask debug mode (enables the interactive debugger '
+                             'and auto-reloader; not for production use)')
     args = parser.parse_args()
-    
+
     port = args.port
-    
+
     print("Haven Trigger Server starting...")
     print(f"Configuration file: {CONFIG_FILE}")
     print(f"Registration file: {REGISTRATION_FILE}")
-    
-    # Load existing registrations and re-establish TCP_SOCKET connections
-    print("Loading service registrations...")
-    load_registrations()
-    print(f"Loaded {len(service_registry)} registered service(s)")
-    
+
+    # When debug mode is on, Werkzeug's reloader runs this script TWICE:
+    # once in an outer watcher process, and once in the real server child
+    # (which sets WERKZEUG_RUN_MAIN=true).  We must only establish TCP socket
+    # connections in the child process, or the outer process's sockets are
+    # leaked when the child takes over.  When debug is off there is only one
+    # process, so we always initialise.
+    if not args.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        print("Loading service registrations...")
+        load_registrations()
+        print(f"Loaded {len(service_registry)} registered service(s)")
+    else:
+        print("(Reloader outer process — skipping socket initialisation)")
+
     print(f"Web interface: http://localhost:{port}")
     print("API endpoints:")
     print(f"  - Trigger Configuration: http://localhost:{port}/api/triggers")
     print(f"  - Service Registration: http://localhost:{port}/api/register")
     print(f"  - Trigger Events: http://localhost:{port}/api/trigger-event")
     print(f"  - Trigger Status: http://localhost:{port}/api/trigger-status")
-    
-    app.run(host='0.0.0.0', port=port, debug=True)
+
+    app.run(host='0.0.0.0', port=port, debug=args.debug)
