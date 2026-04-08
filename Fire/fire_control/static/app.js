@@ -26,6 +26,8 @@ class FlameController {
                     this.loadPatterns();
                 } else if (tabId === 'triggers') {
                     this.loadTriggerIntegration();
+                } else if (tabId === 'poofer-mappings') {
+                    this.loadPooferMappings();
                 }
             });
         });
@@ -126,6 +128,21 @@ class FlameController {
                 // Restore body scroll
                 document.body.classList.remove('modal-open');
             }
+        });
+
+        // Poofer mapping tab buttons
+        document.getElementById('pm-add-btn').addEventListener('click', () => this.showPooferAddForm());
+        document.getElementById('pm-reset-btn').addEventListener('click', () => this.resetPooferMappingsToDefaults());
+        document.getElementById('pm-refresh-btn').addEventListener('click', () => this.loadPooferMappings());
+        document.getElementById('pm-add-confirm-btn').addEventListener('click', () => this.submitNewPooferMapping());
+        document.getElementById('pm-add-cancel-btn').addEventListener('click', () => this.hidePooferAddForm());
+
+        // Submit add-form on Enter key inside its inputs
+        ['pm-new-name', 'pm-new-address'].forEach(id => {
+            document.getElementById(id).addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); this.submitNewPooferMapping(); }
+                if (e.key === 'Escape') { e.preventDefault(); this.hidePooferAddForm(); }
+            });
         });
 
         // Initialize by calling system status
@@ -914,11 +931,284 @@ class FlameController {
         }, 3000);
     }
 
+    // =========================================================================
+    // Poofer Mapping Functions
+    // =========================================================================
+
+    async loadPooferMappings() {
+        const container = document.getElementById('pm-table-container');
+        container.innerHTML = '<div class="loading">Loading poofer mappings…</div>';
+        try {
+            const response = await fetch(`${this.baseUrl}/flame/poofer-mappings`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            this.displayPooferMappings(data);
+        } catch (error) {
+            container.innerHTML = `<div class="error">Error loading poofer mappings: ${this.escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    displayPooferMappings(mappings) {
+        const container = document.getElementById('pm-table-container');
+        const entries = Object.entries(mappings);
+
+        if (entries.length === 0) {
+            container.innerHTML = '<div class="empty-state">No poofer mappings defined.</div>';
+            return;
+        }
+
+        let html = `
+            <table class="pm-table">
+                <thead>
+                    <tr>
+                        <th>Poofer Name</th>
+                        <th>Address</th>
+                        <th>Board (hex)</th>
+                        <th>Channel</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+
+        for (const [name, address] of entries) {
+            const board   = address.length >= 2 ? address.slice(0, 2).toUpperCase() : '??';
+            const channel = address.length >= 3 ? address[2]                        : '?';
+            html += `
+                <tr id="pm-row-${this.escapeHtml(name)}" data-name="${this.escapeHtml(name)}">
+                    <td class="pm-name-cell"><strong>${this.escapeHtml(name)}</strong></td>
+                    <td class="pm-address-cell">
+                        <span class="pm-address-text">${this.escapeHtml(address)}</span>
+                        <input class="pm-address-input" type="text" value="${this.escapeHtml(address)}"
+                               maxlength="3" size="4" style="display:none"
+                               data-original="${this.escapeHtml(address)}">
+                    </td>
+                    <td class="pm-board-cell">${this.escapeHtml(board)}</td>
+                    <td class="pm-channel-cell">${this.escapeHtml(channel)}</td>
+                    <td class="pm-actions-cell">
+                        <button class="btn btn-primary btn-sm pm-edit-btn"
+                                onclick="flameController.startEditPooferMapping('${this.escapeHtml(name)}')">Edit</button>
+                        <button class="btn btn-success btn-sm pm-save-btn" style="display:none"
+                                onclick="flameController.savePooferMapping('${this.escapeHtml(name)}')">Save</button>
+                        <button class="btn btn-secondary btn-sm pm-cancel-btn" style="display:none"
+                                onclick="flameController.cancelEditPooferMapping('${this.escapeHtml(name)}')">Cancel</button>
+                        <button class="btn btn-danger btn-sm pm-delete-btn"
+                                onclick="flameController.deletePooferMapping('${this.escapeHtml(name)}')">Delete</button>
+                    </td>
+                </tr>
+            `;
+        }
+
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+        // Allow pressing Enter/Escape inside address inputs
+        container.querySelectorAll('.pm-address-input').forEach(input => {
+            input.addEventListener('keydown', (e) => {
+                const name = input.closest('tr').dataset.name;
+                if (e.key === 'Enter')  { e.preventDefault(); this.savePooferMapping(name); }
+                if (e.key === 'Escape') { e.preventDefault(); this.cancelEditPooferMapping(name); }
+            });
+        });
+    }
+
+    startEditPooferMapping(name) {
+        const row = document.getElementById(`pm-row-${name}`);
+        if (!row) return;
+
+        const addrText  = row.querySelector('.pm-address-text');
+        const addrInput = row.querySelector('.pm-address-input');
+        const editBtn   = row.querySelector('.pm-edit-btn');
+        const saveBtn   = row.querySelector('.pm-save-btn');
+        const cancelBtn = row.querySelector('.pm-cancel-btn');
+        const deleteBtn = row.querySelector('.pm-delete-btn');
+
+        addrText.style.display  = 'none';
+        addrInput.style.display = 'inline-block';
+        addrInput.focus();
+        addrInput.select();
+
+        editBtn.style.display   = 'none';
+        saveBtn.style.display   = 'inline-block';
+        cancelBtn.style.display = 'inline-block';
+        deleteBtn.style.display = 'none';
+    }
+
+    cancelEditPooferMapping(name) {
+        const row = document.getElementById(`pm-row-${name}`);
+        if (!row) return;
+
+        const addrText  = row.querySelector('.pm-address-text');
+        const addrInput = row.querySelector('.pm-address-input');
+        const editBtn   = row.querySelector('.pm-edit-btn');
+        const saveBtn   = row.querySelector('.pm-save-btn');
+        const cancelBtn = row.querySelector('.pm-cancel-btn');
+        const deleteBtn = row.querySelector('.pm-delete-btn');
+
+        // Restore original value
+        addrInput.value = addrInput.dataset.original;
+
+        addrText.style.display  = 'inline';
+        addrInput.style.display = 'none';
+
+        editBtn.style.display   = 'inline-block';
+        saveBtn.style.display   = 'none';
+        cancelBtn.style.display = 'none';
+        deleteBtn.style.display = 'inline-block';
+    }
+
+    async savePooferMapping(name) {
+        const row = document.getElementById(`pm-row-${name}`);
+        if (!row) return;
+
+        const addrInput  = row.querySelector('.pm-address-input');
+        const newAddress = addrInput.value.trim().toUpperCase();
+
+        try {
+            const formData = new FormData();
+            formData.append('address', newAddress);
+
+            const response = await fetch(
+                `${this.baseUrl}/flame/poofer-mappings/${encodeURIComponent(name)}`,
+                { method: 'PUT', body: formData }
+            );
+
+            if (response.ok) {
+                this.showMessage(`Updated ${name} → ${newAddress}`, 'success');
+                // Update the displayed text and board/channel cells in place
+                const addrText    = row.querySelector('.pm-address-text');
+                const boardCell   = row.querySelector('.pm-board-cell');
+                const channelCell = row.querySelector('.pm-channel-cell');
+
+                addrText.textContent    = newAddress;
+                addrInput.dataset.original = newAddress;
+                boardCell.textContent   = newAddress.slice(0, 2).toUpperCase();
+                channelCell.textContent = newAddress[2] || '?';
+
+                this.cancelEditPooferMapping(name); // restore view mode
+            } else {
+                const errorText = await response.text();
+                this.showMessage(`Error: ${errorText}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error saving mapping: ${error.message}`, 'error');
+        }
+    }
+
+    async deletePooferMapping(name) {
+        if (!confirm(`Delete mapping for "${name}"?`)) return;
+
+        try {
+            const response = await fetch(
+                `${this.baseUrl}/flame/poofer-mappings/${encodeURIComponent(name)}`,
+                { method: 'DELETE' }
+            );
+
+            if (response.ok) {
+                this.showMessage(`Deleted mapping for ${name}`, 'success');
+                // Remove the row directly for snappy UX
+                const row = document.getElementById(`pm-row-${name}`);
+                if (row) row.remove();
+            } else {
+                const errorText = await response.text();
+                this.showMessage(`Error: ${errorText}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error deleting mapping: ${error.message}`, 'error');
+        }
+    }
+
+    showPooferAddForm() {
+        document.getElementById('pm-add-form').style.display = 'block';
+        document.getElementById('pm-add-btn').style.display = 'none';
+        document.getElementById('pm-add-error').style.display = 'none';
+        document.getElementById('pm-new-name').value = '';
+        document.getElementById('pm-new-address').value = '';
+        document.getElementById('pm-new-name').focus();
+    }
+
+    hidePooferAddForm() {
+        document.getElementById('pm-add-form').style.display = 'none';
+        document.getElementById('pm-add-btn').style.display = 'inline-block';
+        document.getElementById('pm-add-error').style.display = 'none';
+    }
+
+    async submitNewPooferMapping() {
+        const nameInput    = document.getElementById('pm-new-name');
+        const addressInput = document.getElementById('pm-new-address');
+        const errorDiv     = document.getElementById('pm-add-error');
+
+        const name    = nameInput.value.trim();
+        const address = addressInput.value.trim().toUpperCase();
+
+        if (!name) {
+            errorDiv.textContent = 'Poofer name is required.';
+            errorDiv.style.display = 'block';
+            nameInput.focus();
+            return;
+        }
+        if (!address) {
+            errorDiv.textContent = 'Address is required.';
+            errorDiv.style.display = 'block';
+            addressInput.focus();
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('name', name);
+            formData.append('address', address);
+
+            const response = await fetch(`${this.baseUrl}/flame/poofer-mappings`, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (response.ok) {
+                this.showMessage(`Added mapping: ${name} → ${address}`, 'success');
+                this.hidePooferAddForm();
+                this.loadPooferMappings(); // full refresh to show new row in sorted position
+            } else {
+                const errorText = await response.text();
+                errorDiv.textContent = errorText;
+                errorDiv.style.display = 'block';
+            }
+        } catch (error) {
+            errorDiv.textContent = `Error: ${error.message}`;
+            errorDiv.style.display = 'block';
+        }
+    }
+
+    async resetPooferMappingsToDefaults() {
+        if (!confirm('Reset ALL poofer mappings to built-in defaults? This will overwrite any custom mappings.')) return;
+
+        try {
+            const response = await fetch(`${this.baseUrl}/flame/poofer-mappings/reset-defaults`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.showMessage('Poofer mappings reset to defaults', 'success');
+                this.displayPooferMappings(data);
+            } else {
+                const errorText = await response.text();
+                this.showMessage(`Error resetting mappings: ${errorText}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error: ${error.message}`, 'error');
+        }
+    }
+
+    // =========================================================================
     // Trigger Integration Functions
+    // =========================================================================
+
     async loadTriggerIntegration() {
         await this.loadTriggerStatus();
         await this.loadAvailableTriggers();
         await this.loadAvailableSequencesForTriggers();
+        await this.loadAvailableModes();
         await this.loadTriggerMappings();
         this.initTriggerForm();
         
@@ -929,8 +1219,65 @@ class FlameController {
         this.triggerPollInterval = setInterval(async () => {
             // Silently update trigger data in background
             await this.loadAvailableTriggers();
+            await this.loadAvailableModes();
             await this.loadTriggerMappings();
         }, 120000); // 2 minutes in milliseconds
+    }
+
+    async loadAvailableModes() {
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/modes`);
+            const data = await response.json();
+            this.availableModesData = data.modes || [];
+            this.activeModeData = data.active_mode || null;
+            
+            console.log('Loaded modes:', this.availableModesData, 'Active:', this.activeModeData);
+            
+            // Update mode selection UI
+            this.updateModeSelectionUI();
+            this.updateActiveModeDisplay();
+        } catch (error) {
+            console.error('Error loading modes:', error);
+            this.availableModesData = [];
+            this.activeModeData = null;
+        }
+    }
+
+    updateModeSelectionUI() {
+        const modeContainer = document.getElementById('mode-selection-container');
+        if (!modeContainer) return;
+        
+        if (this.availableModesData.length === 0) {
+            modeContainer.innerHTML = '<div class="help-text">No modes available from mode service</div>';
+            return;
+        }
+        
+        let html = '<div class="mode-checkboxes">';
+        this.availableModesData.forEach(mode => {
+            html += `
+                <label class="mode-checkbox-label">
+                    <input type="checkbox" name="modes" value="${this.escapeHtml(mode)}" class="mode-checkbox">
+                    ${this.escapeHtml(mode)}
+                </label>
+            `;
+        });
+        html += '</div>';
+        html += '<div class="help-text">Select mode(s) for this mapping. Leave all unchecked to trigger in any mode.</div>';
+        
+        modeContainer.innerHTML = html;
+    }
+
+    updateActiveModeDisplay() {
+        const activeModeDisplay = document.getElementById('active-mode-display');
+        if (!activeModeDisplay) return;
+        
+        if (this.activeModeData) {
+            activeModeDisplay.innerHTML = `<strong>Active Mode:</strong> <span class="mode-badge">${this.escapeHtml(this.activeModeData)}</span>`;
+            activeModeDisplay.className = 'active-mode-indicator active';
+        } else {
+            activeModeDisplay.innerHTML = `<strong>Active Mode:</strong> <span class="mode-badge-none">None</span>`;
+            activeModeDisplay.className = 'active-mode-indicator inactive';
+        }
     }
 
     async loadTriggerStatus() {
@@ -1046,6 +1393,7 @@ class FlameController {
         html += '<th>Trigger Name</th>';
         html += '<th>Trigger Value</th>';
         html += '<th>Flame Sequence</th>';
+        html += '<th>Modes</th>';
         html += '<th>Allow Override</th>';
         html += '<th>Actions</th>';
         html += '</tr></thead><tbody>';
@@ -1103,6 +1451,14 @@ class FlameController {
             }
             
             html += `<td>${sequenceDisplay}</td>`;
+            
+            // Display modes
+            let modesDisplay = '<em>any</em>';
+            if (mapping.modes && mapping.modes.length > 0) {
+                modesDisplay = mapping.modes.map(m => `<span class="mode-badge">${this.escapeHtml(m)}</span>`).join(' ');
+            }
+            html += `<td>${modesDisplay}</td>`;
+            
             html += `<td>${mapping.allow_override ? 'Yes' : 'No'}</td>`;
             html += `<td>`;
             html += `<button class="btn btn-primary btn-sm" onclick="flameController.editTriggerMapping(${mapping.id})">Edit</button>`;
@@ -1156,6 +1512,13 @@ class FlameController {
         formData.append('trigger_name', triggerName);
         formData.append('flame_sequence', flameSequence);
         formData.append('allow_override', allowOverride ? 'true' : 'false');
+        
+        // Collect selected modes
+        const modeCheckboxes = document.querySelectorAll('.mode-checkbox:checked');
+        const selectedModes = Array.from(modeCheckboxes).map(cb => cb.value);
+        if (selectedModes.length > 0) {
+            formData.append('modes', JSON.stringify(selectedModes));
+        }
         
         // Handle continuous triggers with min/max range
         if (triggerType === 'Continuous') {
@@ -1256,6 +1619,16 @@ class FlameController {
             
             document.getElementById('flame-sequence').value = mapping.flame_sequence;
             document.getElementById('allow-override').checked = mapping.allow_override;
+            
+            // Set mode checkboxes
+            document.querySelectorAll('.mode-checkbox').forEach(cb => cb.checked = false);
+            if (mapping.modes && mapping.modes.length > 0) {
+                mapping.modes.forEach(mode => {
+                    const checkbox = document.querySelector(`.mode-checkbox[value="${mode}"]`);
+                    if (checkbox) checkbox.checked = true;
+                });
+            }
+            
             document.getElementById('cancel-trigger-btn').style.display = 'inline-block';
             document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Update Mapping';
             
@@ -1459,6 +1832,9 @@ class FlameController {
             valueContainer.insertAdjacentHTML('beforeend',
                 '<div class="help-text">Leave empty to trigger on any value</div>');
         }
+        
+        // Uncheck all mode checkboxes
+        document.querySelectorAll('.mode-checkbox').forEach(cb => cb.checked = false);
         
         // Hide form and show button again
         document.getElementById('trigger-mapping-form-container').style.display = 'none';

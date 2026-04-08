@@ -24,9 +24,10 @@ import pattern_manager
 logger = logging.getLogger("flames")
 
 class TriggerIntegration:
-    def __init__(self, trigger_server_url="http://localhost:5002", listen_port=6000):
+    def __init__(self, trigger_server_url="http://localhost:5002", listen_port=6000, mode_service_url="http://localhost:5003"):
         self.trigger_server_url = trigger_server_url
         self.listen_port = listen_port
+        self.mode_service_url = mode_service_url
         self.service_name = "FlameServer"
         
         # State
@@ -35,7 +36,7 @@ class TriggerIntegration:
         self.listen_thread = None
         self.running = False
         
-        # Mappings: list of {id, trigger_name, trigger_value, flame_sequence, allow_override}
+        # Mappings: list of {id, trigger_name, trigger_value, flame_sequence, allow_override, modes}
         self.mappings = []
         self.mappings_lock = Lock()
         self.mappings_file = "trigger_mappings.json"
@@ -43,6 +44,11 @@ class TriggerIntegration:
         # Available triggers from server
         self.available_triggers = []
         self.triggers_lock = Lock()
+        
+        # Mode management
+        self.available_modes = []
+        self.active_mode = None
+        self.modes_lock = Lock()
         
         # Socket server
         self.server_socket = None
@@ -67,6 +73,10 @@ class TriggerIntegration:
         # Start trigger refresh thread
         self.refresh_thread = threading.Thread(target=self._refresh_triggers_loop, daemon=True)
         self.refresh_thread.start()
+        
+        # Start mode refresh thread
+        self.mode_refresh_thread = threading.Thread(target=self._refresh_modes_loop, daemon=True)
+        self.mode_refresh_thread.start()
         
         logger.info("Trigger Integration started")
     
@@ -280,6 +290,17 @@ class TriggerIntegration:
                     if not value_matches:
                         continue
                     
+                    # Check mode filtering
+                    mapping_modes = mapping.get('modes', [])
+                    if mapping_modes:  # If modes are specified for this mapping
+                        with self.modes_lock:
+                            current_mode = self.active_mode
+                        
+                        # If no mode is active, or active mode not in mapping's modes, skip
+                        if not current_mode or current_mode not in mapping_modes:
+                            logger.info(f"Skipping mapping (mode mismatch): active={current_mode}, required={mapping_modes}")
+                            continue
+                    
                     flame_sequence = mapping['flame_sequence']
                     allow_override = mapping.get('allow_override', False)
                     
@@ -309,6 +330,72 @@ class TriggerIntegration:
                 logger.error(f"Error refreshing triggers: {e}")
             
             time.sleep(300)  # Refresh every 5 minutes
+    
+    def _refresh_modes_loop(self):
+        """Periodically refresh modes and active mode from the mode service."""
+        while self.running:
+            try:
+                self._fetch_modes()
+                self._fetch_active_mode()
+            except Exception as e:
+                logger.error(f"Error refreshing modes: {e}")
+            
+            time.sleep(30)  # Refresh every 30 seconds
+    
+    def _fetch_modes(self):
+        """Fetch available modes from the mode service."""
+        try:
+            response = requests.get(
+                f"{self.mode_service_url}/api/modes",
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                modes = data.get('modes', [])
+                
+                with self.modes_lock:
+                    self.available_modes = modes
+                logger.debug(f"Fetched {len(self.available_modes)} modes from mode service")
+                return True
+            else:
+                logger.debug(f"Failed to fetch modes: {response.status_code}")
+                return False
+                
+        except requests.exceptions.ConnectionError:
+            logger.debug(f"Cannot connect to Mode Service at {self.mode_service_url}")
+            return False
+        except Exception as e:
+            logger.debug(f"Error fetching modes: {e}")
+            return False
+    
+    def _fetch_active_mode(self):
+        """Fetch the active mode from the mode service."""
+        try:
+            response = requests.get(
+                f"{self.mode_service_url}/api/modes/active",
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                active_mode = data.get('active_mode')
+                
+                with self.modes_lock:
+                    if self.active_mode != active_mode:
+                        logger.info(f"Active mode changed: {self.active_mode} -> {active_mode}")
+                        self.active_mode = active_mode
+                return True
+            else:
+                logger.debug(f"Failed to fetch active mode: {response.status_code}")
+                return False
+                
+        except requests.exceptions.ConnectionError:
+            logger.debug(f"Cannot connect to Mode Service at {self.mode_service_url}")
+            return False
+        except Exception as e:
+            logger.debug(f"Error fetching active mode: {e}")
+            return False
     
     def _fetch_available_triggers(self):
         """Fetch available triggers from the trigger server."""
@@ -384,7 +471,7 @@ class TriggerIntegration:
             return self.mappings.copy()
     
     def add_mapping(self, trigger_name, trigger_value, flame_sequence, allow_override=False, 
-                    trigger_value_min=None, trigger_value_max=None):
+                    trigger_value_min=None, trigger_value_max=None, modes=None):
         """Add a new trigger-to-flame mapping."""
         mapping = None
         with self.mappings_lock:
@@ -408,15 +495,19 @@ class TriggerIntegration:
             if trigger_value is not None and trigger_value_min is None and trigger_value_max is None:
                 mapping['trigger_value'] = trigger_value
             
+            # Add modes if provided
+            if modes is not None and isinstance(modes, list):
+                mapping['modes'] = modes
+            
             self.mappings.append(mapping)
         
         self.save_mappings()
-        logger.info(f"Added mapping: {trigger_name} -> {flame_sequence}")
+        logger.info(f"Added mapping: {trigger_name} -> {flame_sequence} (modes: {modes})")
         return mapping
     
     def update_mapping(self, mapping_id, trigger_name=None, trigger_value=None, 
                       flame_sequence=None, allow_override=None,
-                      trigger_value_min=None, trigger_value_max=None):
+                      trigger_value_min=None, trigger_value_max=None, modes=None):
         """Update an existing mapping."""
         found = False
         with self.mappings_lock:
@@ -428,6 +519,14 @@ class TriggerIntegration:
                         mapping['flame_sequence'] = flame_sequence
                     if allow_override is not None:
                         mapping['allow_override'] = allow_override
+                    
+                    # Handle modes update
+                    if modes is not None:
+                        if isinstance(modes, list):
+                            mapping['modes'] = modes
+                        elif modes == []:  # Empty list means remove modes
+                            if 'modes' in mapping:
+                                del mapping['modes']
                     
                     # Handle range values for continuous triggers
                     # If min/max are provided, update to range-based (remove discrete value)
@@ -499,6 +598,20 @@ class TriggerIntegration:
         with self.triggers_lock:
             return self.available_triggers.copy()
     
+    def get_available_modes(self):
+        """Get list of available modes from the mode service."""
+        # Fetch fresh data from mode service
+        self._fetch_modes()
+        with self.modes_lock:
+            return self.available_modes.copy()
+    
+    def get_active_mode(self):
+        """Get the currently active mode."""
+        # Fetch fresh data from mode service
+        self._fetch_active_mode()
+        with self.modes_lock:
+            return self.active_mode
+    
     def get_status(self):
         """Get integration status."""
         return {
@@ -506,7 +619,9 @@ class TriggerIntegration:
             'trigger_server_url': self.trigger_server_url,
             'listen_port': self.listen_port,
             'mapping_count': len(self.mappings),
-            'available_triggers_count': len(self.available_triggers)
+            'available_triggers_count': len(self.available_triggers),
+            'available_modes_count': len(self.available_modes),
+            'active_mode': self.active_mode
         }
 
 

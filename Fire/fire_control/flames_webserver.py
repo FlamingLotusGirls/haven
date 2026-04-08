@@ -230,6 +230,61 @@ def patternName_valid(patternName):
 def param_valid(value, validValues):
     return value != None and (value.lower() in validValues)
 
+# ---------------------------------------------------------------------------
+# Poofer Mapping Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route("/flame/poofer-mappings", methods=['GET', 'POST'])
+def poofer_mappings():
+    '''GET  /flame/poofer-mappings         : Return all current poofer→address mappings.
+       POST /flame/poofer-mappings         : Add (or overwrite) a mapping.
+         Required fields: name, address
+    '''
+    if request.method == 'GET':
+        return JSONResponse(json.dumps(poofermapping.get_all()))
+
+    # POST – add / overwrite a mapping
+    name    = request.values.get('name',    '').strip()
+    address = request.values.get('address', '').strip()
+    if not name:
+        return CORSResponse("'name' must be present and non-empty", 400)
+    if not address:
+        return CORSResponse("'address' must be present and non-empty", 400)
+    try:
+        poofermapping.update_mapping(name, address)
+        return JSONResponse(json.dumps({'name': name, 'address': address}), 201)
+    except ValueError as e:
+        return CORSResponse(str(e), 400)
+
+
+@app.route("/flame/poofer-mappings/reset-defaults", methods=['POST'])
+def poofer_mappings_reset_defaults():
+    '''POST /flame/poofer-mappings/reset-defaults : Reset all mappings to built-in defaults.'''
+    poofermapping.reset_to_defaults()
+    return JSONResponse(json.dumps(poofermapping.get_all()))
+
+
+@app.route("/flame/poofer-mappings/<name>", methods=['PUT', 'DELETE'])
+def poofer_mapping(name):
+    '''PUT    /flame/poofer-mappings/<name> address=<addr> : Update the address for a mapping.
+       DELETE /flame/poofer-mappings/<name>                : Remove a mapping.
+    '''
+    if request.method == 'PUT':
+        address = request.values.get('address', '').strip()
+        if not address:
+            return CORSResponse("'address' must be present and non-empty", 400)
+        try:
+            poofermapping.update_mapping(name, address)
+            return CORSResponse('Updated', 200)
+        except ValueError as e:
+            return CORSResponse(str(e), 400)
+
+    # DELETE
+    if poofermapping.delete_mapping(name):
+        return CORSResponse('Deleted', 200)
+    return CORSResponse('Mapping not found', 404)
+
+
 # Trigger Integration Endpoints
 
 @app.route("/trigger-integration/status", methods=['GET'])
@@ -248,6 +303,27 @@ def trigger_integration_triggers():
     if integration:
         triggers = integration.get_available_triggers()
         return JSONResponse(json.dumps({'triggers': triggers}))
+    else:
+        return CORSResponse("Trigger integration not initialized", 503)
+
+@app.route("/trigger-integration/modes", methods=['GET'])
+def trigger_integration_modes():
+    '''GET /trigger-integration/modes: Get available modes from mode service'''
+    integration = trigger_integration.get_integration()
+    if integration:
+        modes = integration.get_available_modes()
+        active_mode = integration.get_active_mode()
+        return JSONResponse(json.dumps({'modes': modes, 'active_mode': active_mode}))
+    else:
+        return CORSResponse("Trigger integration not initialized", 503)
+
+@app.route("/trigger-integration/modes/active", methods=['GET'])
+def trigger_integration_active_mode():
+    '''GET /trigger-integration/modes/active: Get currently active mode'''
+    integration = trigger_integration.get_integration()
+    if integration:
+        active_mode = integration.get_active_mode()
+        return JSONResponse(json.dumps({'active_mode': active_mode}))
     else:
         return CORSResponse("Trigger integration not initialized", 503)
 
@@ -278,13 +354,28 @@ def trigger_integration_mappings():
         trigger_value_min = request.values.get("trigger_value_min", None)
         trigger_value_max = request.values.get("trigger_value_max", None)
         
+        # Handle modes (comma-separated list or JSON array)
+        modes = None
+        if "modes" in request.values:
+            modes_str = request.values.get("modes", "")
+            if modes_str:
+                try:
+                    # Try to parse as JSON array first
+                    modes = json.loads(modes_str)
+                except:
+                    # Fall back to comma-separated string
+                    modes = [m.strip() for m in modes_str.split(',') if m.strip()]
+            else:
+                modes = []
+        
         mapping = integration.add_mapping(
             trigger_name, 
             trigger_value, 
             flame_sequence, 
             allow_override,
             trigger_value_min,
-            trigger_value_max
+            trigger_value_max,
+            modes
         )
         return JSONResponse(json.dumps({'message': 'Mapping created', 'mapping': mapping}))
 
@@ -316,9 +407,23 @@ def trigger_integration_mapping(mapping_id):
         trigger_value_min = request.values.get("trigger_value_min", None)
         trigger_value_max = request.values.get("trigger_value_max", None)
         
+        # Handle modes (comma-separated list or JSON array)
+        modes = None
+        if "modes" in request.values:
+            modes_str = request.values.get("modes", "")
+            if modes_str:
+                try:
+                    # Try to parse as JSON array first
+                    modes = json.loads(modes_str)
+                except:
+                    # Fall back to comma-separated string
+                    modes = [m.strip() for m in modes_str.split(',') if m.strip()]
+            else:
+                modes = []
+        
         if integration.update_mapping(mapping_id, trigger_name, trigger_value, 
                                       flame_sequence, allow_override,
-                                      trigger_value_min, trigger_value_max):
+                                      trigger_value_min, trigger_value_max, modes):
             return CORSResponse("Mapping updated", 200)
         else:
             return CORSResponse("Mapping not found", 404)
@@ -358,6 +463,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(format='%(asctime)-15s %(levelname)s %(module)s %(lineno)d: %(message)s', level=logging.DEBUG)
 
+    poofermapping.init()
     #pattern_manager.init("./pattern_test_2.json")
     pattern_manager.init("./std_sequences.json")
     event_manager.init()

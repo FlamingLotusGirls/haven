@@ -14,7 +14,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Cockatoo Birds Allpoof"
+    "display_name": "Cockatoo Birds Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Cockatoo_bigBird_allpoof",
@@ -31,7 +33,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Cockatoo Bigbird Allpoof"
+    "display_name": "Cockatoo Bigbird Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Cockatoo_bigBird_chase",
@@ -66,7 +70,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Cockatoo Bigbird Chase"
+    "display_name": "Cockatoo Bigbird Chase",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Cockatoo_birds_chase",
@@ -115,7 +121,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Cockatoo Birds Chase"
+    "display_name": "Cockatoo Birds Chase",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Osprey_birds_allpoof",
@@ -131,7 +139,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Osprey Birds Allpoof"
+    "display_name": "Osprey Birds Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Osprey_bigbird_allpoof",
@@ -146,7 +156,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Osprey Bigbird Allpoof"
+    "display_name": "Osprey Bigbird Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Magpie_birds_allpoof",
@@ -162,7 +174,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Magpie Birds Allpoof"
+    "display_name": "Magpie Birds Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Magpie_bigbird_allpoof",
@@ -176,7 +190,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Magpie Bigbird Allpoof"
+    "display_name": "Magpie Bigbird Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Perch_birds_allpoof",
@@ -193,7 +209,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Perch Birds Allpoof"
+    "display_name": "Perch Birds Allpoof",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__Perch_birds_chase",
@@ -228,7 +246,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "Perch Birds Chase"
+    "display_name": "Perch Birds Chase",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C1",
@@ -242,7 +262,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C1"
+    "display_name": "C1",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C2",
@@ -256,7 +278,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C2"
+    "display_name": "C2",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C3",
@@ -270,7 +294,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C3"
+    "display_name": "C3",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C4",
@@ -284,7 +310,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C4"
+    "display_name": "C4",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C5",
@@ -298,7 +326,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C5"
+    "display_name": "C5",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C6",
@@ -312,7 +342,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C6"
+    "display_name": "C6",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C_HAIR1",
@@ -326,7 +358,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C Hair1"
+    "display_name": "C Hair1",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C_HAIR2",
@@ -340,7 +374,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C Hair2"
+    "display_name": "C Hair2",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C_HAIR3",
@@ -354,7 +390,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C Hair3"
+    "display_name": "C Hair3",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__C_HAIR4",
@@ -368,7 +406,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "C Hair4"
+    "display_name": "C Hair4",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__M_TAIL",
@@ -382,7 +422,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "M Tail"
+    "display_name": "M Tail",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__M1",
@@ -396,7 +438,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "M1"
+    "display_name": "M1",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__M2",
@@ -410,7 +454,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "M2"
+    "display_name": "M2",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__M3",
@@ -424,7 +470,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "M3"
+    "display_name": "M3",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__O_EYES",
@@ -438,7 +486,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "O Eyes"
+    "display_name": "O Eyes",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__O_WINGS",
@@ -452,7 +502,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "O Wings"
+    "display_name": "O Wings",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__O1",
@@ -466,7 +518,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "O1"
+    "display_name": "O1",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__O2",
@@ -480,7 +534,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "O2"
+    "display_name": "O2",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__O3",
@@ -494,7 +550,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "O3"
+    "display_name": "O3",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__P1",
@@ -508,7 +566,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "P1"
+    "display_name": "P1",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__P2",
@@ -522,7 +582,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "P2"
+    "display_name": "P2",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__P3",
@@ -536,7 +598,9 @@
       }
     ],
     "modifiable": false,
-    "display_name": "P3"
+    "display_name": "P3",
+    "enabled": true,
+    "active": false
   },
   {
     "name": "__P4",
@@ -550,20 +614,21 @@
       }
     ],
     "modifiable": false,
-    "display_name": "P4"
+    "display_name": "P4",
+    "enabled": true,
+    "active": false
   },
   {
-    "name": "foobar",
+    "name": "test pattern",
     "events": [
       {
         "ids": [
-          "C4"
+          "C2"
         ],
         "startTime": 0,
         "duration": 0.5
       }
     ],
-    "modifiable": true,
-    "display_name": "Foobar"
+    "modifiable": true
   }
 ]

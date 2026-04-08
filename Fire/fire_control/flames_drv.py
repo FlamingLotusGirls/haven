@@ -183,6 +183,10 @@ class PooferFiringThread(Thread): # comment out for unit testing
                 elif type == "resume":
                     self.resumeAll()
 
+                elif type == "reloadMappings":
+                    self.generateDisableAllString()
+                    logger.info("Poofer mappings reloaded in driver")
+
                 elif type == "pooferDisable":
                     # TODO: does this need to persist?
                     self.disablePoofer(msgObj)
