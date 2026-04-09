@@ -362,6 +362,48 @@
             font-size: 0.85em;
             font-weight: bold;
         }
+
+        /* ── OSC Aliases ─────────────────────────────────────────── */
+        .alias-item {
+            background: #f8f9fa;
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            border-left: 4px solid #28a745;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .alias-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 3px;
+        }
+        .alias-osc {
+            color: #28a745;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        .alias-desc {
+            color: #6c757d;
+            font-size: 0.85em;
+            margin-top: 2px;
+            font-style: italic;
+        }
+        /* Badge shown next to the OSC address in the mapping list */
+        .alias-badge {
+            display: inline-block;
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 0.78em;
+            font-weight: normal;
+            font-family: 'Courier New', monospace;
+            margin-left: 6px;
+            opacity: 0.85;
+        }
     </style>
 </head>
 <body>
@@ -396,6 +438,20 @@
             </div>
         </div>
 
+        <!-- OSC Aliases -->
+        <div class="card">
+            <h2>OSC Command Aliases</h2>
+            <p style="color:#555; margin-bottom:15px; font-size:0.9em;">
+                Give human-readable names to OSC addresses. When adding or editing a mapping
+                you can select an alias to auto-fill the address and default arguments —
+                you can still type any raw OSC address directly.
+            </p>
+            <button class="success" onclick="openAliasModal()">➕ Add Alias</button>
+            <div id="aliasesList" style="margin-top:15px;">
+                <p style="color:#6c757d; text-align:center; padding:15px;">Loading aliases…</p>
+            </div>
+        </div>
+
         <!-- Trigger to OSC Mappings -->
         <div class="card">
             <h2>Trigger to OSC Mappings</h2>
@@ -421,6 +477,13 @@
                 <label for="modalTrigger">Trigger</label>
                 <select id="modalTrigger">
                     <option value="">Select a trigger...</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="modalAliasSelect">Select from Alias <em style="color:#999;font-size:0.85em;">(or type address below)</em></label>
+                <select id="modalAliasSelect" onchange="onAliasSelected()">
+                    <option value="">— select an alias to auto-fill, or type directly below —</option>
                 </select>
             </div>
 
@@ -461,17 +524,52 @@
         </div>
     </div>
 
+    <!-- Add/Edit Alias Modal -->
+    <div id="aliasModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close-btn" onclick="closeAliasModal()">&times;</span>
+                <h2 id="aliasModalTitle">Add Alias</h2>
+            </div>
+            <div id="aliasModalAlert"></div>
+            <div class="form-group">
+                <label for="aliasName">Alias Name</label>
+                <input type="text" id="aliasName" placeholder="e.g., Fire Poof, Bird Chirp, Lights Up">
+            </div>
+            <div class="form-group">
+                <label for="aliasOscAddress">OSC Address</label>
+                <input type="text" id="aliasOscAddress" placeholder="/example/address">
+            </div>
+            <div class="form-group">
+                <label>Default Arguments <em style="color:#999;font-size:0.85em;">(optional — pre-filled when alias is selected in a mapping)</em></label>
+                <div id="aliasArgsList" class="arg-list"></div>
+                <button class="secondary" onclick="addAliasArgument()">Add Argument</button>
+            </div>
+            <div class="form-group">
+                <label for="aliasDescription">Description <em style="color:#999;font-size:0.85em;">(optional)</em></label>
+                <input type="text" id="aliasDescription" placeholder="What does this OSC command do?">
+            </div>
+            <div class="button-group">
+                <button class="primary" onclick="saveAlias()">Save Alias</button>
+                <button class="secondary" onclick="closeAliasModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let config = {};
         let triggers = [];
+        let aliases = [];
         let currentEditingId = null;
+        let currentEditingAliasId = null;
 
         // Load initial data
         async function loadData() {
             await Promise.all([
                 loadConfig(),
                 loadTriggers(),
-                loadMappings()
+                loadMappings(),
+                loadAliases()
             ]);
             updateStatus();
         }
@@ -564,21 +662,27 @@
                 data.mappings.forEach(mapping => {
                     const item = document.createElement('div');
                     item.className = 'mapping-item' + (mapping.enabled ? '' : ' disabled');
-                    
-                    const argsText = mapping.osc_args.length > 0 
+
+                    const argsText = mapping.osc_args.length > 0
                         ? `Args: [${mapping.osc_args.join(', ')}]`
                         : 'No arguments';
+
+                    // Resolve alias name for human-readable display
+                    const aliasName = resolveAliasName(mapping.osc_address);
+                    const oscDisplay = aliasName
+                        ? `${aliasName} <span class="alias-badge">${mapping.osc_address}</span>`
+                        : mapping.osc_address;
 
                     // Build mode chips HTML
                     const modes = mapping.modes || [];
                     const modesHtml = modes.length > 0
                         ? modes.map(m => `<span class="mode-chip">${m}</span>`).join('')
                         : '<span class="mode-chip all-modes">All modes</span>';
-                    
+
                     item.innerHTML = `
                         <div class="mapping-info">
                             <div class="mapping-trigger">🎯 ${mapping.trigger_name}</div>
-                            <div class="mapping-osc">➜ ${mapping.osc_address}</div>
+                            <div class="mapping-osc">➜ ${oscDisplay}</div>
                             <div class="mapping-args">${argsText}</div>
                             <div class="mapping-modes" style="margin-top:5px;">${modesHtml}</div>
                         </div>
@@ -680,6 +784,8 @@
             document.getElementById('modalOscAddress').value = '';
             document.getElementById('argsList').innerHTML = '';
             document.getElementById('modalAlert').innerHTML = '';
+            populateAliasMappingDropdown();
+            document.getElementById('modalAliasSelect').value = '';
             renderModeCheckboxes([]);   // no modes pre-selected
             document.getElementById('mappingModal').classList.add('active');
         }
@@ -697,7 +803,12 @@
                 document.getElementById('modalTrigger').value = mapping.trigger_name;
                 document.getElementById('modalOscAddress').value = mapping.osc_address;
                 document.getElementById('modalAlert').innerHTML = '';
-                
+
+                // Populate alias dropdown; pre-select if osc_address matches a known alias
+                populateAliasMappingDropdown();
+                const matchingAlias = aliases.find(a => a.osc_address === mapping.osc_address);
+                document.getElementById('modalAliasSelect').value = matchingAlias ? matchingAlias.id : '';
+
                 // Load arguments
                 document.getElementById('argsList').innerHTML = '';
                 mapping.osc_args.forEach(arg => {
@@ -706,7 +817,7 @@
 
                 // Pre-check the modes this mapping belongs to
                 renderModeCheckboxes(mapping.modes || []);
-                
+
                 document.getElementById('mappingModal').classList.add('active');
             } catch (error) {
                 console.error('Error loading mapping:', error);
@@ -831,11 +942,187 @@
             }, 5000);
         }
 
-        // Close modal when clicking outside
+        // ── OSC Alias management ──────────────────────────────────────────────────
+
+        /** Lookup an alias name for a given osc_address, or return null. */
+        function resolveAliasName(oscAddress) {
+            const match = aliases.find(a => a.osc_address === oscAddress);
+            return match ? match.alias : null;
+        }
+
+        /** Fetch aliases from the server and refresh all alias-related UI. */
+        async function loadAliases() {
+            try {
+                const r = await fetch('/api/aliases');
+                const data = await r.json();
+                aliases = data.aliases || [];
+                renderAliasList();
+            } catch (e) {
+                console.error('Error loading aliases:', e);
+                aliases = [];
+            }
+        }
+
+        /** Re-render the alias management list in the Aliases card. */
+        function renderAliasList() {
+            const div = document.getElementById('aliasesList');
+            if (!div) return;
+            if (aliases.length === 0) {
+                div.innerHTML = '<p style="color:#6c757d; text-align:center; padding:15px;">No aliases defined yet. Click "Add Alias" to create one.</p>';
+                return;
+            }
+            div.innerHTML = '';
+            aliases.forEach(a => {
+                const item = document.createElement('div');
+                item.className = 'alias-item';
+                const argsText = a.osc_args && a.osc_args.length > 0 ? ` [${a.osc_args.join(', ')}]` : '';
+                const descHtml = a.description ? `<div class="alias-desc">${a.description}</div>` : '';
+                item.innerHTML = `
+                    <div>
+                        <div class="alias-name">${a.alias}</div>
+                        <div class="alias-osc">${a.osc_address}${argsText}</div>
+                        ${descHtml}
+                    </div>
+                    <div style="display:flex; gap:5px;">
+                        <button class="primary" style="padding:5px 10px;font-size:12px;" onclick="openAliasModal(${a.id})">✏️ Edit</button>
+                        <button class="danger" style="padding:5px 10px;font-size:12px;" onclick="deleteAlias(${a.id})">🗑️ Delete</button>
+                    </div>
+                `;
+                div.appendChild(item);
+            });
+        }
+
+        /** Fill the "Select from Alias" dropdown in the mapping modal. */
+        function populateAliasMappingDropdown() {
+            const sel = document.getElementById('modalAliasSelect');
+            if (!sel) return;
+            const current = sel.value;
+            sel.innerHTML = '<option value="">— select an alias to auto-fill, or type directly below —</option>';
+            aliases.forEach(a => {
+                const opt = document.createElement('option');
+                opt.value = a.id;
+                const argsHint = a.osc_args && a.osc_args.length > 0 ? ` [${a.osc_args.join(', ')}]` : '';
+                opt.textContent = `${a.alias}  →  ${a.osc_address}${argsHint}`;
+                if (String(a.id) === String(current)) opt.selected = true;
+                sel.appendChild(opt);
+            });
+        }
+
+        /** Called when user picks an alias in the mapping modal dropdown.
+         *  Fills in the OSC Address field and default arguments. */
+        function onAliasSelected() {
+            const sel = document.getElementById('modalAliasSelect');
+            const aliasId = parseInt(sel.value);
+            if (!aliasId) return;
+            const a = aliases.find(x => x.id === aliasId);
+            if (!a) return;
+            document.getElementById('modalOscAddress').value = a.osc_address;
+            document.getElementById('argsList').innerHTML = '';
+            (a.osc_args || []).forEach(arg => addArgument(arg));
+        }
+
+        /** Open the add/edit alias modal.  Pass an alias id to edit, or nothing to add. */
+        function openAliasModal(id = null) {
+            currentEditingAliasId = id || null;
+            document.getElementById('aliasModalTitle').textContent = id ? 'Edit Alias' : 'Add Alias';
+            document.getElementById('aliasModalAlert').innerHTML = '';
+            document.getElementById('aliasArgsList').innerHTML = '';
+            if (id) {
+                const a = aliases.find(x => x.id === id);
+                if (!a) return;
+                document.getElementById('aliasName').value = a.alias;
+                document.getElementById('aliasOscAddress').value = a.osc_address;
+                document.getElementById('aliasDescription').value = a.description || '';
+                (a.osc_args || []).forEach(arg => addAliasArgument(arg));
+            } else {
+                document.getElementById('aliasName').value = '';
+                document.getElementById('aliasOscAddress').value = '';
+                document.getElementById('aliasDescription').value = '';
+            }
+            document.getElementById('aliasModal').classList.add('active');
+        }
+
+        function closeAliasModal() {
+            document.getElementById('aliasModal').classList.remove('active');
+            currentEditingAliasId = null;
+        }
+
+        function addAliasArgument(value = '') {
+            const list = document.getElementById('aliasArgsList');
+            const item = document.createElement('div');
+            item.className = 'arg-item';
+            item.innerHTML = `
+                <input type="text" class="alias-arg-value" placeholder="e.g., 100, hello" value="${value}">
+                <button class="danger" onclick="this.parentElement.remove()">Remove</button>
+            `;
+            list.appendChild(item);
+        }
+
+        async function saveAlias() {
+            const alias    = document.getElementById('aliasName').value.trim();
+            const osc_address  = document.getElementById('aliasOscAddress').value.trim();
+            const description  = document.getElementById('aliasDescription').value.trim();
+            const osc_args = Array.from(document.querySelectorAll('.alias-arg-value'))
+                                  .map(el => el.value).filter(v => v);
+
+            if (!alias) { showAliasModalAlert('Please enter an alias name', 'error'); return; }
+            if (!osc_address) { showAliasModalAlert('Please enter an OSC address', 'error'); return; }
+
+            const payload = { alias, osc_address, osc_args, description };
+            try {
+                const url    = currentEditingAliasId ? `/api/aliases/${currentEditingAliasId}` : '/api/aliases';
+                const method = currentEditingAliasId ? 'PUT' : 'POST';
+                const r = await fetch(url, {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (r.ok) {
+                    closeAliasModal();
+                    await loadAliases();
+                    populateAliasMappingDropdown();
+                    // Refresh mapping list so alias names update in place
+                    await loadMappings();
+                } else {
+                    const err = await r.json();
+                    showAliasModalAlert('Error: ' + err.error, 'error');
+                }
+            } catch (e) {
+                showAliasModalAlert('Failed to save alias', 'error');
+            }
+        }
+
+        async function deleteAlias(id) {
+            if (!confirm('Delete this alias? Existing mappings using this OSC address are unaffected.')) return;
+            try {
+                const r = await fetch(`/api/aliases/${id}`, { method: 'DELETE' });
+                if (r.ok) {
+                    await loadAliases();
+                    populateAliasMappingDropdown();
+                    await loadMappings();   // re-render so alias badges update
+                } else {
+                    alert('Failed to delete alias');
+                }
+            } catch (e) {
+                alert('Failed to delete alias');
+            }
+        }
+
+        function showAliasModalAlert(message, type) {
+            const div = document.getElementById('aliasModalAlert');
+            div.innerHTML = `<div class="alert ${type}">${message}</div>`;
+            setTimeout(() => { div.innerHTML = ''; }, 5000);
+        }
+
+        // ── End alias management ──────────────────────────────────────────────────
+
+        // Close modals when clicking outside
         window.onclick = function(event) {
-            const modal = document.getElementById('mappingModal');
-            if (event.target === modal) {
+            if (event.target === document.getElementById('mappingModal')) {
                 closeMappingModal();
+            }
+            if (event.target === document.getElementById('aliasModal')) {
+                closeAliasModal();
             }
         }
 

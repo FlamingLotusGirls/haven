@@ -33,6 +33,7 @@ config = {
         'port': 8000
     },
     'mappings': [],
+    'osc_aliases': [],      # list of {id, alias, osc_address, osc_args, description}
     'gateway_url': GATEWAY_URL,
     'mode_service_url': MODE_SERVICE_URL,
     'service_port': 5100
@@ -620,6 +621,79 @@ def get_modes():
 
     # Fallback: return cached active mode + empty list
     return jsonify({'modes': [], 'active_mode': get_current_mode()})
+
+
+@app.route('/api/aliases', methods=['GET'])
+def get_aliases():
+    """Return all OSC address aliases."""
+    return jsonify({'aliases': config.get('osc_aliases', [])})
+
+
+@app.route('/api/aliases', methods=['POST'])
+def add_alias():
+    """Add a new OSC alias."""
+    data = request.get_json()
+    if not data or not data.get('alias', '').strip():
+        return jsonify({'error': 'alias (human-readable name) is required'}), 400
+    if not data.get('osc_address', '').strip():
+        return jsonify({'error': 'osc_address is required'}), 400
+    if 'osc_args' in data and not isinstance(data['osc_args'], list):
+        return jsonify({'error': 'osc_args must be an array'}), 400
+
+    with config_lock:
+        aliases = config.setdefault('osc_aliases', [])
+        max_id = max((a.get('id', 0) for a in aliases), default=0)
+        entry = {
+            'id': max_id + 1,
+            'alias': data['alias'].strip(),
+            'osc_address': data['osc_address'].strip(),
+            'osc_args': data.get('osc_args', []),
+            'description': data.get('description', '').strip()
+        }
+        aliases.append(entry)
+        save_config()
+
+    return jsonify({'message': 'Alias added', 'alias': entry}), 201
+
+
+@app.route('/api/aliases/<int:alias_id>', methods=['PUT'])
+def update_alias(alias_id):
+    """Update an existing OSC alias."""
+    data = request.get_json()
+    if not data or not data.get('alias', '').strip():
+        return jsonify({'error': 'alias (human-readable name) is required'}), 400
+    if not data.get('osc_address', '').strip():
+        return jsonify({'error': 'osc_address is required'}), 400
+    if 'osc_args' in data and not isinstance(data['osc_args'], list):
+        return jsonify({'error': 'osc_args must be an array'}), 400
+
+    with config_lock:
+        aliases = config.setdefault('osc_aliases', [])
+        idx = next((i for i, a in enumerate(aliases) if a.get('id') == alias_id), None)
+        if idx is None:
+            return jsonify({'error': 'Alias not found'}), 404
+        aliases[idx].update({
+            'alias': data['alias'].strip(),
+            'osc_address': data['osc_address'].strip(),
+            'osc_args': data.get('osc_args', []),
+            'description': data.get('description', '').strip()
+        })
+        save_config()
+
+    return jsonify({'message': 'Alias updated', 'alias': aliases[idx]})
+
+
+@app.route('/api/aliases/<int:alias_id>', methods=['DELETE'])
+def delete_alias(alias_id):
+    """Delete an OSC alias."""
+    with config_lock:
+        aliases = config.setdefault('osc_aliases', [])
+        orig_len = len(aliases)
+        config['osc_aliases'] = [a for a in aliases if a.get('id') != alias_id]
+        if len(config['osc_aliases']) < orig_len:
+            save_config()
+            return jsonify({'message': 'Alias deleted'})
+        return jsonify({'error': 'Alias not found'}), 404
 
 
 @app.route('/api/status', methods=['GET'])
