@@ -236,6 +236,132 @@
         #rangeGroup {
             display: none;
         }
+
+        /* ── Forwarding Control ─────────────────────────────────── */
+        .forwarding-card {
+            border: 3px solid #e0e0e0;
+            transition: border-color 0.4s;
+        }
+        .forwarding-card.enabled  { border-color: #27ae60; }
+        .forwarding-card.disabled { border-color: #e74c3c; }
+
+        .forwarding-row {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .forwarding-badge {
+            display: inline-block;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: 700;
+            letter-spacing: 1px;
+            min-width: 160px;
+            text-align: center;
+        }
+        .forwarding-badge.enabled  { background: #d4edda; color: #155724; }
+        .forwarding-badge.disabled { background: #f8d7da; color: #721c24; }
+
+        .forwarding-toggle {
+            padding: 12px 28px;
+            font-size: 1em;
+            font-weight: 700;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .forwarding-toggle.to-disable { background: #e74c3c; color: white; }
+        .forwarding-toggle.to-disable:hover { background: #c0392b; }
+        .forwarding-toggle.to-enable  { background: #27ae60; color: white; }
+        .forwarding-toggle.to-enable:hover  { background: #1e8449; }
+
+        .forwarding-note {
+            font-size: 0.88em;
+            color: #666;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        /* ── Trigger Log ────────────────────────────────────────── */
+        .log-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .log-toolbar label { font-weight: 600; color: #333; }
+        .log-toolbar select {
+            padding: 6px 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .log-auto-badge {
+            font-size: 0.8em;
+            color: #27ae60;
+            font-weight: 600;
+            animation: blink 1.5s infinite;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        .log-table-wrap {
+            max-height: 380px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .log-table thead th {
+            background: #667eea;
+            color: white;
+            padding: 8px 12px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .log-table tbody tr { border-bottom: 1px solid #f0f0f0; }
+        .log-table tbody tr:last-child { border-bottom: none; }
+
+        .log-table td { padding: 7px 12px; vertical-align: middle; }
+
+        .log-row-forwarded { background: #f0fff4; }
+        .log-row-blocked   { background: #fff5f5; }
+
+        .log-badge-forwarded {
+            background: #d4edda; color: #155724;
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.8em; font-weight: 600;
+        }
+        .log-badge-blocked {
+            background: #f8d7da; color: #721c24;
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.8em; font-weight: 600;
+        }
+
+        .log-empty { text-align: center; padding: 30px; color: #999; font-style: italic; }
+
+        button.clear-log {
+            background: #95a5a6;
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        button.clear-log:hover { background: #7f8c8d; }
     </style>
 </head>
 <body>
@@ -243,6 +369,58 @@
         <h1>🔥 Haven Trigger Server</h1>
 
         <div id="alertContainer"></div>
+
+        <!-- Forwarding Control -->
+        <div class="card forwarding-card" id="forwardingCard">
+            <h2>📡 Trigger Forwarding</h2>
+            <div class="forwarding-row">
+                <span class="forwarding-badge" id="forwardingBadge">…</span>
+                <button class="forwarding-toggle" id="forwardingToggle" onclick="toggleForwarding()">…</button>
+                <span class="forwarding-note">
+                    When <strong>disabled</strong>, trigger events are still logged here but are
+                    <em>not</em> dispatched to services — useful for testing device wiring
+                    without activating the sculpture.
+                </span>
+            </div>
+        </div>
+
+        <!-- Trigger Log -->
+        <div class="card">
+            <div class="log-toolbar">
+                <div>
+                    <h2 style="display:inline; margin-bottom:0;">📋 Recent Trigger Events</h2>
+                    <span class="log-auto-badge" id="logAutoBadge"> ● live</span>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <label for="logMinutes">Show last:</label>
+                    <select id="logMinutes" onchange="refreshLog()">
+                        <option value="2">2 min</option>
+                        <option value="5">5 min</option>
+                        <option value="10" selected>10 min</option>
+                        <option value="30">30 min</option>
+                    </select>
+                    <button onclick="refreshLog()" style="padding:8px 14px; font-size:13px;">🔄 Refresh</button>
+                    <button class="clear-log" onclick="clearLog()">🗑 Clear</button>
+                </div>
+            </div>
+            <div class="log-table-wrap">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Trigger Name</th>
+                            <th>Value</th>
+                            <th>ID</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody">
+                        <tr><td colspan="5" class="log-empty">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="logCount" style="font-size:0.85em; color:#666; margin-top:8px;"></div>
+        </div>
 
         <!-- Add/Edit Trigger Form -->
         <div class="card">
@@ -297,8 +475,141 @@
         const API_BASE = '/api';
         let currentTriggers = [];
 
+        // ── Forwarding control ──────────────────────────────────────────────
+
+        let forwardingEnabled = true; // local mirror, updated on load
+
+        async function loadForwardingState() {
+            try {
+                const r = await fetch('/api/forwarding');
+                const d = await r.json();
+                applyForwardingState(d.enabled);
+            } catch (e) {
+                console.error('Could not load forwarding state:', e);
+            }
+        }
+
+        function applyForwardingState(enabled) {
+            forwardingEnabled = enabled;
+            const card   = document.getElementById('forwardingCard');
+            const badge  = document.getElementById('forwardingBadge');
+            const toggle = document.getElementById('forwardingToggle');
+
+            if (enabled) {
+                card.className   = 'card forwarding-card enabled';
+                badge.className  = 'forwarding-badge enabled';
+                badge.textContent = '✓ Forwarding ON';
+                toggle.className  = 'forwarding-toggle to-disable';
+                toggle.textContent = 'Disable Forwarding';
+            } else {
+                card.className   = 'card forwarding-card disabled';
+                badge.className  = 'forwarding-badge disabled';
+                badge.textContent = '✗ Forwarding OFF';
+                toggle.className  = 'forwarding-toggle to-enable';
+                toggle.textContent = 'Enable Forwarding';
+            }
+        }
+
+        async function toggleForwarding() {
+            const btn = document.getElementById('forwardingToggle');
+            btn.disabled = true;
+            try {
+                const r = await fetch('/api/forwarding', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled: !forwardingEnabled})
+                });
+                const d = await r.json();
+                if (r.ok) {
+                    applyForwardingState(d.enabled);
+                    showAlert(d.message, 'success');
+                } else {
+                    showAlert(d.error || 'Failed to update forwarding', 'error');
+                }
+            } catch (e) {
+                showAlert('Error toggling forwarding: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Trigger Log ─────────────────────────────────────────────────────
+
+        let logRefreshTimer = null;
+
+        function formatTime(iso) {
+            // Show HH:MM:SS.mmm  (local time)
+            const d = new Date(iso);
+            const hh = String(d.getHours()).padStart(2,'0');
+            const mm = String(d.getMinutes()).padStart(2,'0');
+            const ss = String(d.getSeconds()).padStart(2,'0');
+            const ms = String(d.getMilliseconds()).padStart(3,'0');
+            return `${hh}:${mm}:${ss}.${ms}`;
+        }
+
+        async function refreshLog() {
+            const minutes = document.getElementById('logMinutes').value;
+            try {
+                const r = await fetch(`/api/trigger-log?minutes=${minutes}&limit=200`);
+                const d = await r.json();
+                renderLog(d.events, d.total);
+            } catch (e) {
+                console.error('Log fetch error:', e);
+            }
+        }
+
+        function renderLog(events, total) {
+            const tbody = document.getElementById('logTableBody');
+            const countEl = document.getElementById('logCount');
+
+            if (!events || events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="log-empty">No trigger events in this time window.</td></tr>';
+                countEl.textContent = '';
+                return;
+            }
+
+            tbody.innerHTML = events.map(e => {
+                const rowClass  = e.forwarded ? 'log-row-forwarded' : 'log-row-blocked';
+                const badge     = e.forwarded
+                    ? '<span class="log-badge-forwarded">forwarded</span>'
+                    : '<span class="log-badge-blocked">blocked</span>';
+                const value = e.value !== undefined ? escapeHtml(String(e.value)) : '<em style="color:#bbb">—</em>';
+                const id    = e.id    !== undefined ? escapeHtml(String(e.id))    : '<em style="color:#bbb">—</em>';
+                return `<tr class="${rowClass}">
+                    <td style="white-space:nowrap; font-family:monospace;">${formatTime(e.timestamp)}</td>
+                    <td><strong>${escapeHtml(e.name)}</strong></td>
+                    <td>${value}</td>
+                    <td>${id}</td>
+                    <td>${badge}</td>
+                </tr>`;
+            }).join('');
+
+            countEl.textContent = `Showing ${events.length} of ${total} event${total !== 1 ? 's' : ''} in window`;
+        }
+
+        async function clearLog() {
+            if (!confirm('Clear the trigger log?')) return;
+            try {
+                await fetch('/api/trigger-log', {method: 'DELETE'});
+                renderLog([], 0);
+                showAlert('Log cleared', 'success');
+            } catch (e) {
+                showAlert('Error clearing log: ' + e.message, 'error');
+            }
+        }
+
+        function startLogAutoRefresh() {
+            if (logRefreshTimer) clearInterval(logRefreshTimer);
+            logRefreshTimer = setInterval(refreshLog, 2000); // every 2 s
+        }
+
+        // ── Init ────────────────────────────────────────────────────────────
+
         // Initialize
         document.addEventListener('DOMContentLoaded', () => {
+            loadForwardingState();
+            refreshLog();
+            startLogAutoRefresh();
             loadTriggers();
             setupEventListeners();
         });

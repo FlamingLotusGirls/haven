@@ -11,13 +11,14 @@ Additionally handles:
 - Trigger status caching
 """
 
+from collections import deque
 from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
 import socket
 import tempfile
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -51,6 +52,16 @@ service_send_locks = {}
 # Every endpoint that calls load_config() + save_config() must hold this lock
 # for the full duration to prevent concurrent requests from losing each other's writes.
 config_lock = threading.Lock()
+
+# Rolling in-memory trigger event log.  Capped at 1000 entries; older entries
+# beyond 10 minutes are filtered out at read time.
+trigger_log: deque = deque(maxlen=1000)
+log_lock = threading.Lock()
+
+# Forwarding toggle.  When False, trigger events are logged but NOT dispatched
+# to registered services.  Useful for testing without affecting the sculpture.
+forwarding_enabled = True
+forwarding_lock = threading.Lock()
 
 
 def load_config():
@@ -721,13 +732,32 @@ def trigger_event():
         
         trigger_cache[trigger_name] = cache_entry
     
-    # Dispatch to registered services
-    dispatch_trigger_event(trigger_event)
-    
+    # Record in rolling log (always, regardless of forwarding state)
+    with forwarding_lock:
+        should_forward = forwarding_enabled
+
+    log_entry = {
+        'timestamp': trigger_event['timestamp'],
+        'name':      trigger_event['name'],
+        'forwarded': should_forward,
+    }
+    if 'value' in trigger_event:
+        log_entry['value'] = trigger_event['value']
+    if 'id' in trigger_event:
+        log_entry['id'] = trigger_event['id']
+
+    with log_lock:
+        trigger_log.append(log_entry)
+
+    # Dispatch to registered services only when forwarding is enabled
+    if should_forward:
+        dispatch_trigger_event(trigger_event)
+
     return jsonify({
-        'message': 'Trigger event received and dispatched',
+        'message': 'Trigger event received' + (' and dispatched' if should_forward else ' (forwarding disabled)'),
         'event': trigger_event,
-        'dispatched_to': len(service_registry)
+        'dispatched_to': len(service_registry) if should_forward else 0,
+        'forwarded': should_forward,
     }), 200
 
 
@@ -786,6 +816,73 @@ def get_trigger_status():
         'triggers': trigger_cache,
         'count': len(trigger_cache)
     })
+
+
+# ---------------------------------------------------------------------------
+# Trigger Log & Forwarding Control Endpoints
+# ---------------------------------------------------------------------------
+
+@app.route('/api/trigger-log', methods=['GET'])
+def get_trigger_log():
+    """
+    Return the recent trigger event log.
+    Query params:
+      minutes (int, default 10): only return events from the last N minutes
+      limit   (int, default 200): cap the number of returned entries
+    Results are returned newest-first.
+    """
+    try:
+        minutes = int(request.args.get('minutes', 10))
+        limit   = int(request.args.get('limit', 200))
+    except ValueError:
+        return jsonify({'error': 'minutes and limit must be integers'}), 400
+
+    cutoff = (datetime.now() - timedelta(minutes=minutes)).isoformat()
+
+    with log_lock:
+        # deque is ordered oldest→newest; reverse for newest-first output
+        recent = [e for e in trigger_log if e['timestamp'] >= cutoff]
+
+    recent.reverse()
+    return jsonify({
+        'events': recent[:limit],
+        'total':  len(recent),
+        'minutes': minutes,
+    })
+
+
+@app.route('/api/trigger-log', methods=['DELETE'])
+def clear_trigger_log():
+    """Clear the in-memory trigger log."""
+    with log_lock:
+        trigger_log.clear()
+    return jsonify({'message': 'Trigger log cleared'})
+
+
+@app.route('/api/forwarding', methods=['GET'])
+def get_forwarding():
+    """Return the current forwarding state."""
+    with forwarding_lock:
+        enabled = forwarding_enabled
+    return jsonify({'enabled': enabled})
+
+
+@app.route('/api/forwarding', methods=['POST'])
+def set_forwarding():
+    """
+    Enable or disable trigger forwarding.
+    Body: {"enabled": true} or {"enabled": false}
+    """
+    global forwarding_enabled
+    data = request.get_json(silent=True) or {}
+    if 'enabled' not in data:
+        return jsonify({'error': '"enabled" field is required'}), 400
+    with forwarding_lock:
+        forwarding_enabled = bool(data['enabled'])
+        enabled = forwarding_enabled
+    state = 'enabled' if enabled else 'disabled'
+    print(f"Trigger forwarding {state}")
+    return jsonify({'enabled': enabled, 'message': f'Forwarding {state}'})
 
 
 if __name__ == '__main__':
