@@ -38,6 +38,12 @@ def serve_forever(httpPort=PORT):
     logger.info("FLAMES WebServer: port {}".format(httpPort))
     app.run(host="0.0.0.0", port=httpPort, threaded=True) ## XXX - FIXME - got a broken pipe on the socket that terminated the application (uncaught exception) supposedly this is fixed in flask 0.12
 
+@app.route("/")
+def index():
+    """Serve the flame control web UI."""
+    return app.send_static_file('index.html')
+
+
 @app.route("/flame", methods=['GET', 'POST'])
 def flame_status():
     ''' GET /flame. Get status of all poofers, any active patterns. (Poofer status 
