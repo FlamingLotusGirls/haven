@@ -70,6 +70,12 @@ def _poll_mode_service():
             print(f"[mode] could not reach mode service: {e}")
         time.sleep(10)
 
+# Track active sequences per trigger_name.
+# Value is the count of mapping-sequence threads currently running for that trigger.
+# While count > 0, new triggers of the same name are suppressed.
+_active_sequences = {}
+_active_sequences_lock = threading.Lock()
+
 # OSC client instance
 osc_client_instance = None
 
@@ -264,51 +270,103 @@ def send_osc_message(osc_address, osc_args, trigger_value=None):
         return False
 
 
-def process_trigger_event(trigger_event):
-    """Process a trigger event and send corresponding OSC messages."""
-    trigger_name = trigger_event.get('name')
-    trigger_value = trigger_event.get('value')
-    
-    print(f"Processing trigger event: {trigger_name} = {trigger_value}")
+def get_mapping_steps(mapping):
+    """Return the sequence steps for a mapping.
 
-    # Snapshot active mode once for this event (avoids repeated lock acquisitions).
-    active_mode = get_current_mode()
+    Supports both the new ``sequence`` format and the legacy single-command
+    ``osc_address`` / ``osc_args`` format so old config files keep working.
+    """
+    if mapping.get('sequence'):
+        return mapping['sequence']
+    addr = mapping.get('osc_address', '').strip()
+    if addr:
+        return [{'delay_ms': 0, 'osc_address': addr, 'osc_args': mapping.get('osc_args', [])}]
+    return []
 
-    # Take a snapshot of the current mappings under the lock so mutations from
-    # Flask threads do not race with our iteration (which may call send_osc_message,
-    # an operation we do not want to hold the lock across).
-    with config_lock:
-        current_mappings = list(config['mappings'])
-    
-    # Find matching mappings
-    matched = False
-    for mapping in current_mappings:
-        if mapping.get('trigger_name') == trigger_name:
-            # Check if this mapping is enabled
-            if not mapping.get('enabled', True):
-                continue
 
-            # ── Mode gate ──────────────────────────────────────────────────────
-            # If the mapping specifies one or more modes, only fire when the
-            # active mode is in that list.  An empty (or absent) modes list
-            # means "active in all modes".
-            allowed_modes = mapping.get('modes', [])
-            if allowed_modes:                       # non-empty → restrict
-                if active_mode not in allowed_modes:
-                    print(f"[mode] skipping mapping {mapping.get('id')} "
-                          f"(active='{active_mode}', allowed={allowed_modes})")
-                    continue
-            # ──────────────────────────────────────────────────────────────────
+def _run_sequence(trigger_name, steps, trigger_value):
+    """Execute one mapping's sequence in a background daemon thread.
 
-            osc_address = mapping.get('osc_address')
-            osc_args = mapping.get('osc_args', [])
-            
+    Sleeps *delay_ms* milliseconds before each step, then sends the OSC
+    message.  Decrements the active-sequence counter when done.
+    """
+    try:
+        for step in steps:
+            delay_ms = step.get('delay_ms', 0)
+            if delay_ms > 0:
+                time.sleep(delay_ms / 1000.0)
+            osc_address = step.get('osc_address', '').strip()
+            osc_args = step.get('osc_args', [])
             if osc_address:
                 send_osc_message(osc_address, osc_args, trigger_value)
-                matched = True
-    
-    if not matched:
+    except Exception as e:
+        print(f"Error in sequence for '{trigger_name}': {e}")
+    finally:
+        with _active_sequences_lock:
+            count = _active_sequences.get(trigger_name, 1) - 1
+            if count <= 0:
+                _active_sequences.pop(trigger_name, None)
+            else:
+                _active_sequences[trigger_name] = count
+        print(f"Sequence for '{trigger_name}' finished")
+
+
+def process_trigger_event(trigger_event):
+    """Process a trigger event and fire the associated OSC sequence(s)."""
+    trigger_name = trigger_event.get('name')
+    trigger_value = trigger_event.get('value')
+
+    print(f"Processing trigger event: {trigger_name} = {trigger_value}")
+
+    # ── Busy-check ────────────────────────────────────────────────────────────
+    # If any sequence for this trigger is still running, suppress the new event.
+    with _active_sequences_lock:
+        if _active_sequences.get(trigger_name, 0) > 0:
+            print(f"Sequence for '{trigger_name}' still playing — ignoring new trigger")
+            return
+    # ──────────────────────────────────────────────────────────────────────────
+
+    active_mode = get_current_mode()
+
+    with config_lock:
+        current_mappings = list(config['mappings'])
+
+    # Collect all matching, enabled, mode-allowed mappings with their resolved steps
+    to_fire = []
+    for mapping in current_mappings:
+        if mapping.get('trigger_name') != trigger_name:
+            continue
+        if not mapping.get('enabled', True):
+            continue
+
+        # ── Mode gate ─────────────────────────────────────────────────────────
+        allowed_modes = mapping.get('modes', [])
+        if allowed_modes and active_mode not in allowed_modes:
+            print(f"[mode] skipping mapping {mapping.get('id')} "
+                  f"(active='{active_mode}', allowed={allowed_modes})")
+            continue
+        # ──────────────────────────────────────────────────────────────────────
+
+        steps = get_mapping_steps(mapping)
+        if steps:
+            to_fire.append(steps)
+
+    if not to_fire:
         print(f"No OSC mapping found for trigger: {trigger_name}")
+        return
+
+    # Register all threads as active before starting any, so a near-instant
+    # completion of the first thread does not clear the guard prematurely.
+    with _active_sequences_lock:
+        _active_sequences[trigger_name] = len(to_fire)
+
+    for steps in to_fire:
+        t = threading.Thread(
+            target=_run_sequence,
+            args=(trigger_name, steps, trigger_value),
+            daemon=True
+        )
+        t.start()
 
 
 def handle_client_connection(client_socket, client_address):
@@ -473,20 +531,23 @@ def get_mappings():
 def add_mapping():
     """Add a new trigger-to-OSC mapping."""
     mapping = request.get_json()
-    
+
     # Validate required fields
     if 'trigger_name' not in mapping or not mapping['trigger_name']:
         return jsonify({'error': 'trigger_name is required'}), 400
-    
-    if 'osc_address' not in mapping or not mapping['osc_address']:
-        return jsonify({'error': 'osc_address is required'}), 400
-    
-    # Ensure osc_args is a list
-    if 'osc_args' not in mapping:
+
+    # Accept either new 'sequence' format or legacy 'osc_address' format
+    has_address  = bool(mapping.get('osc_address', '').strip())
+    has_sequence = bool(mapping.get('sequence') and isinstance(mapping['sequence'], list))
+    if not has_address and not has_sequence:
+        return jsonify({'error': 'Either osc_address or sequence is required'}), 400
+
+    # Legacy normalisation
+    if has_address and 'osc_args' not in mapping:
         mapping['osc_args'] = []
-    elif not isinstance(mapping['osc_args'], list):
+    if has_address and not isinstance(mapping.get('osc_args'), list):
         return jsonify({'error': 'osc_args must be an array'}), 400
-    
+
     # Add metadata
     mapping['enabled'] = mapping.get('enabled', True)
     mapping['created_at'] = datetime.now().isoformat()
@@ -513,18 +574,19 @@ def add_mapping():
 def update_mapping(mapping_id):
     """Update an existing mapping."""
     updated_mapping = request.get_json()
-    
+
     # Validate required fields (no config access — safe outside the lock)
     if 'trigger_name' not in updated_mapping or not updated_mapping['trigger_name']:
         return jsonify({'error': 'trigger_name is required'}), 400
-    
-    if 'osc_address' not in updated_mapping or not updated_mapping['osc_address']:
-        return jsonify({'error': 'osc_address is required'}), 400
-    
-    # Ensure osc_args is a list
-    if 'osc_args' not in updated_mapping:
+
+    has_address  = bool(updated_mapping.get('osc_address', '').strip())
+    has_sequence = bool(updated_mapping.get('sequence') and isinstance(updated_mapping['sequence'], list))
+    if not has_address and not has_sequence:
+        return jsonify({'error': 'Either osc_address or sequence is required'}), 400
+
+    if has_address and 'osc_args' not in updated_mapping:
         updated_mapping['osc_args'] = []
-    elif not isinstance(updated_mapping['osc_args'], list):
+    if has_address and not isinstance(updated_mapping.get('osc_args'), list):
         return jsonify({'error': 'osc_args must be an array'}), 400
     
     with config_lock:
@@ -696,9 +758,19 @@ def delete_alias(alias_id):
         return jsonify({'error': 'Alias not found'}), 404
 
 
+@app.route('/api/active-sequences', methods=['GET'])
+def get_active_sequences():
+    """Return the names of triggers whose sequences are currently playing."""
+    with _active_sequences_lock:
+        active = list(_active_sequences.keys())
+    return jsonify({'active_sequences': active})
+
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Get server status."""
+    with _active_sequences_lock:
+        active_seq_count = sum(_active_sequences.values())
     return jsonify({
         'service_name': SERVICE_NAME,
         'socket_server_running': server_running,
@@ -707,7 +779,8 @@ def get_status():
         'osc_client_config': config['osc_client'],
         'gateway_url': config['gateway_url'],
         'active_mode': get_current_mode(),
-        'mappings_count': len(config['mappings'])
+        'mappings_count': len(config['mappings']),
+        'active_sequences': active_seq_count
     })
 
 

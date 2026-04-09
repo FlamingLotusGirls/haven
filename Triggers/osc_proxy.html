@@ -404,6 +404,46 @@
             margin-left: 6px;
             opacity: 0.85;
         }
+
+        /* ── Sequence step editor ─────────────────────────────────── */
+        .sequence-step-item {
+            background: #f0f4ff;
+            border: 1px solid #c5d0f5;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+        .step-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .step-label {
+            font-weight: bold;
+            color: #3a4a8a;
+            font-size: 0.9em;
+        }
+        .step-row {
+            display: grid;
+            grid-template-columns: 100px 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .step-row label {
+            font-size: 0.8em;
+            color: #555;
+            margin-bottom: 2px;
+        }
+        .step-args-section label {
+            font-size: 0.8em;
+            color: #555;
+        }
+        .mapping-seq-summary {
+            color: #667eea;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
     </style>
 </head>
 <body>
@@ -481,29 +521,17 @@
             </div>
 
             <div class="form-group">
-                <label for="modalAliasSelect">Select from Alias <em style="color:#999;font-size:0.85em;">(or type address below)</em></label>
-                <select id="modalAliasSelect" onchange="onAliasSelected()">
-                    <option value="">— select an alias to auto-fill, or type directly below —</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label for="modalOscAddress">OSC Address</label>
-                <input type="text" id="modalOscAddress" placeholder="/example/address">
-            </div>
-
-            <div class="form-group">
-                <label>OSC Arguments</label>
+                <label>OSC Sequence</label>
                 <div class="info-box">
-                    <strong>Variable substitution:</strong><br>
-                    • <code>${value}</code> - Insert trigger value as string<br>
-                    • <code>${value:int}</code> - Convert to integer<br>
-                    • <code>${value:float}</code> - Convert to float
+                    <strong>Each step fires an OSC command after its delay (ms from trigger).</strong>
+                    While the sequence is playing, duplicate triggers are ignored.<br>
+                    <strong>Arg substitution:</strong>
+                    <code>${value}</code> (string) &nbsp;
+                    <code>${value:int}</code> &nbsp;
+                    <code>${value:float}</code>
                 </div>
-                <div id="argsList" class="arg-list">
-                    <!-- Arguments will be added here -->
-                </div>
-                <button class="secondary" onclick="addArgument()">Add Argument</button>
+                <div id="sequenceStepsList"></div>
+                <button class="secondary" onclick="addMappingStep()" style="margin-top:4px;">➕ Add Step</button>
             </div>
 
             <div class="form-group">
@@ -649,29 +677,42 @@
             try {
                 const response = await fetch('/api/mappings');
                 const data = await response.json();
-                
+
                 const listDiv = document.getElementById('mappingsList');
-                
+
                 if (data.mappings.length === 0) {
                     listDiv.innerHTML = '<p style="color: #6c757d; text-align: center; padding: 20px;">No mappings configured yet. Click "Add New Mapping" to get started.</p>';
                     return;
                 }
-                
+
                 listDiv.innerHTML = '';
-                
+
                 data.mappings.forEach(mapping => {
                     const item = document.createElement('div');
                     item.className = 'mapping-item' + (mapping.enabled ? '' : ' disabled');
 
-                    const argsText = mapping.osc_args.length > 0
-                        ? `Args: [${mapping.osc_args.join(', ')}]`
-                        : 'No arguments';
+                    // Normalise to sequence steps (supports legacy single-command mappings too)
+                    const steps = mapping.sequence && mapping.sequence.length > 0
+                        ? mapping.sequence
+                        : (mapping.osc_address
+                            ? [{ delay_ms: 0, osc_address: mapping.osc_address, osc_args: mapping.osc_args || [] }]
+                            : []);
 
-                    // Resolve alias name for human-readable display
-                    const aliasName = resolveAliasName(mapping.osc_address);
-                    const oscDisplay = aliasName
-                        ? `${aliasName} <span class="alias-badge">${mapping.osc_address}</span>`
-                        : mapping.osc_address;
+                    // Build sequence summary HTML
+                    let seqHtml;
+                    if (steps.length === 0) {
+                        seqHtml = '<em style="color:#999;">no steps</em>';
+                    } else {
+                        const firstStep = steps[0];
+                        const aliasName = resolveAliasName(firstStep.osc_address);
+                        const firstDisplay = aliasName
+                            ? `${aliasName} <span class="alias-badge">${firstStep.osc_address}</span>`
+                            : firstStep.osc_address;
+                        const extra = steps.length > 1
+                            ? ` <span style="color:#6c757d;font-size:0.85em;">+${steps.length - 1} more step${steps.length > 2 ? 's' : ''}</span>`
+                            : '';
+                        seqHtml = firstDisplay + extra;
+                    }
 
                     // Build mode chips HTML
                     const modes = mapping.modes || [];
@@ -682,8 +723,8 @@
                     item.innerHTML = `
                         <div class="mapping-info">
                             <div class="mapping-trigger">🎯 ${mapping.trigger_name}</div>
-                            <div class="mapping-osc">➜ ${oscDisplay}</div>
-                            <div class="mapping-args">${argsText}</div>
+                            <div class="mapping-seq-summary">➜ ${seqHtml}</div>
+                            <div style="color:#6c757d;font-size:0.85em;margin-top:2px;">${steps.length} step${steps.length !== 1 ? 's' : ''}</div>
                             <div class="mapping-modes" style="margin-top:5px;">${modesHtml}</div>
                         </div>
                         <div class="mapping-actions">
@@ -692,7 +733,7 @@
                             <button class="danger" onclick="deleteMapping(${mapping.id})">🗑️ Delete</button>
                         </div>
                     `;
-                    
+
                     listDiv.appendChild(item);
                 });
             } catch (error) {
@@ -704,21 +745,33 @@
             try {
                 const response = await fetch('/api/status');
                 const status = await response.json();
-                
+
                 const socketStatus = document.getElementById('socketStatus');
                 socketStatus.className = 'status-item ' + (status.socket_server_running ? 'online' : 'offline');
                 socketStatus.textContent = `Socket: ${status.socket_server_running ? 'Running on :' + status.socket_server_port : 'Offline'}`;
-                
+
                 const oscStatus = document.getElementById('oscStatus');
                 oscStatus.className = 'status-item ' + (status.osc_client_initialized ? 'online' : 'offline');
                 oscStatus.textContent = `OSC: ${status.osc_client_initialized ? status.osc_client_config.host + ':' + status.osc_client_config.port : 'Not Configured'}`;
-                
+
                 document.getElementById('mappingCount').textContent = `Mappings: ${status.mappings_count}`;
 
                 const modeEl = document.getElementById('modeStatus');
                 const activeMode = status.active_mode || '';
                 modeEl.className = 'status-item ' + (activeMode ? 'online' : '');
                 modeEl.textContent = activeMode ? `Mode: ${activeMode}` : 'Mode: none';
+
+                // Show active sequences if any are running
+                let seqEl = document.getElementById('seqStatus');
+                if (!seqEl) {
+                    seqEl = document.createElement('span');
+                    seqEl.id = 'seqStatus';
+                    seqEl.className = 'status-item';
+                    document.getElementById('modeStatus').insertAdjacentElement('afterend', seqEl);
+                }
+                const seqCount = status.active_sequences || 0;
+                seqEl.className = 'status-item ' + (seqCount > 0 ? 'online' : '');
+                seqEl.textContent = seqCount > 0 ? `▶ ${seqCount} sequence${seqCount > 1 ? 's' : ''} playing` : 'Sequences: idle';
             } catch (error) {
                 console.error('Error loading status:', error);
             }
@@ -781,12 +834,10 @@
             currentEditingId = null;
             document.getElementById('modalTitle').textContent = 'Add New Mapping';
             document.getElementById('modalTrigger').value = '';
-            document.getElementById('modalOscAddress').value = '';
-            document.getElementById('argsList').innerHTML = '';
             document.getElementById('modalAlert').innerHTML = '';
-            populateAliasMappingDropdown();
-            document.getElementById('modalAliasSelect').value = '';
-            renderModeCheckboxes([]);   // no modes pre-selected
+            document.getElementById('sequenceStepsList').innerHTML = '';
+            addMappingStep();               // start with one empty step
+            renderModeCheckboxes([]);
             document.getElementById('mappingModal').classList.add('active');
         }
 
@@ -795,29 +846,27 @@
                 const response = await fetch('/api/mappings');
                 const data = await response.json();
                 const mapping = data.mappings.find(m => m.id === id);
-                
                 if (!mapping) return;
-                
+
                 currentEditingId = id;
                 document.getElementById('modalTitle').textContent = 'Edit Mapping';
                 document.getElementById('modalTrigger').value = mapping.trigger_name;
-                document.getElementById('modalOscAddress').value = mapping.osc_address;
                 document.getElementById('modalAlert').innerHTML = '';
 
-                // Populate alias dropdown; pre-select if osc_address matches a known alias
-                populateAliasMappingDropdown();
-                const matchingAlias = aliases.find(a => a.osc_address === mapping.osc_address);
-                document.getElementById('modalAliasSelect').value = matchingAlias ? matchingAlias.id : '';
+                // Populate sequence steps (normalize legacy single-command format)
+                document.getElementById('sequenceStepsList').innerHTML = '';
+                const steps = mapping.sequence && mapping.sequence.length > 0
+                    ? mapping.sequence
+                    : (mapping.osc_address
+                        ? [{ delay_ms: 0, osc_address: mapping.osc_address, osc_args: mapping.osc_args || [] }]
+                        : []);
+                if (steps.length === 0) {
+                    addMappingStep();
+                } else {
+                    steps.forEach(step => addMappingStep(step));
+                }
 
-                // Load arguments
-                document.getElementById('argsList').innerHTML = '';
-                mapping.osc_args.forEach(arg => {
-                    addArgument(arg);
-                });
-
-                // Pre-check the modes this mapping belongs to
                 renderModeCheckboxes(mapping.modes || []);
-
                 document.getElementById('mappingModal').classList.add('active');
             } catch (error) {
                 console.error('Error loading mapping:', error);
@@ -828,43 +877,28 @@
             document.getElementById('mappingModal').classList.remove('active');
         }
 
-        function addArgument(value = '') {
-            const argsList = document.getElementById('argsList');
-            const argItem = document.createElement('div');
-            argItem.className = 'arg-item';
-            
-            argItem.innerHTML = `
-                <input type="text" class="arg-value" placeholder="e.g., \${value:int}, 100, hello" value="${value}">
-                <button class="danger" onclick="this.parentElement.remove()">Remove</button>
-            `;
-            
-            argsList.appendChild(argItem);
-        }
-
         async function saveMappingModal() {
             const trigger = document.getElementById('modalTrigger').value;
-            const oscAddress = document.getElementById('modalOscAddress').value;
-            
-            if (!trigger || !oscAddress) {
-                showModalAlert('Please fill in all required fields', 'error');
+            if (!trigger) {
+                showModalAlert('Please select a trigger', 'error');
                 return;
             }
-            
-            // Collect arguments
-            const argInputs = document.querySelectorAll('.arg-value');
-            const oscArgs = Array.from(argInputs).map(input => input.value).filter(v => v);
 
-            // Collect selected modes (empty array = fire in all modes)
+            const sequence = getMappingSteps();
+            if (sequence.length === 0) {
+                showModalAlert('Please add at least one step with an OSC address', 'error');
+                return;
+            }
+
             const selectedModes = Array.from(document.querySelectorAll('.mode-cb:checked')).map(cb => cb.value);
-            
+
             const mapping = {
                 trigger_name: trigger,
-                osc_address: oscAddress,
-                osc_args: oscArgs,
+                sequence: sequence,
                 modes: selectedModes,
                 enabled: true
             };
-            
+
             try {
                 let response;
                 if (currentEditingId) {
@@ -880,7 +914,7 @@
                         body: JSON.stringify(mapping)
                     });
                 }
-                
+
                 if (response.ok) {
                     closeMappingModal();
                     await loadMappings();
@@ -894,6 +928,127 @@
                 showModalAlert('Failed to save mapping', 'error');
             }
         }
+
+        // ── Sequence step editor ──────────────────────────────────────────────────
+
+        /** Add a step card to the sequence editor.
+         *  stepData = { delay_ms, osc_address, osc_args } or null for a blank step. */
+        function addMappingStep(stepData = null) {
+            const list = document.getElementById('sequenceStepsList');
+            const stepIndex = list.children.length;
+            const delay   = stepData ? (stepData.delay_ms   || 0)  : 0;
+            const address = stepData ? (stepData.osc_address || '') : '';
+            const args    = stepData ? (stepData.osc_args   || []) : [];
+
+            const stepDiv = document.createElement('div');
+            stepDiv.className = 'sequence-step-item';
+
+            const aliasOpts = aliases.map(a => {
+                const hint = a.osc_args && a.osc_args.length ? ` [${a.osc_args.join(', ')}]` : '';
+                return `<option value="${a.id}">${a.alias}  →  ${a.osc_address}${hint}</option>`;
+            }).join('');
+
+            stepDiv.innerHTML = `
+                <div class="step-header">
+                    <span class="step-label">Step ${stepIndex + 1}</span>
+                    <button class="danger" onclick="removeMappingStep(this)" style="padding:3px 8px;font-size:12px;">✕ Remove</button>
+                </div>
+                <div class="step-row">
+                    <div>
+                        <label>Delay (ms)</label>
+                        <input type="number" class="step-delay" value="${delay}" min="0" placeholder="0">
+                    </div>
+                    <div>
+                        <label>Alias <em style="color:#999;font-size:0.82em;">(optional)</em></label>
+                        <select class="step-alias-select" onchange="onStepAliasSelected(this)">
+                            <option value="">— type address below —</option>
+                            ${aliasOpts}
+                        </select>
+                    </div>
+                    <div>
+                        <label>OSC Address</label>
+                        <input type="text" class="step-address" value="${address}" placeholder="/example/address">
+                    </div>
+                </div>
+                <div class="step-args-section">
+                    <label>Arguments</label>
+                    <div class="step-args-list arg-list"></div>
+                    <button class="secondary" onclick="addStepArg(this)" style="padding:4px 8px;font-size:12px;margin-top:4px;">Add Arg</button>
+                </div>
+            `;
+
+            list.appendChild(stepDiv);
+
+            // Pre-select alias if address matches a known one
+            if (address) {
+                const match = aliases.find(a => a.osc_address === address);
+                if (match) stepDiv.querySelector('.step-alias-select').value = match.id;
+            }
+
+            // Populate args
+            const argsListDiv = stepDiv.querySelector('.step-args-list');
+            args.forEach(arg => addStepArgToList(argsListDiv, arg));
+
+            renumberMappingSteps();
+        }
+
+        /** When user picks an alias in a step row, fill address + args for that step. */
+        function onStepAliasSelected(selectEl) {
+            const aliasId = parseInt(selectEl.value);
+            if (!aliasId) return;
+            const a = aliases.find(x => x.id === aliasId);
+            if (!a) return;
+            const stepDiv = selectEl.closest('.sequence-step-item');
+            stepDiv.querySelector('.step-address').value = a.osc_address;
+            const argsListDiv = stepDiv.querySelector('.step-args-list');
+            argsListDiv.innerHTML = '';
+            (a.osc_args || []).forEach(arg => addStepArgToList(argsListDiv, arg));
+        }
+
+        /** "Add Arg" button handler — btnEl is the button, its previousSibling is the list. */
+        function addStepArg(btnEl) {
+            addStepArgToList(btnEl.previousElementSibling, '');
+        }
+
+        function addStepArgToList(listDiv, value = '') {
+            const item = document.createElement('div');
+            item.className = 'arg-item';
+            item.innerHTML = `
+                <input type="text" class="step-arg-value" placeholder="e.g., \${value:int}, 100" value="${value}">
+                <button class="danger" onclick="this.parentElement.remove()" style="padding:4px 8px;">Remove</button>
+            `;
+            listDiv.appendChild(item);
+        }
+
+        function removeMappingStep(btnEl) {
+            btnEl.closest('.sequence-step-item').remove();
+            renumberMappingSteps();
+        }
+
+        function renumberMappingSteps() {
+            const list = document.getElementById('sequenceStepsList');
+            Array.from(list.children).forEach((stepDiv, i) => {
+                const label = stepDiv.querySelector('.step-label');
+                if (label) label.textContent = `Step ${i + 1}`;
+            });
+        }
+
+        /** Collect all step data from the sequence editor into an array. */
+        function getMappingSteps() {
+            const steps = [];
+            document.querySelectorAll('.sequence-step-item').forEach(stepDiv => {
+                const delay_ms     = parseInt(stepDiv.querySelector('.step-delay').value) || 0;
+                const osc_address  = stepDiv.querySelector('.step-address').value.trim();
+                const osc_args     = Array.from(stepDiv.querySelectorAll('.step-arg-value'))
+                                         .map(el => el.value).filter(v => v);
+                if (osc_address) {
+                    steps.push({ delay_ms, osc_address, osc_args });
+                }
+            });
+            return steps;
+        }
+
+        // ── End sequence step editor ──────────────────────────────────────────────
 
         async function deleteMapping(id) {
             if (!confirm('Are you sure you want to delete this mapping?')) {
@@ -992,35 +1147,6 @@
             });
         }
 
-        /** Fill the "Select from Alias" dropdown in the mapping modal. */
-        function populateAliasMappingDropdown() {
-            const sel = document.getElementById('modalAliasSelect');
-            if (!sel) return;
-            const current = sel.value;
-            sel.innerHTML = '<option value="">— select an alias to auto-fill, or type directly below —</option>';
-            aliases.forEach(a => {
-                const opt = document.createElement('option');
-                opt.value = a.id;
-                const argsHint = a.osc_args && a.osc_args.length > 0 ? ` [${a.osc_args.join(', ')}]` : '';
-                opt.textContent = `${a.alias}  →  ${a.osc_address}${argsHint}`;
-                if (String(a.id) === String(current)) opt.selected = true;
-                sel.appendChild(opt);
-            });
-        }
-
-        /** Called when user picks an alias in the mapping modal dropdown.
-         *  Fills in the OSC Address field and default arguments. */
-        function onAliasSelected() {
-            const sel = document.getElementById('modalAliasSelect');
-            const aliasId = parseInt(sel.value);
-            if (!aliasId) return;
-            const a = aliases.find(x => x.id === aliasId);
-            if (!a) return;
-            document.getElementById('modalOscAddress').value = a.osc_address;
-            document.getElementById('argsList').innerHTML = '';
-            (a.osc_args || []).forEach(arg => addArgument(arg));
-        }
-
         /** Open the add/edit alias modal.  Pass an alias id to edit, or nothing to add. */
         function openAliasModal(id = null) {
             currentEditingAliasId = id || null;
@@ -1080,7 +1206,6 @@
                 if (r.ok) {
                     closeAliasModal();
                     await loadAliases();
-                    populateAliasMappingDropdown();
                     // Refresh mapping list so alias names update in place
                     await loadMappings();
                 } else {
@@ -1098,7 +1223,6 @@
                 const r = await fetch(`/api/aliases/${id}`, { method: 'DELETE' });
                 if (r.ok) {
                     await loadAliases();
-                    populateAliasMappingDropdown();
                     await loadMappings();   // re-render so alias badges update
                 } else {
                     alert('Failed to delete alias');
