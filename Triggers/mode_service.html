@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mode Manager</title>
+  <style>
+    /* ── Reset & base ────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Arial', sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      color: #e0e0e0;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    .page { max-width: 900px; margin: 0 auto; }
+
+    header {
+      text-align: center;
+      padding: 22px 20px 18px;
+      background: linear-gradient(45deg, #533483, #7b4fa6, #533483);
+      border-radius: 14px;
+      margin-bottom: 22px;
+      box-shadow: 0 8px 32px rgba(83, 52, 131, 0.4);
+    }
+    header h1 { font-size: 2rem; color: #fff; text-shadow: 1px 1px 4px rgba(0,0,0,.5); }
+    header p  { color: #d4b8f0; margin-top: 6px; font-size: 0.95rem; }
+
+    /* ── Active mode banner ──────────────────────────────────────── */
+    #active-banner {
+      border-radius: 12px;
+      margin-bottom: 22px;
+      padding: 18px 22px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      transition: all .4s ease;
+    }
+    #active-banner.has-mode {
+      background: rgba(83,52,131,.45);
+      border: 1px solid #7b4fa6;
+    }
+    #active-banner.no-mode {
+      background: rgba(50,50,60,.45);
+      border: 1px solid #444;
+    }
+
+    .banner-label {
+      font-size: 0.85rem;
+      color: #b88aff;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+      white-space: nowrap;
+    }
+    #banner-mode-name {
+      font-size: 1.45rem;
+      font-weight: bold;
+      flex: 1;
+      color: #c390ff;
+      min-width: 100px;
+    }
+    #active-banner.no-mode #banner-mode-name { color: #888; }
+
+    /* Inline active-mode selector */
+    .banner-selector {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .banner-selector label {
+      font-size: 0.8rem;
+      color: #b88aff;
+      white-space: nowrap;
+    }
+    #banner-mode-select {
+      padding: 7px 10px;
+      border: 1px solid rgba(123,79,166,.5);
+      border-radius: 7px;
+      background: rgba(0,0,0,.4);
+      color: #e0e0e0;
+      font-size: 0.9rem;
+      min-width: 150px;
+    }
+
+    /* ── Grid ────────────────────────────────────────────────────── */
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+
+    /* ── Cards ───────────────────────────────────────────────────── */
+    .card {
+      background: rgba(255,255,255,0.07);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(123,79,166,0.35);
+      border-radius: 12px;
+      padding: 22px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.25);
+    }
+    .card h2 {
+      color: #b88aff;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid rgba(123,79,166,0.3);
+    }
+    .card.full-width { grid-column: 1 / -1; }
+
+    /* ── Buttons ─────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 8px 18px;
+      border: none; border-radius: 7px;
+      cursor: pointer; font-size: 0.88rem; font-weight: bold;
+      letter-spacing: .5px; transition: all .25s ease;
+      white-space: nowrap;
+    }
+    .btn:hover  { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+    .btn-primary  { background: linear-gradient(45deg,#533483,#7b4fa6); color:#fff; }
+    .btn-success  { background: linear-gradient(45deg,#1a7a4a,#28a745); color:#fff; }
+    .btn-danger   { background: linear-gradient(45deg,#c82333,#dc3545); color:#fff; }
+    .btn-ghost    { background: transparent; border:1px solid #7b4fa6; color:#b88aff; }
+    .btn-sm       { padding: 4px 10px; font-size: 0.8rem; }
+
+    /* ── Input row ───────────────────────────────────────────────── */
+    .input-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    input[type="text"], input[type="time"], select,
+    #banner-mode-select {
+      flex: 1; min-width: 120px;
+      padding: 9px 12px;
+      border: 1px solid rgba(123,79,166,.4);
+      border-radius: 7px;
+      background: rgba(0,0,0,.35);
+      color: #e0e0e0;
+      font-size: 0.9rem;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #7b4fa6;
+      box-shadow: 0 0 0 3px rgba(123,79,166,.25);
+    }
+    input::placeholder { color: #777; }
+
+    /* ── Mode list ───────────────────────────────────────────────── */
+    #mode-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+
+    .mode-row {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(123,79,166,.2);
+      border-radius: 8px;
+      padding: 10px 14px;
+      transition: background .2s;
+    }
+    .mode-row:hover { background: rgba(123,79,166,.12); }
+    .mode-row.is-active { border-color: #7b4fa6; background: rgba(83,52,131,.3); }
+    .mode-row .name { flex: 1; font-weight: bold; color: #ddd; word-break: break-all; }
+    .mode-row.is-active .name { color: #c390ff; }
+
+    .active-badge {
+      background: #7b4fa6; color: #fff;
+      font-size: 0.72rem; padding: 2px 8px;
+      border-radius: 20px; font-weight: bold; white-space: nowrap;
+    }
+
+    /* ── Service status ──────────────────────────────────────────── */
+    .status-block {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(123,79,166,.25);
+      font-size: 0.83rem;
+      color: #aaa;
+      line-height: 1.7;
+    }
+    .status-block strong { color: #e0e0e0; }
+
+    /* ── Schedule list ───────────────────────────────────────────── */
+    #sched-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .sched-row {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(83,52,131,.25);
+      border-radius: 8px; padding: 10px 14px;
+    }
+    .sched-row.editing {
+      flex-wrap: wrap;
+      border-color: #7b4fa6;
+      background: rgba(83,52,131,.18);
+    }
+    .sched-info { flex: 1; }
+    .sched-info .sched-mode { font-weight: bold; color: #c390ff; font-size: 1rem; }
+    .sched-info .sched-meta { font-size: 0.82rem; color: #aaa; margin-top: 2px; }
+
+    /* Inline edit controls inside a row */
+    .edit-fields {
+      display: flex; align-items: center; gap: 8px; flex: 1; flex-wrap: wrap;
+    }
+    .edit-fields select, .edit-fields input[type="time"] {
+      flex: 1; min-width: 110px; padding: 6px 9px; font-size: 0.85rem;
+    }
+
+    .repeat-badge {
+      font-size: 0.72rem; padding: 2px 8px; border-radius: 20px;
+      font-weight: bold; white-space: nowrap;
+    }
+    .repeat-badge.daily { background: #0f6b3a; color: #a6ffd2; }
+    .repeat-badge.once  { background: #5a3200; color: #ffd8a0; }
+
+    /* ── Schedule form ───────────────────────────────────────────── */
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 8px; align-items: end;
+    }
+    @media (max-width: 600px) { .form-row { grid-template-columns: 1fr 1fr; } }
+
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
+    .form-group label {
+      font-size: 0.78rem; color: #b88aff; font-weight: bold;
+      text-transform: uppercase; letter-spacing: .6px;
+    }
+
+    /* ── Toasts ──────────────────────────────────────────────────── */
+    #toast-container {
+      position: fixed; top: 20px; right: 20px;
+      display: flex; flex-direction: column; gap: 8px;
+      z-index: 9999; pointer-events: none;
+    }
+    .toast {
+      padding: 10px 18px; border-radius: 7px;
+      font-size: 0.88rem; font-weight: bold; color: #fff;
+      box-shadow: 0 4px 14px rgba(0,0,0,.4);
+      opacity: 0; transform: translateX(30px);
+      transition: all .3s ease; pointer-events: auto;
+    }
+    .toast.show { opacity: 1; transform: translateX(0); }
+    .toast.success { background: #1a7a4a; }
+    .toast.error   { background: #c82333; }
+    .toast.info    { background: #2c5fa0; }
+
+    /* ── Misc ────────────────────────────────────────────────────── */
+    .empty-state { color: #777; font-style: italic; text-align: center; padding: 18px 0; }
+    .section-sub { font-size: 0.82rem; color: #999; margin-bottom: 12px; }
+    .refresh-time { font-size: 0.75rem; color: #888; text-align: right; margin-top: 10px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1>🎭 Mode Manager</h1>
+    <p>Create modes, set the active mode, and schedule automatic activations.</p>
+  </header>
+
+  <!-- ── Active mode banner ──────────────────────────────────────── -->
+  <div id="active-banner" class="no-mode">
+    <span class="banner-label">Active Mode</span>
+    <span id="banner-mode-name">— none —</span>
+
+    <!-- Inline selector: choose mode (or "none" to clear) + Set button -->
+    <div class="banner-selector">
+      <label for="banner-mode-select">Change to:</label>
+      <select id="banner-mode-select">
+        <option value="">— none (clear) —</option>
+      </select>
+      <button class="btn btn-primary" id="banner-set-btn">Set</button>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- ── Modes card ─────────────────────────────────────────── -->
+    <div class="card full-width">
+      <h2>🗂️ Modes</h2>
+
+      <div class="input-row">
+        <input type="text" id="new-mode-name" placeholder="New mode name…" maxlength="64">
+        <button class="btn btn-success" id="create-mode-btn">+ Create</button>
+      </div>
+
+      <div id="mode-list">
+        <div class="empty-state">Loading…</div>
+      </div>
+
+      <!-- Service status tucked below the mode list -->
+      <div class="status-block" id="health-display">Checking service status…</div>
+      <div class="refresh-time" id="modes-refresh-time"></div>
+    </div>
+
+    <!-- ── Schedules card ─────────────────────────────────────── -->
+    <div class="card full-width">
+      <h2>🕐 Scheduled Mode Changes</h2>
+      <p class="section-sub">
+        The scheduler wakes every 30 s and activates the mode when the clock matches.
+        <em>Daily</em> schedules repeat every day; <em>Once</em> schedules are removed after firing.
+      </p>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Mode</label>
+          <select id="sched-mode-select">
+            <option value="">— choose —</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Time (HH:MM)</label>
+          <input type="time" id="sched-time">
+        </div>
+        <div class="form-group">
+          <label>Repeat</label>
+          <select id="sched-repeat">
+            <option value="daily">Daily</option>
+            <option value="once">Once</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <button class="btn btn-primary" id="add-sched-btn">+ Add</button>
+        </div>
+      </div>
+
+      <div id="sched-list">
+        <div class="empty-state">Loading…</div>
+      </div>
+      <div class="refresh-time" id="sched-refresh-time"></div>
+    </div>
+
+  </div><!-- /grid -->
+</div><!-- /page -->
+
+<div id="toast-container"></div>
+
+<script>
+const BASE = window.location.origin;
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 350);
+  }, 3200);
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+function nowLabel() { return `Last updated: ${new Date().toLocaleTimeString()}`; }
+
+/** Convert "HH:MM" (24-hr) to "H:MM AM/PM" for display. */
+function fmt24to12(hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  const period = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+async function apiGet(path) {
+  const r = await fetch(BASE + path);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+async function apiPut(path, body) {
+  const r = await fetch(BASE + path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+async function apiDelete(path) {
+  const r = await fetch(BASE + path, { method: 'DELETE' });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+// ─── State ────────────────────────────────────────────────────────────────────
+let currentModes = [];
+let currentActive = null;
+let currentSchedules = [];
+let editingScheduleId = null;  // id of the schedule row currently being edited
+
+// ─── Render: Banner ───────────────────────────────────────────────────────────
+function renderBanner() {
+  const banner   = document.getElementById('active-banner');
+  const nameEl   = document.getElementById('banner-mode-name');
+  const selector = document.getElementById('banner-mode-select');
+
+  // Update big name display
+  if (currentActive) {
+    banner.className = 'has-mode';
+    nameEl.textContent = currentActive;
+  } else {
+    banner.className = 'no-mode';
+    nameEl.textContent = '— none —';
+  }
+
+  // Rebuild dropdown: "none" option + all modes
+  const prev = selector.value;
+  selector.innerHTML = '<option value="">— none (clear) —</option>';
+  currentModes.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name;
+    opt.textContent = name;
+    selector.appendChild(opt);
+  });
+  // Restore selection or pre-select current active
+  if (prev && currentModes.includes(prev)) {
+    selector.value = prev;
+  } else if (currentActive) {
+    selector.value = currentActive;
+  }
+}
+
+// ─── Render: Mode list ────────────────────────────────────────────────────────
+function renderModes() {
+  const list       = document.getElementById('mode-list');
+  const schedSel   = document.getElementById('sched-mode-select');
+
+  // Rebuild schedule-form dropdown
+  const prevSched = schedSel.value;
+  schedSel.innerHTML = '<option value="">— choose —</option>';
+
+  if (currentModes.length === 0) {
+    list.innerHTML = '<div class="empty-state">No modes yet. Create one above!</div>';
+    document.getElementById('modes-refresh-time').textContent = nowLabel();
+    return;
+  }
+
+  list.innerHTML = '';
+  currentModes.forEach(name => {
+    const isActive = name === currentActive;
+
+    const row = document.createElement('div');
+    row.className = 'mode-row' + (isActive ? ' is-active' : '');
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = name;
+    row.appendChild(nameSpan);
+
+    if (isActive) {
+      const badge = document.createElement('span');
+      badge.className = 'active-badge';
+      badge.textContent = 'ACTIVE';
+      row.appendChild(badge);
+    }
+
+    // Delete (disabled for active mode)
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-danger btn-sm';
+    delBtn.textContent = '🗑';
+    delBtn.title = isActive ? 'Cannot delete the active mode' : `Delete "${name}"`;
+    delBtn.disabled = isActive;
+    delBtn.addEventListener('click', () => deleteMode(name));
+    row.appendChild(delBtn);
+
+    list.appendChild(row);
+
+    // Schedule form dropdown
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    schedSel.appendChild(opt);
+  });
+
+  if (prevSched && currentModes.includes(prevSched)) schedSel.value = prevSched;
+  document.getElementById('modes-refresh-time').textContent = nowLabel();
+}
+
+// ─── Render: Schedules ────────────────────────────────────────────────────────
+function renderSchedules() {
+  // Don't disrupt an in-progress inline edit on auto-refresh
+  if (editingScheduleId !== null) return;
+
+  const list = document.getElementById('sched-list');
+
+  if (currentSchedules.length === 0) {
+    list.innerHTML = '<div class="empty-state">No schedules yet. Add one above!</div>';
+    document.getElementById('sched-refresh-time').textContent = nowLabel();
+    return;
+  }
+
+  list.innerHTML = '';
+  [...currentSchedules]
+    .sort((a, b) => a.time.localeCompare(b.time))
+    .forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'sched-row';
+      row.dataset.id = s.id;
+
+      const info = document.createElement('div');
+      info.className = 'sched-info';
+      info.innerHTML = `
+        <div class="sched-mode">${esc(s.mode)}</div>
+        <div class="sched-meta">
+          ⏰ ${esc(fmt24to12(s.time))}
+          ${s.last_fired ? `&nbsp;|&nbsp; Last fired: ${fmtTime(s.last_fired)}` : ''}
+        </div>`;
+
+      const badge = document.createElement('span');
+      badge.className = `repeat-badge ${s.repeat}`;
+      badge.textContent = s.repeat === 'daily' ? '🔁 Daily' : '1️⃣ Once';
+
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn btn-ghost btn-sm';
+      editBtn.textContent = '✏️ Edit';
+      editBtn.title = 'Edit this schedule';
+      editBtn.addEventListener('click', () => startEditSchedule(s));
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn btn-danger btn-sm';
+      delBtn.textContent = '🗑';
+      delBtn.title = 'Delete this schedule';
+      delBtn.addEventListener('click', () => deleteSchedule(s.id));
+
+      row.appendChild(info);
+      row.appendChild(badge);
+      row.appendChild(editBtn);
+      row.appendChild(delBtn);
+      list.appendChild(row);
+    });
+
+  document.getElementById('sched-refresh-time').textContent = nowLabel();
+}
+
+// ─── Inline schedule editing ──────────────────────────────────────────────────
+function startEditSchedule(s) {
+  editingScheduleId = s.id;
+
+  // Find and transform the row in place
+  const row = document.querySelector(`.sched-row[data-id="${s.id}"]`);
+  if (!row) return;
+
+  row.className = 'sched-row editing';
+  row.innerHTML = '';   // clear existing content
+
+  // Mode dropdown
+  const modeSelect = document.createElement('select');
+  modeSelect.className = 'edit-mode-sel';
+  currentModes.forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    if (name === s.mode) opt.selected = true;
+    modeSelect.appendChild(opt);
+  });
+
+  // Time input
+  const timeInput = document.createElement('input');
+  timeInput.type = 'time';
+  timeInput.value = s.time;
+
+  // Repeat select
+  const repeatSelect = document.createElement('select');
+  ['daily', 'once'].forEach(val => {
+    const opt = document.createElement('option');
+    opt.value = val;
+    opt.textContent = val === 'daily' ? '🔁 Daily' : '1️⃣ Once';
+    if (val === s.repeat) opt.selected = true;
+    repeatSelect.appendChild(opt);
+  });
+
+  // Wrap fields
+  const fields = document.createElement('div');
+  fields.className = 'edit-fields';
+  fields.appendChild(modeSelect);
+  fields.appendChild(timeInput);
+  fields.appendChild(repeatSelect);
+
+  // Save button
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn btn-success btn-sm';
+  saveBtn.textContent = '💾 Save';
+  saveBtn.addEventListener('click', async () => {
+    const mode   = modeSelect.value;
+    const time   = timeInput.value;
+    const repeat = repeatSelect.value;
+    if (!time) { toast('Please enter a time.', 'error'); return; }
+    try {
+      await apiPut(`/api/schedules/${s.id}`, { mode, time, repeat });
+      toast('Schedule updated.', 'success');
+      editingScheduleId = null;
+      await loadAll();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+
+  // Cancel button
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-ghost btn-sm';
+  cancelBtn.textContent = '✕ Cancel';
+  cancelBtn.addEventListener('click', () => {
+    editingScheduleId = null;
+    renderSchedules();   // restore normal view from cached data
+  });
+
+  row.appendChild(fields);
+  row.appendChild(saveBtn);
+  row.appendChild(cancelBtn);
+}
+
+// ─── Health display ───────────────────────────────────────────────────────────
+async function loadHealth() {
+  try {
+    const h = await apiGet('/health');
+    document.getElementById('health-display').innerHTML =
+      `Status: <strong style="color:#5cff8f">${h.status}</strong> &nbsp;|&nbsp; ` +
+      `Modes: <strong>${h.modes_count}</strong> &nbsp;|&nbsp; ` +
+      `Schedules: <strong>${h.schedules_count}</strong> &nbsp;|&nbsp; ` +
+      `Active: <strong>${h.active_mode || 'none'}</strong>`;
+  } catch {
+    document.getElementById('health-display').textContent = 'Could not reach service.';
+  }
+}
+
+// ─── Full data load ───────────────────────────────────────────────────────────
+async function loadAll() {
+  try {
+    const data = await apiGet('/api/modes');
+    currentModes  = data.modes || [];
+    currentActive = data.active_mode || null;
+    renderBanner();
+    renderModes();
+  } catch (e) {
+    document.getElementById('mode-list').innerHTML =
+      `<div class="empty-state" style="color:#dc3545">Error: ${e.message}</div>`;
+  }
+
+  try {
+    const data = await apiGet('/api/schedules');
+    currentSchedules = data.schedules || [];
+    renderSchedules();
+  } catch (e) {
+    document.getElementById('sched-list').innerHTML =
+      `<div class="empty-state" style="color:#dc3545">Error: ${e.message}</div>`;
+  }
+
+  loadHealth();
+}
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
+async function createMode() {
+  const input = document.getElementById('new-mode-name');
+  const name = input.value.trim();
+  if (!name) { toast('Please enter a mode name.', 'error'); return; }
+  try {
+    await apiPost('/api/modes', { name });
+    toast(`Mode "${name}" created.`, 'success');
+    input.value = '';
+    await loadAll();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteMode(name) {
+  if (!confirm(`Delete mode "${name}"?`)) return;
+  try {
+    await apiDelete(`/api/modes/${encodeURIComponent(name)}`);
+    toast(`Mode "${name}" deleted.`, 'success');
+    await loadAll();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function setActiveModeFromBanner() {
+  const name = document.getElementById('banner-mode-select').value || null;
+  try {
+    await apiPost('/api/modes/active', { name });
+    toast(name ? `Active mode set to "${name}".` : 'Active mode cleared.', 'success');
+    await loadAll();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function addSchedule() {
+  const mode   = document.getElementById('sched-mode-select').value;
+  const time   = document.getElementById('sched-time').value;
+  const repeat = document.getElementById('sched-repeat').value;
+  if (!mode) { toast('Please select a mode.', 'error'); return; }
+  if (!time) { toast('Please enter a time.', 'error'); return; }
+  try {
+    await apiPost('/api/schedules', { mode, time, repeat });
+    toast(`Schedule added: "${mode}" @ ${time} (${repeat}).`, 'success');
+    document.getElementById('sched-time').value = '';
+    await loadAll();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function deleteSchedule(id) {
+  if (!confirm('Delete this schedule?')) return;
+  try {
+    await apiDelete(`/api/schedules/${id}`);
+    toast('Schedule deleted.', 'success');
+    await loadAll();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ─── Event bindings ───────────────────────────────────────────────────────────
+document.getElementById('create-mode-btn').addEventListener('click', createMode);
+document.getElementById('new-mode-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createMode();
+});
+document.getElementById('banner-set-btn').addEventListener('click', setActiveModeFromBanner);
+document.getElementById('add-sched-btn').addEventListener('click', addSchedule);
+
+// Initial load + 30-second auto-refresh
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
