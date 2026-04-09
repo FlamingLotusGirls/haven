@@ -23,6 +23,7 @@ app = Flask(__name__)
 
 CONFIG_FILE = 'osc_proxy_config.json'
 GATEWAY_URL = 'http://localhost:5002'
+MODE_SERVICE_URL = 'http://localhost:5003'
 SERVICE_NAME = 'OSC_Proxy'
 
 # Global configuration
@@ -33,8 +34,40 @@ config = {
     },
     'mappings': [],
     'gateway_url': GATEWAY_URL,
+    'mode_service_url': MODE_SERVICE_URL,
     'service_port': 5100
 }
+
+# ── Mode tracking ──────────────────────────────────────────────────────────────
+# Cached active mode, updated every ~10 s by the mode-poll thread.
+# Empty string means "no active mode".
+_active_mode = ''
+_active_mode_lock = threading.Lock()
+
+
+def get_current_mode():
+    """Return the cached active mode name ('' if none)."""
+    with _active_mode_lock:
+        return _active_mode
+
+
+def _poll_mode_service():
+    """Background thread: poll the mode service every 10 s and cache the result."""
+    global _active_mode
+    while True:
+        try:
+            url = config.get('mode_service_url', MODE_SERVICE_URL)
+            r = requests.get(f"{url}/api/modes/active", timeout=4)
+            if r.status_code == 200:
+                new_mode = r.json().get('active_mode') or ''
+                with _active_mode_lock:
+                    if new_mode != _active_mode:
+                        print(f"[mode] active mode changed: '{_active_mode}' → '{new_mode}'")
+                        _active_mode = new_mode
+        except Exception as e:
+            # Mode service may not be running — silently keep the last known mode
+            print(f"[mode] could not reach mode service: {e}")
+        time.sleep(10)
 
 # OSC client instance
 osc_client_instance = None
@@ -236,7 +269,10 @@ def process_trigger_event(trigger_event):
     trigger_value = trigger_event.get('value')
     
     print(f"Processing trigger event: {trigger_name} = {trigger_value}")
-    
+
+    # Snapshot active mode once for this event (avoids repeated lock acquisitions).
+    active_mode = get_current_mode()
+
     # Take a snapshot of the current mappings under the lock so mutations from
     # Flask threads do not race with our iteration (which may call send_osc_message,
     # an operation we do not want to hold the lock across).
@@ -250,7 +286,19 @@ def process_trigger_event(trigger_event):
             # Check if this mapping is enabled
             if not mapping.get('enabled', True):
                 continue
-            
+
+            # ── Mode gate ──────────────────────────────────────────────────────
+            # If the mapping specifies one or more modes, only fire when the
+            # active mode is in that list.  An empty (or absent) modes list
+            # means "active in all modes".
+            allowed_modes = mapping.get('modes', [])
+            if allowed_modes:                       # non-empty → restrict
+                if active_mode not in allowed_modes:
+                    print(f"[mode] skipping mapping {mapping.get('id')} "
+                          f"(active='{active_mode}', allowed={allowed_modes})")
+                    continue
+            # ──────────────────────────────────────────────────────────────────
+
             osc_address = mapping.get('osc_address')
             osc_args = mapping.get('osc_args', [])
             
@@ -554,6 +602,26 @@ def test_osc():
         return jsonify({'error': 'Failed to send OSC message'}), 500
 
 
+@app.route('/api/modes', methods=['GET'])
+def get_modes():
+    """Fetch the list of modes and active mode from the mode service.
+
+    The UI calls this to populate the mode checkboxes in the mapping modal.
+    Returns whatever the mode service has; returns an empty list gracefully
+    if the mode service is unreachable.
+    """
+    try:
+        url = config.get('mode_service_url', MODE_SERVICE_URL)
+        r = requests.get(f"{url}/api/modes", timeout=4)
+        if r.status_code == 200:
+            return jsonify(r.json())
+    except Exception as e:
+        print(f"[mode] get_modes proxy error: {e}")
+
+    # Fallback: return cached active mode + empty list
+    return jsonify({'modes': [], 'active_mode': get_current_mode()})
+
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Get server status."""
@@ -564,6 +632,7 @@ def get_status():
         'osc_client_initialized': osc_client_instance is not None,
         'osc_client_config': config['osc_client'],
         'gateway_url': config['gateway_url'],
+        'active_mode': get_current_mode(),
         'mappings_count': len(config['mappings'])
     })
 
@@ -577,8 +646,8 @@ def cleanup():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Haven OSC Proxy Server')
-    parser.add_argument('--port', type=int, default=5003,
-                        help='Port for web interface (default: 5003)')
+    parser.add_argument('--port', type=int, default=5004,
+                        help='Port for web interface (default: 5004)')
     parser.add_argument('--service-port', type=int, default=5100,
                         help='Port for trigger socket server (default: 5100)')
     parser.add_argument('--gateway', type=str, default='http://localhost:5002',
@@ -595,6 +664,11 @@ if __name__ == '__main__':
     # Load configuration
     load_config()
     
+    # Start mode-service polling thread
+    mode_thread = threading.Thread(target=_poll_mode_service, daemon=True, name='mode-poller')
+    mode_thread.start()
+    print(f"Mode service polling: {config.get('mode_service_url', MODE_SERVICE_URL)}")
+
     # Start socket server
     start_socket_server()
     
