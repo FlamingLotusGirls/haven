@@ -293,61 +293,79 @@ class FlameController {
         }
     }
 
-    toggleRepeat(sequenceId, button) {
+    async toggleRepeat(sequenceId, button) {
         const sequenceItem = button.closest('.sequence-item');
+        const modeSelect    = sequenceItem.querySelector('.repeat-mode');
         const intervalInput = sequenceItem.querySelector('.repeat-interval');
         const statusIndicator = sequenceItem.querySelector('.repeat-status');
-        
+
         if (this.repeatTimers.has(sequenceId)) {
-            // Stop repeating
-            clearInterval(this.repeatTimers.get(sequenceId));
-            this.repeatTimers.delete(sequenceId);
-            
-            // Update UI
-            button.style.backgroundColor = '';
-            button.style.color = '';
-            button.title = 'Toggle repeat';
-            statusIndicator.textContent = 'Stopped';
-            statusIndicator.className = 'repeat-status stopped';
-            
-            this.showMessage(`Repeat stopped for ${sequenceId}`, 'info');
+            // ── Stop the server-side loop ──────────────────────────────────
+            try {
+                const response = await fetch(`${this.baseUrl}/flame/patterns/${sequenceId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: 'active=false'
+                });
+                if (response.ok) {
+                    this.repeatTimers.delete(sequenceId);
+                    button.style.backgroundColor = '';
+                    button.style.color = '';
+                    button.title = 'Toggle repeat';
+                    statusIndicator.textContent = 'Stopped';
+                    statusIndicator.className = 'repeat-status stopped';
+                    this.showMessage(`Loop stopped for ${sequenceId}`, 'info');
+                } else {
+                    const txt = await response.text();
+                    this.showMessage(`Failed to stop loop: ${txt}`, 'error');
+                }
+            } catch (error) {
+                this.showMessage(`Error stopping loop: ${error.message}`, 'error');
+            }
         } else {
-            // Start repeating
-            const interval = parseInt(intervalInput.value) * 1000; // Convert to milliseconds
-            
-            if (interval < 1000) {
-                this.showMessage('Repeat interval must be at least 1 second', 'error');
+            // ── Start a server-side loop ───────────────────────────────────
+            const mode    = modeSelect ? modeSelect.value : 'interval';
+            const seconds = parseFloat(intervalInput.value);
+
+            if (isNaN(seconds) || seconds < 0) {
+                this.showMessage('Time value must be a valid number ≥ 0', 'error');
                 return;
             }
-            
-            // Update button appearance
-            button.style.backgroundColor = '#28a745';
-            button.style.color = 'white';
-            button.title = 'Stop repeat';
-            statusIndicator.textContent = `Repeating (${intervalInput.value}s)`;
-            statusIndicator.className = 'repeat-status repeating';
-            
-            // Start the repeat timer
-            const timerId = setInterval(async () => {
-                try {
-                    const response = await fetch(`${this.baseUrl}/flame/patterns/${sequenceId}`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                        },
-                        body: `active=true`
-                    });
-                    
-                    if (!response.ok) {
-                        console.error(`Failed to fire sequence ${sequenceId} during repeat`);
-                    }
-                } catch (error) {
-                    console.error(`Error firing sequence ${sequenceId} during repeat:`, error);
+
+            // Convert seconds → milliseconds for the API
+            const ms = Math.round(seconds * 1000);
+            const param = mode === 'gap'
+                ? `active=true&repeat_gap=${ms}`
+                : `active=true&repeat_interval=${ms}`;
+
+            try {
+                button.disabled = true;
+                const response = await fetch(`${this.baseUrl}/flame/patterns/${sequenceId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: param
+                });
+
+                if (response.ok) {
+                    this.repeatTimers.set(sequenceId, true); // flag only — looping is server-side
+                    button.style.backgroundColor = '#28a745';
+                    button.style.color = 'white';
+                    button.title = 'Stop loop';
+                    const modeLabel = mode === 'gap'
+                        ? `back-to-back +${seconds}s gap`
+                        : `every ${seconds}s`;
+                    statusIndicator.textContent = `Looping (${modeLabel})`;
+                    statusIndicator.className = 'repeat-status repeating';
+                    this.showMessage(`Loop started for ${sequenceId} — ${modeLabel}`, 'success');
+                } else {
+                    const txt = await response.text();
+                    this.showMessage(`Failed to start loop: ${txt}`, 'error');
                 }
-            }, interval);
-            
-            this.repeatTimers.set(sequenceId, timerId);
-            this.showMessage(`Repeat started for ${sequenceId} every ${intervalInput.value} seconds`, 'success');
+            } catch (error) {
+                this.showMessage(`Error starting loop: ${error.message}`, 'error');
+            } finally {
+                button.disabled = false;
+            }
         }
     }
 

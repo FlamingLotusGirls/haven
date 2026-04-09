@@ -845,14 +845,37 @@ body.modal-open {
     white-space: nowrap;
 }
 
+.repeat-mode {
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 69, 0, 0.3);
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    color: #ff6b35;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    appearance: auto;   /* keep native arrow for usability */
+}
+
+.repeat-mode:focus {
+    outline: none;
+    border-color: #ff6b35;
+    box-shadow: 0 0 10px rgba(255, 69, 0, 0.3);
+}
+
+.repeat-mode option {
+    background: #2d1b1b;
+    color: white;
+}
+
 .repeat-interval {
-    padding: 8px 12px;
+    padding: 8px 10px;
     border: 1px solid rgba(255, 69, 0, 0.3);
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.5);
     color: white;
     font-size: 14px;
-    width: 80px;
+    width: 70px;
     text-align: center;
 }
 
@@ -862,6 +885,8 @@ body.modal-open {
     box-shadow: 0 0 10px rgba(255, 69, 0, 0.3);
 }
 
+/* .repeat-unit replaces the old plain <span> "seconds" */
+.repeat-unit,
 .repeat-controls span {
     color: #ff6b35;
     font-size: 14px;

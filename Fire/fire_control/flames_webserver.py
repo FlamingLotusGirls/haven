@@ -56,6 +56,7 @@ def flame_status():
         if "playState" in request.values:
             playState = request.values["playState"].lower()
             if playState == "pause":
+                flames_controller.stopAllLoops()   # cancel autonomous loops before pause
                 flames_controller.globalPause()
             elif playState == "play":
                 flames_controller.globalRelease()
@@ -151,6 +152,25 @@ def flame_pattern(patternName):
         else:
             activeValid = False
 
+        # Optional loop parameters — if supplied with active=true, loop the pattern.
+        #   repeat_interval=N  fire on a fixed N-ms clock (clamped to pattern duration)
+        #   repeat_gap=N       fire N ms after the previous run ends (0 = back-to-back)
+        repeat_interval_ms = None
+        repeat_gap_ms = None
+        if "repeat_interval" in request.values:
+            try:
+                repeat_interval_ms = int(request.values["repeat_interval"])
+            except ValueError:
+                return CORSResponse("'repeat_interval' must be an integer (milliseconds)", 400)
+        if "repeat_gap" in request.values:
+            try:
+                repeat_gap_ms = int(request.values["repeat_gap"])
+            except ValueError:
+                return CORSResponse("'repeat_gap' must be an integer (milliseconds)", 400)
+
+        if repeat_interval_ms is not None and repeat_gap_ms is not None:
+            return CORSResponse("Specify 'repeat_interval' or 'repeat_gap', not both", 400)
+
         if (not enabledValid and not activeValid):
             abort(400)
 
@@ -161,9 +181,19 @@ def flame_pattern(patternName):
                 flames_controller.disableFlameEffect(patternName)
         if activeValid:
             if (active == "true"):
-                flames_controller.doFlameEffect(patternName)
+                if repeat_interval_ms is not None or repeat_gap_ms is not None:
+                    try:
+                        flames_controller.loopFlameEffect(
+                            patternName,
+                            interval_ms=repeat_interval_ms or 0,
+                            gap_ms=repeat_gap_ms or 0
+                        )
+                    except ValueError as e:
+                        return CORSResponse(str(e), 400)
+                else:
+                    flames_controller.doFlameEffect(patternName)
             elif (active == "false"):
-                flames_controller.stopFlameEffect(patternName)
+                flames_controller.stopFlameEffect(patternName)   # also cancels any loop
 
         return CORSResponse("Success", 200)
 
@@ -182,21 +212,36 @@ def flame_pattern(patternName):
                 return JSONResponse(json.dumps(get_pattern_status(patternName)))
 
 
+@app.route("/flame/patterns/loops/stop", methods=['POST'])
+def stop_all_loops():
+    '''POST /flame/patterns/loops/stop : Stop all autonomous looping patterns
+       without globally pausing the system (scene transition helper).
+    '''
+    flames_controller.stopAllLoops()
+    return CORSResponse("All loops stopped", 200)
+
+
 def get_status():
     pooferList = list()
     patternList = list()
+    # getLoopingFlameEffects() → {name: {mode, period_ms, pattern_dur_ms, ...}}
+    looping = flames_controller.getLoopingFlameEffects()
     for pooferId in poofermapping.mappings:
         pooferList.append({"id" : pooferId,
                            "enabled": flames_controller.isPooferEnabled(pooferId),
                            "active" : flames_controller.isPooferActive(pooferId)})
     for patternName in pattern_manager.getPatternNames():
-        patternList.append({"name" : patternName,
-                            "enabled": flames_controller.isFlameEffectEnabled(patternName),
-                            "active" : flames_controller.isFlameEffectActive(patternName)})
+        entry = {"name"    : patternName,
+                 "enabled" : flames_controller.isFlameEffectEnabled(patternName),
+                 "active"  : flames_controller.isFlameEffectActive(patternName),
+                 "looping" : patternName in looping}
+        if patternName in looping:
+            entry["loop_info"] = looping[patternName]
+        patternList.append(entry)
     return {"globalState": (not flames_controller.isStopped()),
-            "poofers":pooferList,
-            "patterns":patternList }
-
+            "poofers" : pooferList,
+            "patterns": patternList,
+            "looping_patterns": looping}
 
 
 def get_poofer_status(poofer_id):
@@ -206,8 +251,15 @@ def get_poofer_status(poofer_id):
     return pooferStatus
 
 def get_pattern_status(patternName):
-    patternStatus = {"enabled": flames_controller.isFlameEffectEnabled(patternName),
-                     "active" : flames_controller.isFlameEffectActive(patternName)}
+    looping = flames_controller.isFlameEffectLooping(patternName)
+    patternStatus = {"enabled" : flames_controller.isFlameEffectEnabled(patternName),
+                     "active"  : flames_controller.isFlameEffectActive(patternName),
+                     "looping" : looping}
+    if looping:
+        # getLoopingFlameEffects() returns {name: {mode, period_ms, ...}}
+        loop_info = flames_controller.getLoopingFlameEffects().get(patternName)
+        if loop_info:
+            patternStatus["loop_info"] = loop_info
     return patternStatus
 
 def get_pattern(patternName):
