@@ -107,31 +107,40 @@ async function saveAllData() {
 function addChannelMapping() {
     const channelIndexStr = document.getElementById('channelIndex').value;
     const solenoidName = document.getElementById('solenoidName').value.trim();
-    
+    const outputOverrideStr = document.getElementById('outputOverride').value;
+
     if (!channelIndexStr) {
         showStatus('Please select a channel index', true);
         return;
     }
-    
+
     const channelIndex = parseInt(channelIndexStr);
-    
+
     if (!solenoidName) {
         showStatus('Please enter a solenoid name', true);
         return;
     }
-    
+
     // Check if channel index already exists
     const existingIndex = channelsData.findIndex(item => Array.isArray(item) ? item[0] === channelIndex : item.channel === channelIndex);
     if (existingIndex !== -1) {
         showStatus('Channel index already mapped', true);
         return;
     }
-    
-    // Add new mapping - using array format as specified in config
-    channelsData.push([channelIndex, solenoidName]);
+
+    // Only store the output override when it differs from the default (input == output)
+    const outputOverride = outputOverrideStr !== '' ? parseInt(outputOverrideStr) : channelIndex;
+    if (outputOverride !== channelIndex) {
+        channelsData.push([channelIndex, solenoidName, outputOverride]);
+    } else {
+        channelsData.push([channelIndex, solenoidName]);
+    }
+
     updateChannelTable();
+    checkRemapWarning();
     clearInputs('solenoidName');
     document.getElementById('channelIndex').value = '';
+    document.getElementById('outputOverride').value = '';
     markUnsavedChanges();
     showStatus('Channel mapping added');
 }
@@ -146,14 +155,25 @@ function removeChannelMapping(index) {
 function updateChannelTable() {
     const tbody = document.getElementById('channelTableBody');
     tbody.innerHTML = '';
-    
+
     channelsData.forEach((mapping, index) => {
-        const [channelIndex, solenoidName] = mapping;
+        const channelIndex  = mapping[0];
+        const solenoidName  = mapping[1];
+        const outputOverride = mapping.length >= 3 ? mapping[2] : channelIndex;
+        const isRemapped    = outputOverride !== channelIndex;
+
         const row = tbody.insertRow();
+        if (isRemapped) row.style.backgroundColor = '#fff3cd';
+
+        const overrideCell = isRemapped
+            ? `<span class="remap-badge">⚠ → Output ${outputOverride}</span>`
+            : `<span style="color:#6c757d;">Output ${outputOverride}</span>`;
+
         row.innerHTML = `
             <td>${channelIndex}</td>
             <td id="channelName-${index}">${solenoidName}</td>
-            <td>
+            <td id="channelOverride-${index}">${overrideCell}</td>
+            <td id="channelActions-${index}">
                 <button onclick="editChannelName(${index})">Edit</button>
                 <button class="danger" onclick="removeChannelMapping(${index})">Remove</button>
             </td>
@@ -162,35 +182,64 @@ function updateChannelTable() {
 }
 
 function editChannelName(index) {
-    const nameCell = document.getElementById(`channelName-${index}`);
-    const currentName = channelsData[index][1];
-    
-    // Replace the cell content with an input field
+    const nameCell     = document.getElementById(`channelName-${index}`);
+    const overrideCell = document.getElementById(`channelOverride-${index}`);
+    const actionsCell  = document.getElementById(`channelActions-${index}`);
+    const currentName  = channelsData[index][1];
+    const channelIndex = channelsData[index][0];
+    const currentOverride = channelsData[index].length >= 3 ? channelsData[index][2] : channelIndex;
+
+    // Name field in the name cell (no buttons here)
     nameCell.innerHTML = `
         <input type="text" id="editName-${index}" value="${currentName}" style="width: 150px;">
-        <button onclick="saveChannelName(${index})" style="padding: 4px 8px; margin-left: 5px;">Save</button>
-        <button onclick="cancelChannelEdit(${index})" style="padding: 4px 8px; margin-left: 5px;">Cancel</button>
     `;
-    
-    // Focus on the input field
+
+    // Override select in its own cell
+    const overrideOptions = Array.from({length: 8}, (_, i) =>
+        `<option value="${i}" ${i === currentOverride ? 'selected' : ''}>` +
+        `Output ${i}${i === channelIndex ? ' (default)' : ''}</option>`
+    ).join('');
+
+    overrideCell.innerHTML = `
+        <select id="editOverride-${index}" style="padding:4px;">${overrideOptions}</select>
+    `;
+
+    // Save/Cancel go in the Actions cell, replacing the Edit/Remove buttons
+    actionsCell.innerHTML = `
+        <button onclick="saveChannelName(${index})" style="padding:4px 8px;">Save</button>
+        <button onclick="cancelChannelEdit(${index})" style="padding:4px 8px; margin-left:5px;">Cancel</button>
+    `;
+
     document.getElementById(`editName-${index}`).focus();
 }
 
 function saveChannelName(index) {
     const newName = document.getElementById(`editName-${index}`).value.trim();
-    
+    const overrideEl = document.getElementById(`editOverride-${index}`);
+
     if (!newName) {
         showStatus('Please enter a solenoid name', true);
         return;
     }
-    
-    // Update the data
+
     channelsData[index][1] = newName;
-    
-    // Refresh the table
+
+    if (overrideEl) {
+        const newOverride = parseInt(overrideEl.value);
+        const channelIndex = channelsData[index][0];
+        if (newOverride !== channelIndex) {
+            // Store the override as a 3rd element
+            channelsData[index][2] = newOverride;
+        } else {
+            // Remove override — identity mapping, no need to store
+            channelsData[index] = [channelsData[index][0], channelsData[index][1]];
+        }
+    }
+
     updateChannelTable();
+    checkRemapWarning();
     markUnsavedChanges();
-    showStatus('Channel name updated');
+    showStatus('Channel updated');
 }
 
 function cancelChannelEdit(index) {
@@ -714,6 +763,24 @@ function updatePatternSelect() {
     });
 }
 
+// Show/hide the remap warning banner based on active remaps in channelsData
+function checkRemapWarning() {
+    const warningDiv = document.getElementById('remapWarning');
+    if (!warningDiv) return;
+
+    const remaps = channelsData.filter(m => m.length >= 3 && m[2] !== m[0]);
+    if (remaps.length > 0) {
+        const detail = remaps.map(m => `Input ${m[0]} (${m[1]}) → Output ${m[2]}`).join('; ');
+        warningDiv.style.display = 'block';
+        warningDiv.innerHTML =
+            `⚠️ <strong>Non-standard output remaps active</strong> — ` +
+            `this is a field-repair configuration and is not obvious from the hardware. ` +
+            `Active remaps: ${detail}`;
+    } else {
+        warningDiv.style.display = 'none';
+    }
+}
+
 // Update all tables
 function updateAllTables() {
     updateChannelTable();
@@ -721,4 +788,5 @@ function updateAllTables() {
     updatePatternTable();
     updateMappingTable();
     updatePatternSelect();
+    checkRemapWarning();
 }

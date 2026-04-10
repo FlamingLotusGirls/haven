@@ -466,6 +466,20 @@ public:
     bFollowerOnly = tf;
   }
 
+  // Override the default output channel for this input.
+  // Normally input N drives output N; call this to redirect it to a different
+  // output (e.g. when the paired output has a hardware fault and a spare output
+  // is available).  An invalid outputChannel value is clamped to
+  // INVALID_OUTPUT_CHANNEL so the channel simply produces no output.
+  void setDefaultOutputChannel(int outputChannel) {
+    m_defaultOutputChannel = (outputChannel >= 0 && outputChannel < NUM_OUTPUT_CHANNELS)
+                             ? outputChannel : INVALID_OUTPUT_CHANNEL;
+  }
+
+  int getDefaultOutputChannel() const {
+    return m_defaultOutputChannel;
+  }
+
   void update(bool buttonPressed, uint32_t curTimeMs) {
     if (buttonPressed) {
       /*
@@ -1006,11 +1020,14 @@ void loadChannelsFromFile() {
   }
   
   // Process channel mappings - expecting array of [channelIndex, solenoidName]
+  // An optional 3rd element [channelIndex, solenoidName, outputOverride] redirects
+  // the default output channel (field repair: swap a bad output to a spare one).
+  bool anyRemapped = false;
   if (doc.is<JsonArray>()) {
     JsonArray channelArray = doc.as<JsonArray>();
     for (JsonArray::iterator it = channelArray.begin(); it != channelArray.end(); ++it) {
       JsonArray mapping = *it;
-      if (mapping.size() == 2) {
+      if (mapping.size() >= 2) {
         int channelIndex = mapping[0];
         String solenoidName = mapping[1].as<String>();
         
@@ -1020,11 +1037,33 @@ void loadChannelsFromFile() {
           Serial.print(channelIndex);
           Serial.print(" mapped to: ");
           Serial.println(solenoidName);
+
+          // Optional output override (3rd element).
+          // Absent or null → identity mapping (input N → output N).
+          int outputOverride = channelIndex;
+          if (mapping.size() >= 3 && !mapping[2].isNull()) {
+            outputOverride = mapping[2].as<int>();
+          }
+          controllers[channelIndex].setDefaultOutputChannel(outputOverride);
+
+          if (outputOverride != channelIndex) {
+            anyRemapped = true;
+            Serial.print("  *** OUTPUT REMAP: input ");
+            Serial.print(channelIndex);
+            Serial.print(" (");
+            Serial.print(solenoidName);
+            Serial.print(") → output ");
+            Serial.println(outputOverride);
+          }
         }
       }
     }
   }
   Serial.println("Channels loaded from file successfully");
+  if (anyRemapped) {
+    Serial.println("*** WARNING: One or more output channel remaps are active.");
+    Serial.println("*** Check the web UI channel table for details.");
+  }
 }
 
 // Dynamic sequence and pattern loading from JSON files
