@@ -29,7 +29,20 @@
 #include <unistd.h>
 #endif // ARDUINO
 
-bool bFollowerOnly = false;  // Used by test mode, to override the dynamic program
+// Operating mode — selected by the 3-bit DIP switch.
+//   DIP=7 : FollowerOnly    – output mirrors input, no triggers sent     (field test)
+//   DIP=6 : TriggerOnly     – triggers sent to network, no local output  (network-only test)
+//   DIP=5 : FollowerTrigger – output mirrors input AND triggers sent      (hybrid)
+//   DIP=0–4 : Normal        – programs run, triggers sent                (production)
+enum class OperatingMode {
+  Normal,           // Programs run; triggers sent to network
+  FollowerOnly,     // Output follows input directly; no triggers  (DIP=7)
+  TriggerOnly,      // Triggers sent; no local solenoid output     (DIP=6)
+  FollowerTrigger,  // Output follows input; triggers also sent    (DIP=5)
+};
+
+bool bFollowerOnly = false;              // True in any non-Normal mode; blocks setProgram()
+static OperatingMode g_operatingMode = OperatingMode::Normal;  // Set by DIP switch in buttonLoop()
 
 // Please only define on of these (if any). They set up the special sequences on the specific
 // flame control boxes. Perhaps one day I will have an ESP32 rather than a trinketPro on the board,
@@ -829,7 +842,11 @@ class Debouncer {
 Debouncer debouncer;
 bool inputButtonStates[NUM_INPUT_CHANNELS];
 
-static void readInputButtonStates(uint16_t gpioRawData, int curTimeMs, bool testMode) {
+static void readInputButtonStates(uint16_t gpioRawData, int curTimeMs) {
+  // Triggers are sent in Normal, TriggerOnly, and FollowerTrigger modes.
+  const bool sendTriggers = (g_operatingMode == OperatingMode::Normal     ||
+                             g_operatingMode == OperatingMode::TriggerOnly ||
+                             g_operatingMode == OperatingMode::FollowerTrigger);
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
     bool oldButtonState = inputButtonStates[i];
     bool buttonState = readRawInput(i, gpioRawData, curTimeMs);
@@ -838,10 +855,10 @@ static void readInputButtonStates(uint16_t gpioRawData, int curTimeMs, bool test
       Serial.print("ButtonChange on channel ");
       Serial.print(i);
       Serial.println(oldButtonState ? ",now UNPRESSED" : ",now PRESSED");
-      
-      // TRIGGER INTEGRATION: Send trigger event if enabled
+
+      // TRIGGER INTEGRATION: Send trigger event if enabled for this mode
       #ifdef ARDUINO
-      if (!testMode && triggerEnabled[i] && channelTriggers[i] != nullptr) {
+      if (sendTriggers && triggerEnabled[i] && channelTriggers[i] != nullptr) {
         channelTriggers[i]->CheckForEventAndSend(inputButtonStates[i]);
         Serial.print("Trigger sent for channel ");
         Serial.println(i);
@@ -884,7 +901,6 @@ uint8_t csw_read_pca() {
 
 static uint16_t g_oldGpioRawData = 0xFFFF;
 static uint8_t g_oldDipSwitch = 0;
-static bool g_testMode = false;
 void buttonLoop() {
   // Update connection to trigger gateway
   if (triggerDevice != nullptr) {
@@ -909,32 +925,44 @@ void buttonLoop() {
     g_oldGpioRawData = gpioRawData;
   }
   // Read DIP switch to determine operating mode.
-  // DIP switch value 7 = test mode: all channels follow input directly (follower behaviour),
-  // no programs run, and no trigger events are sent to the network.
-  // Detect transitions so active programs are canceled exactly once on entry.
+  //   DIP=7 : FollowerOnly    (output mirrors input, no triggers)
+  //   DIP=6 : TriggerOnly     (triggers only, no local output)
+  //   DIP=5 : FollowerTrigger (output mirrors input + triggers)
+  //   DIP=0–4 : Normal        (programs run, triggers sent)
+  // Detect transitions so active programs are canceled exactly once on mode change.
   uint8_t dipSwitch = readDIPSwitch(gpioRawData);
   if (g_oldDipSwitch != dipSwitch) {
-    bool newTestMode = (dipSwitch == 7);
-    if (newTestMode != g_testMode) {
-      // Enter test mode: cancel any in-flight programs immediately so they
-      // don't continue driving outputs while test mode is active.
-      Serial.printf("TEST MODE: %s\n", newTestMode ? "ENTERED" : "EXITED");
+    OperatingMode newMode;
+    if      (dipSwitch == 7) newMode = OperatingMode::FollowerOnly;
+    else if (dipSwitch == 6) newMode = OperatingMode::TriggerOnly;
+    else if (dipSwitch == 5) newMode = OperatingMode::FollowerTrigger;
+    else                     newMode = OperatingMode::Normal;
+
+    if (newMode != g_operatingMode) {
+      static const char* modeNames[] = {"Normal", "FollowerOnly", "TriggerOnly", "FollowerTrigger"};
+      Serial.printf("Operating mode: %s -> %s (DIP=%d)\n",
+                    modeNames[(int)g_operatingMode], modeNames[(int)newMode], dipSwitch);
+
+      // On any transition away from Normal: immediately cancel in-flight programs.
+      if (newMode != OperatingMode::Normal || g_operatingMode != OperatingMode::Normal) {
 #ifdef ARDUINO
-      if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
+        if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
 #endif
-      for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
-        controllers[i].setTestMode(newTestMode);
+        for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+          controllers[i].cancel();
+        }
+#ifdef ARDUINO
+        if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
+#endif
       }
-#ifdef ARDUINO
-      if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
-#endif
+      // bFollowerOnly blocks setProgram() in any non-Normal mode
+      bFollowerOnly = (newMode != OperatingMode::Normal);
+      g_operatingMode = newMode;
     }
-    g_testMode = newTestMode;
     g_oldDipSwitch = dipSwitch;
   }
 
-  // readInputButtonStates suppresses trigger sends when testMode is true.
-  readInputButtonStates(gpioRawData, curTimeMs, g_testMode);
+  readInputButtonStates(gpioRawData, curTimeMs);
 
   // Take the mutex before accessing controllers[]. The web server task may call
   // setProgram() concurrently; portMAX_DELAY is safe here because the web handler
@@ -943,19 +971,21 @@ void buttonLoop() {
   if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
 #endif
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
-    if (g_testMode) {
-      // Test mode: output directly mirrors input state, bypassing all program logic.
-      // Programs were already canceled on the transition into test mode.
+    if (g_operatingMode == OperatingMode::TriggerOnly) {
+      // Trigger-only: no local output at all — consolidatedOutput stays zeroed.
+    } else if (g_operatingMode == OperatingMode::FollowerOnly ||
+               g_operatingMode == OperatingMode::FollowerTrigger) {
+      // Follower modes: output directly mirrors input, bypassing all program logic.
+      // Programs were already canceled on the transition into this mode.
       if (i < NUM_OUTPUT_CHANNELS) {
         consolidatedOutput[i] = inputButtonStates[i];
       }
     } else {
+      // Normal mode: run programs via controllers.
       controllers[i].update(inputButtonStates[i], curTimeMs);
       PlayState* playState = controllers[i].getPlayState();
       for (int j=0; j<NUM_OUTPUT_CHANNELS; j++) {
-        // For the moment, if any program says that the button is pressed, it's pressed.
         if (playState->valid && playState->buttonPressed) {
-          // Serial.printf("Controller %d, output active %d\n", i, j);
           consolidatedOutput[j] = true;
         }
         playState++;
@@ -1433,7 +1463,13 @@ void buttonSetup(String& netName) {
   Serial.print("  Initial GPIO read is ");
   Serial.println(g_oldGpioRawData, BIN);
 
-  g_testMode = (g_oldDipSwitch == 7);
+  // Set initial operating mode from DIP switch
+  if      (g_oldDipSwitch == 7) g_operatingMode = OperatingMode::FollowerOnly;
+  else if (g_oldDipSwitch == 6) g_operatingMode = OperatingMode::TriggerOnly;
+  else if (g_oldDipSwitch == 5) g_operatingMode = OperatingMode::FollowerTrigger;
+  else                          g_operatingMode = OperatingMode::Normal;
+  bFollowerOnly = (g_operatingMode != OperatingMode::Normal);
+  Serial.printf("Initial operating mode: %d (DIP=%d)\n", (int)g_operatingMode, g_oldDipSwitch);
 
 #else // ~ARDUINO
   printf("Buttons Starting...\n");
