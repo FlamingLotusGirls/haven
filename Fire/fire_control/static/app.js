@@ -12,6 +12,10 @@ class FlameController {
         this.initTabs();
         this.loadSystemStatus();
         this.loadPatterns();
+        this.loadSceneStatus();
+        // Poll scene status every 5 s so the header chip and warning banner
+        // update automatically whenever the mode service changes the scene.
+        setInterval(() => this.loadSceneStatus(), 5000);
     }
 
     initTabs() {
@@ -68,6 +72,7 @@ class FlameController {
         document.getElementById('globalPlay').addEventListener('click', () => this.setGlobalState('play'));
         document.getElementById('globalPause').addEventListener('click', () => this.setGlobalState('pause'));
         document.getElementById('refreshStatus').addEventListener('click', () => this.loadSystemStatus());
+        document.getElementById('refreshScene').addEventListener('click', () => this.refreshMode());
         document.getElementById('refreshPatterns').addEventListener('click', () => this.loadPatterns());
 
         // Poofer toggle buttons
@@ -389,6 +394,120 @@ class FlameController {
         }
     }
 
+    // =========================================================================
+    // Scene / Mode Display
+    // =========================================================================
+
+    /**
+     * Fetch trigger-integration status (includes active_mode AND scene_unconfigured)
+     * and update both the scene display pill and the unconfigured-scene banner.
+     */
+    async loadSceneStatus() {
+        try {
+            const response = await fetch(`${this.baseUrl}/trigger-integration/status`);
+            if (response.ok) {
+                const data = await response.json();
+                this.displayScene(data.active_mode);
+                this.updateUnconfiguredBanner(data.scene_unconfigured, data.active_mode);
+            } else {
+                this.displayScene(null, /*error=*/true);
+                this.updateUnconfiguredBanner(false, null);
+            }
+        } catch (error) {
+            this.displayScene(null, /*error=*/true);
+            this.updateUnconfiguredBanner(false, null);
+        }
+    }
+
+    /**
+     * POST /api/refresh-mode — force the flame server to re-fetch from the
+     * mode service right now, then update the scene display and banner.
+     */
+    async refreshMode() {
+        const btn = document.getElementById('refreshScene');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Refreshing…';
+
+        try {
+            const response = await fetch(`${this.baseUrl}/api/refresh-mode`, {
+                method: 'POST',
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.refreshed) {
+                    this.showMessage(`Scene refreshed: ${data.active_mode ?? '(none)'}`, 'success');
+                } else {
+                    this.showMessage('Mode service unreachable; showing last known scene', 'info');
+                }
+                // Reload full status so both the scene pill and the banner are updated.
+                await this.loadSceneStatus();
+            } else {
+                this.displayScene(null, /*error=*/true);
+                this.updateUnconfiguredBanner(false, null);
+                this.showMessage('Failed to refresh scene', 'error');
+            }
+        } catch (error) {
+            this.displayScene(null, /*error=*/true);
+            this.updateUnconfiguredBanner(false, null);
+            this.showMessage(`Error refreshing scene: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+
+    /**
+     * Show or hide the full-page unconfigured-scene warning banner.
+     *
+     * @param {boolean}     unconfigured  - true when scene_unconfigured flag is set
+     * @param {string|null} sceneName     - the active scene name (used in the message)
+     */
+    updateUnconfiguredBanner(unconfigured, sceneName) {
+        const banner = document.getElementById('unconfigured-scene-banner');
+        const msgEl  = document.getElementById('unconfigured-scene-msg');
+        if (!banner) return;
+
+        if (unconfigured && sceneName && sceneName !== 'Unknown') {
+            if (msgEl) {
+                msgEl.textContent =
+                    `The current scene "${sceneName}" has no trigger mappings configured.`;
+            }
+            banner.style.display = 'flex';
+        } else {
+            banner.style.display = 'none';
+        }
+    }
+
+    /**
+     * Update both the header scene chip and the System Status card pill.
+     *
+     * @param {string|null} scene  - scene name, "Unknown", or null
+     * @param {boolean}     error  - true when the server is unreachable
+     */
+    displayScene(scene, error = false) {
+        // Helper — applies the same text + class to any element with a scene-value role.
+        const applyTo = (el, cardClass) => {
+            if (!el) return;
+            if (error) {
+                el.textContent = 'Error';
+                el.className = cardClass + ' scene-error';
+            } else if (!scene || scene === 'Unknown') {
+                el.textContent = scene || 'Unknown';
+                el.className = cardClass + ' scene-unknown';
+            } else {
+                el.textContent = scene;
+                el.className = cardClass + ' scene-known';
+            }
+        };
+
+        // Header chip (uses hdr-label as base, colour modifier stacked on top)
+        applyTo(document.getElementById('headerSceneValue'), 'hdr-label');
+        // System Status card pill (keeps its own scene-value base)
+        applyTo(document.getElementById('sceneValue'), 'scene-value');
+    }
+
     async loadSystemStatus() {
         try {
             const response = await fetch(`${this.baseUrl}/flame`);
@@ -399,6 +518,8 @@ class FlameController {
         } catch (error) {
             document.getElementById('systemStatus').innerHTML = `<div class="error">Error loading status: ${error.message}</div>`;
         }
+        // Also refresh the scene status and unconfigured banner.
+        await this.loadSceneStatus();
     }
 
     displaySystemStatus(data) {
@@ -424,8 +545,8 @@ class FlameController {
         document.getElementById('systemStatus').innerHTML = statusHtml;
         
         const globalStatus = document.getElementById('globalStatus');
-        globalStatus.textContent = `Status: ${data.globalState ? 'Playing' : 'Paused'}`;
-        globalStatus.className = `status-indicator ${data.globalState ? 'enabled' : 'disabled'}`;
+        globalStatus.textContent = data.globalState ? 'Playing' : 'Paused';
+        globalStatus.className = 'hdr-label';
         
         // Update button visibility based on state
         const playBtn = document.getElementById('globalPlay');
@@ -1219,142 +1340,341 @@ class FlameController {
     }
 
     // =========================================================================
-    // Trigger Integration Functions
+    // Trigger Integration Functions  (scene-first model)
     // =========================================================================
 
-    async loadTriggerIntegration() {
-        await this.loadTriggerStatus();
-        await this.loadAvailableTriggers();
-        await this.loadAvailableSequencesForTriggers();
-        await this.loadAvailableModes();
-        await this.loadTriggerMappings();
-        this.initTriggerForm();
-        
-        // Start periodic polling for trigger status updates (every 2 minutes)
-        if (this.triggerPollInterval) {
-            clearInterval(this.triggerPollInterval);
-        }
-        this.triggerPollInterval = setInterval(async () => {
-            // Silently update trigger data in background
-            await this.loadAvailableTriggers();
-            await this.loadAvailableModes();
-            await this.loadTriggerMappings();
-        }, 120000); // 2 minutes in milliseconds
-    }
-
-    async loadAvailableModes() {
+    /**
+     * Fetch with a built-in AbortController timeout so a hung server can't
+     * silently block the load path forever.
+     *
+     * @param {string} url
+     * @param {RequestInit} [options]
+     * @param {number} [timeoutMs=10000]
+     * @returns {Promise<Response>}
+     */
+    async _fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            const response = await fetch(`${this.baseUrl}/trigger-integration/modes`);
-            const data = await response.json();
-            this.availableModesData = data.modes || [];
-            this.activeModeData = data.active_mode || null;
-            
-            console.log('Loaded modes:', this.availableModesData, 'Active:', this.activeModeData);
-            
-            // Update mode selection UI
-            this.updateModeSelectionUI();
-            this.updateActiveModeDisplay();
-        } catch (error) {
-            console.error('Error loading modes:', error);
-            this.availableModesData = [];
-            this.activeModeData = null;
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(tid);
         }
     }
 
-    updateModeSelectionUI() {
-        const modeContainer = document.getElementById('mode-selection-container');
-        if (!modeContainer) return;
-        
-        if (this.availableModesData.length === 0) {
-            modeContainer.innerHTML = '<div class="help-text">No modes available from mode service</div>';
+    /** Entry point called when the user switches to the Triggers tab. */
+    async loadTriggerIntegration() {
+        // Immediately mark the selector so we can tell the function was called.
+        const _sel = document.getElementById('trigger-scene-select');
+        if (_sel) { _sel.disabled = true; }
+
+        try { await this.loadTriggerStatus(); }
+            catch (e) { console.error('loadTriggerStatus:', e); }
+
+        try { await this.loadAvailableTriggers(); }
+            catch (e) { console.error('loadAvailableTriggers:', e); }
+
+        try { await this.loadAvailableSequencesForTriggers(); }
+            catch (e) { console.error('loadAvailableSequencesForTriggers:', e); }
+
+        try {
+            await this._loadScenesAndMappings();  // builds scene selector + renders table
+        } catch (e) {
+            console.error('_loadScenesAndMappings:', e);
+            // Always leave the selector in a usable state even on hard failure
+            this._buildSceneSelector(this.availableModesData   || [],
+                                     this.configuredScenesData || [],
+                                     null);
+            this._renderSyncWarnings(this.availableModesData   || [],
+                                     this.configuredScenesData || []);
+            this._renderMappingsForSelectedScene();
+        }
+
+        if (_sel) { _sel.disabled = false; }
+
+        try { this.initTriggerForm(); }
+            catch (e) { console.error('initTriggerForm:', e); }
+
+        // Wire up the scene selector and action buttons (idempotent — guarded by dataset flag)
+        const sceneSelect = document.getElementById('trigger-scene-select');
+        if (sceneSelect && !sceneSelect.dataset.initialized) {
+            sceneSelect.dataset.initialized = 'true';
+            sceneSelect.addEventListener('change', () => {
+                this._selectedScene = sceneSelect.value;
+                this._renderMappingsForSelectedScene();
+            });
+        }
+        const dupBtn = document.getElementById('duplicate-scene-btn');
+        if (dupBtn && !dupBtn.dataset.initialized) {
+            dupBtn.dataset.initialized = 'true';
+            dupBtn.addEventListener('click', () => this.duplicateScene());
+        }
+
+        // Background poll every 2 minutes: refresh triggers + mappings silently
+        if (this.triggerPollInterval) clearInterval(this.triggerPollInterval);
+        this.triggerPollInterval = setInterval(async () => {
+            await this.loadAvailableTriggers();
+            try {
+                const r = await fetch(`${this.baseUrl}/trigger-integration/mappings`);
+                if (r.ok) {
+                    const d = await r.json();
+                    this._allMappings = d.mappings || [];
+                    this._renderMappingsForSelectedScene();
+                }
+            } catch (_) {}
+        }, 120000);
+    }
+
+    /**
+     * Fetch modes + all mappings, populate the scene selector, render the table.
+     * Called on tab open and after duplicate/copy operations.
+     * Always initialises instance variables so downstream code never sees undefined.
+     */
+    async _loadScenesAndMappings() {
+        // Initialise to safe defaults so we never pass undefined to _buildSceneSelector
+        // even when a fetch returns a non-200 status code (which doesn't throw).
+        if (!Array.isArray(this.availableModesData))   this.availableModesData   = [];
+        if (!Array.isArray(this.configuredScenesData)) this.configuredScenesData = [];
+        if (!Array.isArray(this._allMappings))         this._allMappings         = [];
+
+        try {
+            const modeResp = await this._fetchWithTimeout(
+                `${this.baseUrl}/trigger-integration/modes`);
+            if (modeResp.ok) {
+                const md = await modeResp.json();
+                this.availableModesData   = md.modes             || [];
+                this.activeModeData       = md.active_mode       || null;
+                this.configuredScenesData = md.configured_scenes || [];
+            } else {
+                console.warn(`/trigger-integration/modes returned ${modeResp.status}`);
+            }
+        } catch (err) {
+            console.warn('Could not reach /trigger-integration/modes:', err.message || err);
+        }
+
+        try {
+            const mapResp = await this._fetchWithTimeout(
+                `${this.baseUrl}/trigger-integration/mappings`);
+            if (mapResp.ok) {
+                const md = await mapResp.json();
+                this._allMappings = md.mappings || [];
+            } else {
+                console.warn(`/trigger-integration/mappings returned ${mapResp.status}`);
+            }
+        } catch (err) {
+            console.warn('Could not reach /trigger-integration/mappings:', err.message || err);
+        }
+
+        this._buildSceneSelector(
+            this.availableModesData, this.configuredScenesData, this.activeModeData);
+        this._renderSyncWarnings(this.availableModesData, this.configuredScenesData);
+        this._renderMappingsForSelectedScene();
+    }
+
+    /**
+     * Rebuild the scene selector dropdown.
+     * Sources: mode-service scene list + flame configured-scenes list (union).
+     * Options are colour-coded:
+     *   default (black) — present in both mode service AND flame config
+     *   red             — mode service only (flame config missing)
+     *   blue            — flame config only (not in mode service, likely orphaned)
+     */
+    _buildSceneSelector(modeServiceScenes, configuredScenes, defaultScene) {
+        const select = document.getElementById('trigger-scene-select');
+        if (!select) return;
+
+        const msSet  = new Set(modeServiceScenes  || []);
+        const cfgSet = new Set(configuredScenes   || []);
+        const allScenes = [...new Set([...msSet, ...cfgSet])].sort();
+
+        const prev = this._selectedScene || select.value || '';
+        select.innerHTML = '';
+
+        if (allScenes.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No scenes defined';
+            select.appendChild(opt);
+            this._selectedScene = '';
             return;
         }
-        
-        let html = '<div class="mode-checkboxes">';
-        this.availableModesData.forEach(mode => {
-            html += `
-                <label class="mode-checkbox-label">
-                    <input type="checkbox" name="modes" value="${this.escapeHtml(mode)}" class="mode-checkbox">
-                    ${this.escapeHtml(mode)}
-                </label>
-            `;
+
+        allScenes.forEach(name => {
+            const inMS  = msSet.has(name);
+            const inCfg = cfgSet.has(name);
+            const opt   = document.createElement('option');
+            opt.value   = name;
+            if (inMS && inCfg) {
+                opt.textContent = name;                             // both — standard
+            } else if (inMS && !inCfg) {
+                opt.textContent  = `${name}  ⚠ (not configured)`;
+                opt.style.color  = '#cc0000';                      // mode-service only
+            } else {
+                opt.textContent  = `${name}  (not in mode service)`;
+                opt.style.color  = '#0055cc';                      // flame config only
+            }
+            select.appendChild(opt);
         });
-        html += '</div>';
-        html += '<div class="help-text">Select mode(s) for this mapping. Leave all unchecked to trigger in any mode.</div>';
-        
-        modeContainer.innerHTML = html;
+
+        const toSelect = (defaultScene && allScenes.includes(defaultScene)) ? defaultScene
+                       : (prev && allScenes.includes(prev))                 ? prev
+                       :                                                       allScenes[0];
+        select.value = toSelect;
+        this._selectedScene = toSelect;
     }
 
-    updateActiveModeDisplay() {
-        const activeModeDisplay = document.getElementById('active-mode-display');
-        if (!activeModeDisplay) return;
-        
-        if (this.activeModeData) {
-            activeModeDisplay.innerHTML = `<strong>Active Mode:</strong> <span class="mode-badge">${this.escapeHtml(this.activeModeData)}</span>`;
-            activeModeDisplay.className = 'active-mode-indicator active';
-        } else {
-            activeModeDisplay.innerHTML = `<strong>Active Mode:</strong> <span class="mode-badge-none">None</span>`;
-            activeModeDisplay.className = 'active-mode-indicator inactive';
+    /**
+     * Render sync-warning banners between the scene selector and the status box.
+     * Red  = scenes in mode service with no flame config.
+     * Blue = scenes in flame config not present in mode service (orphaned).
+     */
+    _renderSyncWarnings(modeServiceScenes, configuredScenes) {
+        const container = document.getElementById('scene-sync-warnings');
+        if (!container) return;
+
+        const msSet  = new Set(modeServiceScenes  || []);
+        const cfgSet = new Set(configuredScenes   || []);
+
+        const missingConfig  = [...msSet].filter(s => !cfgSet.has(s));
+        const orphanedConfig = [...cfgSet].filter(s => !msSet.has(s));
+
+        let html = '';
+        if (missingConfig.length > 0) {
+            const chips = missingConfig
+                .map(s => `<span class="sync-scene-chip sync-chip-red">${this.escapeHtml(s)}</span>`)
+                .join(' ');
+            html += `<div class="sync-warning sync-warning-red">
+                ⚠ <strong>${missingConfig.length} scene${missingConfig.length > 1 ? 's' : ''}
+                from the mode service have no flame configuration:</strong> ${chips}
+            </div>`;
+        }
+        if (orphanedConfig.length > 0) {
+            const chips = orphanedConfig
+                .map(s => `<span class="sync-scene-chip sync-chip-blue">${this.escapeHtml(s)}</span>`)
+                .join(' ');
+            html += `<div class="sync-warning sync-warning-blue">
+                ℹ <strong>${orphanedConfig.length} flame config scene${orphanedConfig.length > 1 ? 's' : ''}
+                not found in the mode service:</strong> ${chips}
+            </div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    /** Return the currently selected scene name (or null). */
+    getSelectedScene() {
+        const select = document.getElementById('trigger-scene-select');
+        return (select && select.value) ? select.value : (this._selectedScene || null);
+    }
+
+    /**
+     * Filter `this._allMappings` to the selected scene and render the table.
+     * Three states:
+     *   1. Scene not in configured_scenes → "not configured" message + Register button
+     *   2. Scene configured but 0 mappings → empty-state with Delete Scene option
+     *   3. Scene configured with mappings  → normal table
+     */
+    _renderMappingsForSelectedScene() {
+        const scene = this.getSelectedScene();
+        const title = document.getElementById('scene-mappings-title');
+        if (title) title.textContent = scene ? `Mappings for "${scene}"` : 'Mappings';
+
+        const container = document.getElementById('trigger-mappings-table');
+
+        if (!scene) {
+            container.innerHTML = '<div class="empty-state">No scenes available.</div>';
+            return;
+        }
+
+        const cfgSet = new Set(this.configuredScenesData || []);
+
+        if (!cfgSet.has(scene)) {
+            // Not configured at all — dispatch is suppressed for this scene
+            container.innerHTML = `
+                <div class="scene-not-configured">
+                    <p>⚠ This scene has <strong>no flame configuration</strong>.</p>
+                    <p>All trigger dispatch is disabled while the flame service has no
+                       configuration for this scene. Click below to register it — you can
+                       add fire mappings later, or leave it as a quiet scene with no effects.</p>
+                    <button class="btn btn-primary"
+                            onclick="flameController.registerCurrentScene()">
+                        Register Scene (Create Empty Config)
+                    </button>
+                </div>`;
+            return;
+        }
+
+        const sceneMappings = (this._allMappings || []).filter(m => m.scene === scene);
+        this.displayTriggerMappings(sceneMappings, scene);
+    }
+
+    /**
+     * Register the currently-selected scene in the flame service (empty config).
+     * Called from the "Register Scene" button in the not-configured state.
+     */
+    async registerCurrentScene() {
+        const scene = this.getSelectedScene();
+        if (!scene) return;
+        try {
+            const fd = new FormData();
+            fd.append('scene_name', scene);
+            const response = await fetch(
+                `${this.baseUrl}/trigger-integration/scenes`, { method: 'POST', body: fd });
+            if (response.ok) {
+                this.showMessage(`Scene "${scene}" registered`, 'success');
+                await this._loadScenesAndMappings();
+            } else {
+                this.showMessage(`Failed to register scene: ${await response.text()}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error: ${error.message}`, 'error');
         }
     }
 
     async loadTriggerStatus() {
         try {
-            const response = await fetch(`${this.baseUrl}/trigger-integration/status`);
+            const response = await this._fetchWithTimeout(
+                `${this.baseUrl}/trigger-integration/status`);
             const status = await response.json();
-            
             const statusBox = document.getElementById('trigger-status-box');
-            const statusClass = status.registered ? 'success' : 'error';
-            statusBox.className = statusClass;
+            statusBox.className = status.registered ? 'success' : 'error';
             statusBox.innerHTML = `
                 <strong>Integration Status:</strong><br>
                 Connected to Trigger Server: <strong>${status.registered ? 'Yes ✓' : 'No ✗'}</strong><br>
-                Trigger Server: ${status.trigger_server_url}<br>
-                Listen Port: ${status.listen_port}<br>
-                Active Mappings: ${status.mapping_count}<br>
+                Trigger Server: ${status.trigger_server_url} &nbsp;|&nbsp;
+                Listen Port: ${status.listen_port} &nbsp;|&nbsp;
+                Active Mappings: ${status.mapping_count} &nbsp;|&nbsp;
                 Available Triggers: ${status.available_triggers_count}
             `;
-        } catch (error) {
+        } catch (_) {
             const statusBox = document.getElementById('trigger-status-box');
             statusBox.className = 'error';
-            statusBox.innerHTML = `<strong>Error:</strong> Cannot connect to trigger integration service`;
+            statusBox.innerHTML = '<strong>Error:</strong> Cannot connect to trigger integration service';
         }
     }
 
     async loadAvailableTriggers() {
         try {
-            const response = await fetch(`${this.baseUrl}/trigger-integration/triggers`);
+            const response = await this._fetchWithTimeout(
+                `${this.baseUrl}/trigger-integration/triggers`);
             const data = await response.json();
             this.availableTriggersData = data.triggers || [];
-            
-            console.log('Loaded triggers:', this.availableTriggersData);
-            
+
             const select = document.getElementById('trigger-name');
             select.innerHTML = '<option value="">Select a trigger...</option>';
-            
+
             this.availableTriggersData.forEach(trigger => {
-                // Extract values from range.values for discrete triggers
                 const values = trigger.range && trigger.range.values ? trigger.range.values : [];
-                console.log(`Trigger: ${trigger.name}, Type: ${trigger.type}, Range:`, trigger.range, 'Values:', values);
-                
                 const option = document.createElement('option');
                 option.value = trigger.name;
-                
-                // Add OFFLINE indicator to text for offline triggers
-                if (trigger.device_status === 'offline') {
-                    option.textContent = `${trigger.name} (${trigger.type}) [OFFLINE]`;
-                } else {
-                    option.textContent = `${trigger.name} (${trigger.type})`;
-                }
-                
-                // Store trigger data for later use
-                option.dataset.triggerType = trigger.type;
+                option.textContent = trigger.device_status === 'offline'
+                    ? `${trigger.name} (${trigger.type}) [OFFLINE]`
+                    : `${trigger.name} (${trigger.type})`;
+                option.dataset.triggerType   = trigger.type;
                 option.dataset.triggerValues = JSON.stringify(values);
-                option.dataset.deviceStatus = trigger.device_status || 'unknown';
+                option.dataset.deviceStatus  = trigger.device_status || 'unknown';
                 select.appendChild(option);
             });
-            
-            // Add change listener to update value field based on trigger type
+
             select.addEventListener('change', () => this.updateTriggerValueField());
         } catch (error) {
             console.error('Error loading triggers:', error);
@@ -1363,19 +1683,16 @@ class FlameController {
 
     async loadAvailableSequencesForTriggers() {
         try {
-            const response = await fetch(`${this.baseUrl}/flame/patterns`);
+            const response = await this._fetchWithTimeout(
+                `${this.baseUrl}/flame/patterns`);
             const patterns = await response.json();
-            
-            // Store patterns for later lookup of display names
             this.availablePatternsData = patterns;
-            
+
             const select = document.getElementById('flame-sequence');
             select.innerHTML = '<option value="">Select a flame sequence...</option>';
-            
             patterns.forEach(pattern => {
                 const option = document.createElement('option');
                 option.value = pattern.name;
-                // Use display_name if available, otherwise use name
                 option.textContent = pattern.display_name || pattern.name;
                 select.appendChild(option);
             });
@@ -1384,107 +1701,83 @@ class FlameController {
         }
     }
 
+    /** Fetch all mappings, cache them, and re-render the current scene's table. */
     async loadTriggerMappings() {
         try {
             const response = await fetch(`${this.baseUrl}/trigger-integration/mappings`);
-            const data = await response.json();
-            const mappings = data.mappings || [];
-            
-            this.displayTriggerMappings(mappings);
+            if (response.ok) {
+                const data = await response.json();
+                this._allMappings = data.mappings || [];
+            }
         } catch (error) {
             console.error('Error loading mappings:', error);
-            document.getElementById('trigger-mappings-table').innerHTML = 
+            document.getElementById('trigger-mappings-table').innerHTML =
                 '<div class="empty-state">Error loading mappings</div>';
-        }
-    }
-
-    displayTriggerMappings(mappings) {
-        const container = document.getElementById('trigger-mappings-table');
-        
-        if (mappings.length === 0) {
-            container.innerHTML = '<div class="empty-state">No mappings configured yet. Create one above!</div>';
             return;
         }
-        
-        let html = '<table>';
-        html += '<thead><tr>';
-        html += '<th>Trigger Name</th>';
-        html += '<th>Trigger Value</th>';
-        html += '<th>Flame Sequence</th>';
-        html += '<th>Modes</th>';
-        html += '<th>Allow Override</th>';
-        html += '<th>Actions</th>';
-        html += '</tr></thead><tbody>';
-        
+        this._renderMappingsForSelectedScene();
+    }
+
+    /**
+     * Render `mappings` (already filtered to one scene) into the table.
+     * No "Modes" column — the scene context is already clear from the selector.
+     */
+    displayTriggerMappings(mappings, scene) {
+        const container = document.getElementById('trigger-mappings-table');
+
+        if (mappings.length === 0) {
+            container.innerHTML = `<div class="empty-state">No mappings configured for
+                "<strong>${this.escapeHtml(scene || '')}</strong>" yet.<br>
+                Click <strong>+ Add Mapping for this Scene</strong> above to create the first one.</div>`;
+            return;
+        }
+
+        let html = '<table><thead><tr>'
+            + '<th>Trigger</th><th>Value</th><th>Flame Sequence</th>'
+            + '<th>Override</th><th>Actions</th>'
+            + '</tr></thead><tbody>';
+
         mappings.forEach(mapping => {
-            // Check if trigger exists and its status
             const trigger = this.availableTriggersData?.find(t => t.name === mapping.trigger_name);
-            let triggerNameDisplay;
-            let triggerStyle = '';
-            
+            let triggerDisplay;
             if (!trigger) {
-                // Trigger not found in available triggers - red text for name only
-                triggerNameDisplay = `${this.escapeHtml(mapping.trigger_name)} [Not Found]`;
-                triggerStyle = 'color: #dc3545;';
+                triggerDisplay = `${this.escapeHtml(mapping.trigger_name)} <em style="color:#dc3545;">[Not Found]</em>`;
             } else if (trigger.device_status === 'offline') {
-                // Trigger exists but is offline - grey text with [Offline] indicator
-                triggerNameDisplay = `${this.escapeHtml(mapping.trigger_name)} [Offline]`;
-                triggerStyle = 'color: #999;';
+                triggerDisplay = `${this.escapeHtml(mapping.trigger_name)} <em style="color:#999;">[Offline]</em>`;
             } else {
-                // Trigger exists and is online
-                triggerNameDisplay = this.escapeHtml(mapping.trigger_name);
+                triggerDisplay = this.escapeHtml(mapping.trigger_name);
             }
-            
-            html += `<tr>`;
-            html += `<td style="${triggerStyle}">${triggerNameDisplay}</td>`;
-            
-            // Format trigger value display based on whether it's a range or single value
+
             let valueDisplay;
             if (mapping.trigger_value_min !== undefined && mapping.trigger_value_max !== undefined) {
-                // Both min and max specified
-                valueDisplay = `${mapping.trigger_value_min} - ${mapping.trigger_value_max}`;
+                valueDisplay = `${mapping.trigger_value_min} – ${mapping.trigger_value_max}`;
             } else if (mapping.trigger_value_min !== undefined) {
-                // Only min specified
                 valueDisplay = `≥ ${mapping.trigger_value_min}`;
             } else if (mapping.trigger_value_max !== undefined) {
-                // Only max specified
                 valueDisplay = `≤ ${mapping.trigger_value_max}`;
             } else if (mapping.trigger_value) {
-                // Single discrete value
                 valueDisplay = this.escapeHtml(mapping.trigger_value);
             } else {
-                // No value specified - any value
                 valueDisplay = '<em>any</em>';
             }
-            
-            html += `<td>${valueDisplay}</td>`;
-            
-            // Look up display name for the flame sequence
-            let sequenceDisplay = this.escapeHtml(mapping.flame_sequence);
+
+            let seqDisplay = this.escapeHtml(mapping.flame_sequence);
             if (this.availablePatternsData) {
-                const pattern = this.availablePatternsData.find(p => p.name === mapping.flame_sequence);
-                if (pattern && pattern.display_name) {
-                    sequenceDisplay = this.escapeHtml(pattern.display_name);
-                }
+                const pat = this.availablePatternsData.find(p => p.name === mapping.flame_sequence);
+                if (pat && pat.display_name) seqDisplay = this.escapeHtml(pat.display_name);
             }
-            
-            html += `<td>${sequenceDisplay}</td>`;
-            
-            // Display modes
-            let modesDisplay = '<em>any</em>';
-            if (mapping.modes && mapping.modes.length > 0) {
-                modesDisplay = mapping.modes.map(m => `<span class="mode-badge">${this.escapeHtml(m)}</span>`).join(' ');
-            }
-            html += `<td>${modesDisplay}</td>`;
-            
-            html += `<td>${mapping.allow_override ? 'Yes' : 'No'}</td>`;
-            html += `<td>`;
-            html += `<button class="btn btn-primary btn-sm" onclick="flameController.editTriggerMapping(${mapping.id})">Edit</button>`;
-            html += `<button class="btn btn-danger btn-sm" onclick="flameController.deleteTriggerMapping(${mapping.id})">Delete</button>`;
-            html += `</td>`;
-            html += '</tr>';
+
+            html += `<tr>`
+                + `<td>${triggerDisplay}</td>`
+                + `<td>${valueDisplay}</td>`
+                + `<td>${seqDisplay}</td>`
+                + `<td>${mapping.allow_override ? 'Yes' : 'No'}</td>`
+                + `<td>`
+                + `<button class="btn btn-primary btn-sm" onclick="flameController.editTriggerMapping(${mapping.id})">Edit</button>`
+                + `<button class="btn btn-danger btn-sm" onclick="flameController.deleteTriggerMapping(${mapping.id})">Delete</button>`
+                + `</td></tr>`;
         });
-        
+
         html += '</tbody></table>';
         container.innerHTML = html;
     }
@@ -1494,17 +1787,18 @@ class FlameController {
         if (form && !form.dataset.initialized) {
             form.dataset.initialized = 'true';
             form.addEventListener('submit', (e) => this.saveTriggerMapping(e));
-            
-            const cancelBtn = document.getElementById('cancel-trigger-btn');
-            if (cancelBtn) {
-                cancelBtn.addEventListener('click', () => this.resetTriggerForm());
-            }
-            
-            // Add reveal button handler
+
+            document.getElementById('cancel-trigger-btn')
+                ?.addEventListener('click', () => this.resetTriggerForm());
+
             const addBtn = document.getElementById('add-trigger-mapping-btn');
             if (addBtn && !addBtn.dataset.initialized) {
                 addBtn.dataset.initialized = 'true';
                 addBtn.addEventListener('click', () => {
+                    const badge = document.getElementById('trigger-form-scene');
+                    if (badge) badge.textContent = this.getSelectedScene() || '—';
+                    document.getElementById('trigger-form-title').textContent = 'Add New Mapping';
+                    document.getElementById('trigger-mapping-id').value = '';
                     document.getElementById('trigger-mapping-form-container').style.display = 'block';
                     document.getElementById('cancel-trigger-btn').style.display = 'inline-block';
                     addBtn.style.display = 'none';
@@ -1515,89 +1809,60 @@ class FlameController {
 
     async saveTriggerMapping(event) {
         event.preventDefault();
-        
-        const mappingId = document.getElementById('trigger-mapping-id').value;
-        const triggerName = document.getElementById('trigger-name').value;
-        const flameSequence = document.getElementById('flame-sequence').value;
+
+        const mappingId    = document.getElementById('trigger-mapping-id').value;
+        const triggerName  = document.getElementById('trigger-name').value;
+        const flameSeq     = document.getElementById('flame-sequence').value;
         const allowOverride = document.getElementById('allow-override').checked;
-        
-        // Determine trigger type
-        const triggerSelect = document.getElementById('trigger-name');
-        const selectedOption = triggerSelect.options[triggerSelect.selectedIndex];
-        const triggerType = selectedOption?.dataset.triggerType;
-        
-        const formData = new FormData();
-        formData.append('trigger_name', triggerName);
-        formData.append('flame_sequence', flameSequence);
-        formData.append('allow_override', allowOverride ? 'true' : 'false');
-        
-        // Collect selected modes
-        const modeCheckboxes = document.querySelectorAll('.mode-checkbox:checked');
-        const selectedModes = Array.from(modeCheckboxes).map(cb => cb.value);
-        if (selectedModes.length > 0) {
-            formData.append('modes', JSON.stringify(selectedModes));
+
+        // Scene is whatever was shown in the form badge when the form was opened
+        const sceneBadge   = document.getElementById('trigger-form-scene');
+        const scene = (sceneBadge && sceneBadge.textContent && sceneBadge.textContent !== '—')
+            ? sceneBadge.textContent
+            : this.getSelectedScene();
+
+        if (!scene) {
+            this.showMessage('No scene selected — please select a scene first', 'error');
+            return;
         }
-        
-        // Handle continuous triggers with min/max range
+
+        const triggerSelect   = document.getElementById('trigger-name');
+        const selectedOption  = triggerSelect.options[triggerSelect.selectedIndex];
+        const triggerType     = selectedOption?.dataset.triggerType;
+
+        const formData = new FormData();
+        formData.append('trigger_name',   triggerName);
+        formData.append('flame_sequence', flameSeq);
+        formData.append('allow_override', allowOverride ? 'true' : 'false');
+        formData.append('scene', scene);
+
         if (triggerType === 'Continuous') {
             const minField = document.getElementById('trigger-value-min');
             const maxField = document.getElementById('trigger-value-max');
-            
-            if (minField && minField.value !== '') {
-                formData.append('trigger_value_min', minField.value);
-            }
-            if (maxField && maxField.value !== '') {
-                formData.append('trigger_value_max', maxField.value);
-            }
-            
-            console.log('Saving continuous trigger mapping:', { 
-                mappingId, triggerName, 
-                min: minField?.value, max: maxField?.value,
-                flameSequence, allowOverride 
-            });
+            if (minField && minField.value !== '') formData.append('trigger_value_min', minField.value);
+            if (maxField && maxField.value !== '') formData.append('trigger_value_max', maxField.value);
         } else {
-            // Handle discrete triggers with single value
-            const triggerValue = document.getElementById('trigger-value')?.value || '';
-            formData.append('trigger_value', triggerValue);
-            
-            console.log('Saving discrete trigger mapping:', { 
-                mappingId, triggerName, triggerValue, flameSequence, allowOverride 
-            });
+            formData.append('trigger_value', document.getElementById('trigger-value')?.value || '');
         }
-        
+
         try {
-            let url, method;
-            if (mappingId) {
-                url = `${this.baseUrl}/trigger-integration/mappings/${mappingId}`;
-                method = 'PUT';
-            } else {
-                url = `${this.baseUrl}/trigger-integration/mappings`;
-                method = 'POST';
-            }
-            
-            console.log('Request:', method, url);
-            
-            const response = await fetch(url, {
-                method: method,
-                body: formData
-            });
-            
-            console.log('Response status:', response.status);
-            
+            const url    = mappingId
+                ? `${this.baseUrl}/trigger-integration/mappings/${mappingId}`
+                : `${this.baseUrl}/trigger-integration/mappings`;
+            const method = mappingId ? 'PUT' : 'POST';
+
+            const response = await fetch(url, { method, body: formData });
             if (response.ok) {
-                const responseText = await response.text();
-                console.log('Response:', responseText);
                 this.showMessage(mappingId ? 'Mapping updated!' : 'Mapping created!', 'success');
                 this.resetTriggerForm();
-                this.loadTriggerMappings();
-                this.loadTriggerStatus();
+                // Re-fetch both configured_scenes AND mappings so the "not configured"
+                // block disappears immediately after the first mapping is saved.
+                await this._loadScenesAndMappings();
+                await this.loadTriggerStatus();
             } else {
-                const errorText = await response.text();
-                console.error('Error response:', errorText);
-                this.showMessage(`Error: ${errorText}`, 'error');
+                this.showMessage(`Error: ${await response.text()}`, 'error');
             }
         } catch (error) {
-            console.error('Exception:', error);
             this.showMessage(`Error: ${error.message}`, 'error');
         }
     }
@@ -1605,52 +1870,39 @@ class FlameController {
     async editTriggerMapping(id) {
         try {
             const response = await fetch(`${this.baseUrl}/trigger-integration/mappings/${id}`);
-            const mapping = await response.json();
-            
-            // Show the form and hide the button
+            const mapping  = await response.json();
+
             document.getElementById('trigger-mapping-form-container').style.display = 'block';
             document.getElementById('add-trigger-mapping-btn').style.display = 'none';
-            
             document.getElementById('trigger-form-title').textContent = 'Edit Mapping';
             document.getElementById('trigger-mapping-id').value = mapping.id;
+
+            // Scene badge — use mapping.scene or current scene
+            const scene = mapping.scene || this.getSelectedScene();
+            const badge = document.getElementById('trigger-form-scene');
+            if (badge) badge.textContent = scene || '—';
+
             document.getElementById('trigger-name').value = mapping.trigger_name;
-            
-            // Trigger the field update to show proper fields for this trigger type
             this.updateTriggerValueField();
-            
-            // Populate values based on trigger type
-            const triggerSelect = document.getElementById('trigger-name');
-            const selectedOption = triggerSelect.options[triggerSelect.selectedIndex];
-            const triggerType = selectedOption?.dataset.triggerType;
-            
-            if (triggerType === 'Continuous') {
-                // Set min/max values for continuous triggers
-                const minField = document.getElementById('trigger-value-min');
-                const maxField = document.getElementById('trigger-value-max');
-                if (minField) minField.value = mapping.trigger_value_min || '';
-                if (maxField) maxField.value = mapping.trigger_value_max || '';
+
+            const trigType = document.getElementById('trigger-name')
+                .options[document.getElementById('trigger-name').selectedIndex]
+                ?.dataset.triggerType;
+
+            if (trigType === 'Continuous') {
+                const minF = document.getElementById('trigger-value-min');
+                const maxF = document.getElementById('trigger-value-max');
+                if (minF) minF.value = mapping.trigger_value_min || '';
+                if (maxF) maxF.value = mapping.trigger_value_max || '';
             } else {
-                // Set single value for discrete triggers
-                const valueField = document.getElementById('trigger-value');
-                if (valueField) valueField.value = mapping.trigger_value || '';
+                const vf = document.getElementById('trigger-value');
+                if (vf) vf.value = mapping.trigger_value || '';
             }
-            
+
             document.getElementById('flame-sequence').value = mapping.flame_sequence;
             document.getElementById('allow-override').checked = mapping.allow_override;
-            
-            // Set mode checkboxes
-            document.querySelectorAll('.mode-checkbox').forEach(cb => cb.checked = false);
-            if (mapping.modes && mapping.modes.length > 0) {
-                mapping.modes.forEach(mode => {
-                    const checkbox = document.querySelector(`.mode-checkbox[value="${mode}"]`);
-                    if (checkbox) checkbox.checked = true;
-                });
-            }
-            
             document.getElementById('cancel-trigger-btn').style.display = 'inline-block';
             document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Update Mapping';
-            
-            // Scroll to form
             document.getElementById('trigger-form-title').scrollIntoView({ behavior: 'smooth' });
         } catch (error) {
             this.showMessage(`Error loading mapping: ${error.message}`, 'error');
@@ -1658,19 +1910,14 @@ class FlameController {
     }
 
     async deleteTriggerMapping(id) {
-        if (!confirm('Are you sure you want to delete this mapping?')) {
-            return;
-        }
-        
+        if (!confirm('Are you sure you want to delete this mapping?')) return;
         try {
-            const response = await fetch(`${this.baseUrl}/trigger-integration/mappings/${id}`, {
-                method: 'DELETE'
-            });
-            
+            const response = await fetch(
+                `${this.baseUrl}/trigger-integration/mappings/${id}`, { method: 'DELETE' });
             if (response.ok) {
                 this.showMessage('Mapping deleted', 'success');
-                this.loadTriggerMappings();
-                this.loadTriggerStatus();
+                await this.loadTriggerMappings();
+                await this.loadTriggerStatus();
             } else {
                 this.showMessage('Error deleting mapping', 'error');
             }
@@ -1680,38 +1927,24 @@ class FlameController {
     }
 
     updateTriggerValueField() {
-        const triggerSelect = document.getElementById('trigger-name');
+        const triggerSelect  = document.getElementById('trigger-name');
         const selectedOption = triggerSelect.options[triggerSelect.selectedIndex];
-        
-        if (!selectedOption || !selectedOption.value) {
-            return;
-        }
-        
-        const triggerType = selectedOption.dataset.triggerType;
+        if (!selectedOption || !selectedOption.value) return;
+
+        const triggerType   = selectedOption.dataset.triggerType;
         const triggerValues = JSON.parse(selectedOption.dataset.triggerValues || '[]');
-        
-        // Get the full trigger data to access range info
-        const triggerName = selectedOption.value;
-        const trigger = this.availableTriggersData.find(t => t.name === triggerName);
-        
+        const trigger       = this.availableTriggersData.find(t => t.name === selectedOption.value);
+
         const valueContainer = document.getElementById('trigger-value').parentElement;
-        const label = valueContainer.querySelector('label');
-        
-        // Replace the input with appropriate field based on trigger type
+        const label          = valueContainer.querySelector('label');
+
         if (triggerType === 'Continuous') {
-            // For continuous triggers, show min/max range fields
             const currentMin = document.getElementById('trigger-value-min')?.value || '';
             const currentMax = document.getElementById('trigger-value-max')?.value || '';
-            
-            let helpText = 'Specify min and/or max to define a range. Leave both empty to trigger on any value.';
-            if (trigger && trigger.range) {
-                const min = trigger.range.min;
-                const max = trigger.range.max;
-                if (min !== undefined && max !== undefined) {
-                    helpText = `Valid range: ${min} to ${max}. Specify min and/or max for your trigger range.`;
-                }
+            let helpText = 'Specify min and/or max to define a range.';
+            if (trigger?.range?.min !== undefined && trigger?.range?.max !== undefined) {
+                helpText = `Valid range: ${trigger.range.min} to ${trigger.range.max}. Specify min and/or max.`;
             }
-            
             valueContainer.innerHTML = '';
             label.textContent = 'Trigger Value Range';
             valueContainer.appendChild(label);
@@ -1728,89 +1961,55 @@ class FlameController {
                 </div>
                 <div class="help-text">${helpText}</div>
             `);
-            
-            // Hide the old trigger-value field if it exists
             const oldField = document.getElementById('trigger-value');
-            if (oldField) {
-                oldField.style.display = 'none';
-            }
-            
-        } else if (triggerType === 'On/Off' || (triggerValues && triggerValues.length > 0)) {
-            // Create dropdown for discrete triggers
+            if (oldField) oldField.style.display = 'none';
+
+        } else if (triggerType === 'On/Off' || triggerValues.length > 0) {
             const currentValue = document.getElementById('trigger-value')?.value || '';
-            
-            let selectHtml = '<select id="trigger-value" class="form-control">';
-            selectHtml += '<option value="">Any value</option>';
-            
+            let selectHtml = '<select id="trigger-value" class="form-control"><option value="">Any value</option>';
             if (triggerType === 'On/Off') {
-                selectHtml += '<option value="On">On</option>';
-                selectHtml += '<option value="Off">Off</option>';
+                selectHtml += '<option value="On">On</option><option value="Off">Off</option>';
             } else {
-                triggerValues.forEach(val => {
-                    selectHtml += `<option value="${this.escapeHtml(val)}">${this.escapeHtml(val)}</option>`;
+                triggerValues.forEach(v => {
+                    selectHtml += `<option value="${this.escapeHtml(v)}">${this.escapeHtml(v)}</option>`;
                 });
             }
-            
             selectHtml += '</select>';
-            
             valueContainer.innerHTML = '';
             label.textContent = 'Trigger Value (optional)';
             valueContainer.appendChild(label);
             valueContainer.insertAdjacentHTML('beforeend', selectHtml);
-            valueContainer.insertAdjacentHTML('beforeend', 
+            valueContainer.insertAdjacentHTML('beforeend',
                 '<div class="help-text">Leave empty to trigger on any value</div>');
-            
-            // Set the current value if it exists
-            if (currentValue) {
-                document.getElementById('trigger-value').value = currentValue;
-            }
+            if (currentValue) document.getElementById('trigger-value').value = currentValue;
+
         } else {
-            // Text input for other discrete triggers
             const currentValue = document.getElementById('trigger-value')?.value || '';
-            
             let helpText = 'Leave empty to trigger on any value';
-            if (trigger && trigger.range) {
-                const min = trigger.range.min;
-                const max = trigger.range.max;
-                if (min !== undefined && max !== undefined) {
-                    helpText = `Valid range: ${min} to ${max}. Leave empty for any value.`;
-                }
+            if (trigger?.range?.min !== undefined && trigger?.range?.max !== undefined) {
+                helpText = `Valid range: ${trigger.range.min} to ${trigger.range.max}. Leave empty for any value.`;
             }
-            
             valueContainer.innerHTML = '';
             label.textContent = 'Trigger Value (optional)';
             valueContainer.appendChild(label);
-            valueContainer.insertAdjacentHTML('beforeend', 
-                '<input type="text" id="trigger-value" placeholder="e.g., 0.5" value="' + currentValue + '">');
-            valueContainer.insertAdjacentHTML('beforeend', 
+            valueContainer.insertAdjacentHTML('beforeend',
+                `<input type="text" id="trigger-value" placeholder="e.g., 0.5" value="${currentValue}">`);
+            valueContainer.insertAdjacentHTML('beforeend',
                 `<div class="help-text">${helpText}</div>`);
         }
     }
 
     async refreshMappings() {
-        const refreshBtn = document.getElementById('refresh-mappings-btn');
-        const originalText = refreshBtn.textContent;
-        const originalBg = refreshBtn.style.backgroundColor;
-        
-        // Disable button and show loading state
-        refreshBtn.disabled = true;
-        refreshBtn.textContent = '⟳ Refreshing...';
-        refreshBtn.style.backgroundColor = '#6c757d';
-        refreshBtn.style.cursor = 'not-allowed';
-        
-        // Reload trigger data and mappings
+        const btn = document.getElementById('refresh-mappings-btn');
+        const orig = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = '⟳ Refreshing...'; }
         await this.loadAvailableTriggers();
         await this.loadTriggerMappings();
         await this.loadTriggerStatus();
-        
-        // Re-enable button after a brief delay
         setTimeout(() => {
-            refreshBtn.disabled = false;
-            refreshBtn.textContent = originalText;
-            refreshBtn.style.backgroundColor = originalBg || '';
-            refreshBtn.style.cursor = 'pointer';
-            this.showMessage('Trigger mappings refreshed successfully', 'success');
-        }, 500);
+            if (btn) { btn.disabled = false; btn.textContent = orig; }
+            this.showMessage('Trigger mappings refreshed', 'success');
+        }, 400);
     }
 
     resetTriggerForm() {
@@ -1818,46 +2017,82 @@ class FlameController {
         document.getElementById('trigger-form-title').textContent = 'Add New Mapping';
         document.getElementById('trigger-mapping-id').value = '';
         document.getElementById('cancel-trigger-btn').style.display = 'none';
-        document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Add Mapping';
-        
-        // Reset trigger value field to text input
-        // Need to handle both continuous (min/max fields) and discrete (single value field) triggers
+        document.querySelector('#triggerMappingForm button[type="submit"]').textContent = 'Save Mapping';
+
+        const badge = document.getElementById('trigger-form-scene');
+        if (badge) badge.textContent = this.getSelectedScene() || '—';
+
+        // Restore trigger-value field to a plain text input
         const valueField = document.getElementById('trigger-value');
-        const minField = document.getElementById('trigger-value-min');
-        const maxField = document.getElementById('trigger-value-max');
-        
-        let valueContainer;
-        if (valueField) {
-            valueContainer = valueField.parentElement;
-        } else if (minField) {
-            valueContainer = minField.closest('.form-group');
-        } else if (maxField) {
-            valueContainer = maxField.closest('.form-group');
-        }
-        
+        const minField   = document.getElementById('trigger-value-min');
+        const maxField   = document.getElementById('trigger-value-max');
+        let valueContainer = valueField?.parentElement
+            ?? minField?.closest('.form-group')
+            ?? maxField?.closest('.form-group');
         if (valueContainer) {
             const label = valueContainer.querySelector('label');
-            
             valueContainer.innerHTML = '';
-            if (label) {
-                label.textContent = 'Trigger Value (optional)';
-                valueContainer.appendChild(label);
-            } else {
-                valueContainer.insertAdjacentHTML('beforeend', '<label for="trigger-value">Trigger Value (optional)</label>');
-            }
-            valueContainer.insertAdjacentHTML('beforeend', 
+            if (label) { label.textContent = 'Trigger Value (optional)'; valueContainer.appendChild(label); }
+            else valueContainer.insertAdjacentHTML('beforeend', '<label for="trigger-value">Trigger Value (optional)</label>');
+            valueContainer.insertAdjacentHTML('beforeend',
                 '<input type="text" id="trigger-value" placeholder="e.g., On, Off, 5">');
             valueContainer.insertAdjacentHTML('beforeend',
                 '<div class="help-text">Leave empty to trigger on any value</div>');
         }
-        
-        // Uncheck all mode checkboxes
-        document.querySelectorAll('.mode-checkbox').forEach(cb => cb.checked = false);
-        
-        // Hide form and show button again
+
         document.getElementById('trigger-mapping-form-container').style.display = 'none';
         document.getElementById('add-trigger-mapping-btn').style.display = 'block';
     }
+
+    /**
+     * Duplicate all mappings for the currently selected scene to a new scene name.
+     * Prompts the user for the target name via window.prompt.
+     */
+    async duplicateScene() {
+        const fromScene = this.getSelectedScene();
+        if (!fromScene) { this.showMessage('Select a scene to duplicate', 'error'); return; }
+
+        const raw = window.prompt(`Duplicate all mappings from "${fromScene}" to a new scene name:`, '');
+        if (!raw || !raw.trim()) return;
+        const toScene = raw.trim();
+        if (toScene === fromScene) {
+            this.showMessage('New scene name must differ from the source', 'error');
+            return;
+        }
+
+        const btn  = document.getElementById('duplicate-scene-btn');
+        const orig = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ Duplicating…'; }
+
+        try {
+            const fd = new FormData();
+            fd.append('from_scene', fromScene);
+            fd.append('to_scene',   toScene);
+            const response = await fetch(
+                `${this.baseUrl}/trigger-integration/mappings/copy-scene`,
+                { method: 'POST', body: fd }
+            );
+            if (response.ok) {
+                const data = await response.json();
+                if (data.copied_count > 0) {
+                    this.showMessage(
+                        `Duplicated ${data.copied_count} mapping${data.copied_count !== 1 ? 's' : ''} to "${toScene}"`,
+                        'success');
+                    this._selectedScene = toScene;       // switch to the new scene
+                    await this._loadScenesAndMappings();
+                } else {
+                    this.showMessage(`No mappings found for "${fromScene}" — nothing to duplicate.`, 'info');
+                }
+            } else {
+                this.showMessage(`Duplicate failed: ${await response.text()}`, 'error');
+            }
+        } catch (error) {
+            this.showMessage(`Error: ${error.message}`, 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = orig; }
+        }
+    }
+
 
     escapeHtml(text) {
         const div = document.createElement('div');

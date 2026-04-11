@@ -40,8 +40,23 @@ def serve_forever(httpPort=PORT):
 
 @app.route("/")
 def index():
-    """Serve the flame control web UI."""
-    return app.send_static_file('index.html')
+    """Serve the flame control web UI (always fresh — no browser caching)."""
+    resp = app.send_static_file('index.html')
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    resp.headers['Pragma']        = 'no-cache'
+    resp.headers['Expires']       = '0'
+    return resp
+
+
+@app.after_request
+def _disable_static_cache(response):
+    """Prevent the browser from caching JS/CSS static assets."""
+    if request.path.startswith('/') and any(
+            request.path.endswith(ext) for ext in ('.js', '.css')):
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma']        = 'no-cache'
+        response.headers['Expires']       = '0'
+    return response
 
 
 @app.route("/flame", methods=['GET', 'POST'])
@@ -366,12 +381,23 @@ def trigger_integration_triggers():
 
 @app.route("/trigger-integration/modes", methods=['GET'])
 def trigger_integration_modes():
-    '''GET /trigger-integration/modes: Get available modes from mode service'''
+    '''GET /trigger-integration/modes: Get available modes from mode service.
+
+    Response JSON:
+      { "modes": [...],              -- scene names from the mode service
+        "active_mode": "...",        -- currently active scene
+        "configured_scenes": [...] } -- scenes registered in the flames config
+    '''
     integration = trigger_integration.get_integration()
     if integration:
-        modes = integration.get_available_modes()
-        active_mode = integration.get_active_mode()
-        return JSONResponse(json.dumps({'modes': modes, 'active_mode': active_mode}))
+        modes             = integration.get_available_modes()
+        active_mode       = integration.get_active_mode()
+        configured_scenes = integration.get_configured_scenes()
+        return JSONResponse(json.dumps({
+            'modes':             modes,
+            'active_mode':       active_mode,
+            'configured_scenes': configured_scenes,
+        }))
     else:
         return CORSResponse("Trigger integration not initialized", 503)
 
@@ -384,6 +410,89 @@ def trigger_integration_active_mode():
         return JSONResponse(json.dumps({'active_mode': active_mode}))
     else:
         return CORSResponse("Trigger integration not initialized", 503)
+
+
+@app.route("/api/refresh-mode", methods=['POST'])
+def refresh_mode():
+    '''POST /api/refresh-mode: Force an immediate re-fetch of the active
+    scene/mode from the mode service and return the result.
+
+    Response JSON:
+      { "active_mode": "<name>"|null, "refreshed": true|false }
+
+    "refreshed" is true when the mode service responded with HTTP 200,
+    false when it was unreachable (active_mode then reflects the last
+    known cached value, which may still be "Unknown" at boot).
+    '''
+    integration = trigger_integration.get_integration()
+    if not integration:
+        return CORSResponse("Trigger integration not initialized", 503)
+
+    ok, active_mode = integration.refresh_active_mode()
+    return JSONResponse(json.dumps({
+        'active_mode': active_mode,
+        'refreshed': ok,
+    }))
+
+@app.route("/trigger-integration/scenes", methods=['POST'])
+def trigger_integration_scenes_create():
+    '''POST /trigger-integration/scenes: Register a scene (create an empty config).
+
+    Form param:  scene_name  – name of the scene to register
+    '''
+    scene_name = request.values.get('scene_name', '').strip()
+    if not scene_name:
+        return CORSResponse("'scene_name' is required", 400)
+    integration = trigger_integration.get_integration()
+    if not integration:
+        return CORSResponse("Trigger integration not initialized", 503)
+    integration.register_scene(scene_name)
+    return JSONResponse(json.dumps({'scene_name': scene_name, 'registered': True}), 201)
+
+
+@app.route("/trigger-integration/scenes/<scene_name>", methods=['DELETE'])
+def trigger_integration_scenes_delete(scene_name):
+    '''DELETE /trigger-integration/scenes/<name>: Delete a scene and all its mappings.'''
+    integration = trigger_integration.get_integration()
+    if not integration:
+        return CORSResponse("Trigger integration not initialized", 503)
+    if integration.delete_scene(scene_name):
+        return CORSResponse("Scene deleted", 200)
+    return CORSResponse("Scene not found", 404)
+
+
+@app.route("/trigger-integration/mappings/copy-scene", methods=['POST'])
+def copy_scene_mappings():
+    '''POST /trigger-integration/mappings/copy-scene
+    Form params:
+      from_scene  – name of the source scene to copy from
+      to_scene    – name of the target scene to copy to
+
+    Duplicates all trigger mappings from from_scene into to_scene.
+    The new scene is registered (even if from_scene is empty / quiet).
+
+    Response JSON: {"from_scene": "...", "to_scene": "...", "copied_count": N}
+    '''
+    from_scene = request.values.get('from_scene', '').strip()
+    to_scene   = request.values.get('to_scene',   '').strip()
+    if not from_scene:
+        return CORSResponse("'from_scene' is required", 400)
+    if not to_scene:
+        return CORSResponse("'to_scene' is required", 400)
+    if from_scene == to_scene:
+        return CORSResponse("'from_scene' and 'to_scene' must differ", 400)
+
+    integration = trigger_integration.get_integration()
+    if not integration:
+        return CORSResponse("Trigger integration not initialized", 503)
+
+    copied = integration.copy_scene_mappings(from_scene, to_scene)
+    return JSONResponse(json.dumps({
+        'from_scene': from_scene,
+        'to_scene': to_scene,
+        'copied_count': copied,
+    }))
+
 
 @app.route("/trigger-integration/mappings", methods=['GET', 'POST'])
 def trigger_integration_mappings():
@@ -412,30 +521,21 @@ def trigger_integration_mappings():
         trigger_value_min = request.values.get("trigger_value_min", None)
         trigger_value_max = request.values.get("trigger_value_max", None)
         
-        # Handle modes (comma-separated list or JSON array)
-        modes = None
-        if "modes" in request.values:
-            modes_str = request.values.get("modes", "")
-            if modes_str:
-                try:
-                    # Try to parse as JSON array first
-                    modes = json.loads(modes_str)
-                except:
-                    # Fall back to comma-separated string
-                    modes = [m.strip() for m in modes_str.split(',') if m.strip()]
-            else:
-                modes = []
-        
+        # The scene this mapping belongs to (required in the new data model)
+        scene = request.values.get('scene', '').strip()
+        if not scene:
+            return CORSResponse("'scene' is required", 400)
+
         mapping = integration.add_mapping(
-            trigger_name, 
-            trigger_value, 
-            flame_sequence, 
+            scene,
+            trigger_name,
+            trigger_value,
+            flame_sequence,
             allow_override,
             trigger_value_min,
             trigger_value_max,
-            modes
         )
-        return JSONResponse(json.dumps({'message': 'Mapping created', 'mapping': mapping}))
+        return JSONResponse(json.dumps({'message': 'Mapping created', 'mapping': mapping}), 201)
 
 @app.route("/trigger-integration/mappings/<int:mapping_id>", methods=['GET', 'PUT', 'DELETE'])
 def trigger_integration_mapping(mapping_id):
@@ -464,33 +564,29 @@ def trigger_integration_mapping(mapping_id):
         # Handle range values for continuous triggers
         trigger_value_min = request.values.get("trigger_value_min", None)
         trigger_value_max = request.values.get("trigger_value_max", None)
-        
-        # Handle modes (comma-separated list or JSON array)
-        modes = None
-        if "modes" in request.values:
-            modes_str = request.values.get("modes", "")
-            if modes_str:
-                try:
-                    # Try to parse as JSON array first
-                    modes = json.loads(modes_str)
-                except:
-                    # Fall back to comma-separated string
-                    modes = [m.strip() for m in modes_str.split(',') if m.strip()]
-            else:
-                modes = []
-        
-        if integration.update_mapping(mapping_id, trigger_name, trigger_value, 
-                                      flame_sequence, allow_override,
-                                      trigger_value_min, trigger_value_max, modes):
+
+        # Optional scene move (moving a mapping to a different scene)
+        scene = request.values.get("scene", None)
+        if scene is not None:
+            scene = scene.strip() or None
+
+        if integration.update_mapping(
+                mapping_id,
+                scene=scene,
+                trigger_name=trigger_name,
+                trigger_value=trigger_value,
+                flame_sequence=flame_sequence,
+                allow_override=allow_override,
+                trigger_value_min=trigger_value_min,
+                trigger_value_max=trigger_value_max):
             return CORSResponse("Mapping updated", 200)
         else:
             return CORSResponse("Mapping not found", 404)
-    
+
     else:  # GET
-        mappings = integration.get_mappings()
-        for mapping in mappings:
-            if mapping['id'] == mapping_id:
-                return JSONResponse(json.dumps(mapping))
+        mapping = integration.get_mapping(mapping_id)
+        if mapping:
+            return JSONResponse(json.dumps(mapping))
         return CORSResponse("Mapping not found", 404)
 
 def shutdown():
