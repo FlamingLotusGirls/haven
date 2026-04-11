@@ -36,39 +36,84 @@ config = {
     'osc_aliases': [],      # list of {id, alias, osc_address, osc_args, description}
     'gateway_url': GATEWAY_URL,
     'mode_service_url': MODE_SERVICE_URL,
-    'service_port': 5100
+    'service_port': 5100,
+    # Per-scene configuration.  Each key is a scene name; value has:
+    #   on_enter  – OSC sequence steps to fire when this scene becomes active
+    #   description – human-readable note
+    # 'Unknown' is the built-in fallback used when the mode service is unreachable.
+    'scenes': {
+        'Unknown': {
+            'on_enter': [],
+            'description': 'Fallback scene — active when mode service is unreachable'
+        }
+    }
 }
 
-# ── Mode tracking ──────────────────────────────────────────────────────────────
-# Cached active mode, updated every ~10 s by the mode-poll thread.
-# Empty string means "no active mode".
-_active_mode = ''
+# ── Mode / Scene tracking ───────────────────────────────────────────────────
+# Cached active mode, updated by the mode-poll thread and by scene_change triggers.
+# Starts as 'Unknown' — the local fallback used when mode service is unreachable.
+_active_mode = 'Unknown'
 _active_mode_lock = threading.Lock()
 
 
 def get_current_mode():
-    """Return the cached active mode name ('' if none)."""
+    """Return the cached active mode name ('Unknown' if unreachable)."""
     with _active_mode_lock:
         return _active_mode
 
 
-def _poll_mode_service():
-    """Background thread: poll the mode service every 10 s and cache the result."""
+def _set_active_mode(name, fire_on_enter=True):
+    """Update the cached active mode; fire on_enter sequence if it changed.
+
+    Returns True if the mode actually changed.
+    Thread-safe — may be called from both the poll thread and the trigger thread.
+    """
     global _active_mode
+    with _active_mode_lock:
+        old = _active_mode
+        changed = (name != old)
+        if changed:
+            print(f"[mode] active scene: '{old}' → '{name}'")
+            _active_mode = name
+    if fire_on_enter and changed:
+        threading.Thread(target=_apply_scene_on_enter, args=(name,),
+                         daemon=True, name=f'scene-enter-{name}').start()
+    return changed
+
+
+def _apply_scene_on_enter(scene_name):
+    """Fire the on_enter OSC sequence for the given scene (if any steps are configured)."""
+    with config_lock:
+        scenes = config.get('scenes', {})
+        scene_cfg = scenes.get(scene_name) or scenes.get('Unknown', {})
+        steps = scene_cfg.get('on_enter', [])
+    if not steps:
+        print(f"[scene] No on_enter sequence configured for scene '{scene_name}'")
+        return
+    print(f"[scene] Firing on_enter for scene '{scene_name}' ({len(steps)} steps)")
+    _run_sequence(f'__scene_enter_{scene_name}', steps, scene_name)
+
+
+def _poll_mode_service():
+    """Background thread: poll mode service every 1 s until known, then every 10 s.
+
+    Falls back to the 'Unknown' scene whenever the mode service is unreachable.
+    """
+    mode_known = False
     while True:
         try:
             url = config.get('mode_service_url', MODE_SERVICE_URL)
             r = requests.get(f"{url}/api/modes/active", timeout=4)
             if r.status_code == 200:
-                new_mode = r.json().get('active_mode') or ''
-                with _active_mode_lock:
-                    if new_mode != _active_mode:
-                        print(f"[mode] active mode changed: '{_active_mode}' → '{new_mode}'")
-                        _active_mode = new_mode
+                new_mode = r.json().get('active_mode') or 'Unknown'
+                _set_active_mode(new_mode)
+                mode_known = True
+            else:
+                mode_known = False
         except Exception as e:
-            # Mode service may not be running — silently keep the last known mode
             print(f"[mode] could not reach mode service: {e}")
-        time.sleep(10)
+            mode_known = False
+        time.sleep(10 if mode_known else 1)
 
 # Track active sequences per trigger_name.
 # Value is the count of mapping-sequence threads currently running for that trigger.
@@ -246,7 +291,11 @@ def parse_osc_value(value_str, trigger_value):
 
 def send_osc_message(osc_address, osc_args, trigger_value=None):
     """Send an OSC message."""
-    if not osc_client_instance:
+    # Snapshot the reference once.  init_osc_client() (called under config_lock)
+    # can replace osc_client_instance at any time; using a local avoids a
+    # check-then-use race where the global becomes None between the guard and the call.
+    client = osc_client_instance
+    if not client:
         print("OSC client not initialized")
         return False
     
@@ -259,9 +308,9 @@ def send_osc_message(osc_address, osc_args, trigger_value=None):
         
         # Send OSC message
         if parsed_args:
-            osc_client_instance.send_message(osc_address, parsed_args)
+            client.send_message(osc_address, parsed_args)
         else:
-            osc_client_instance.send_message(osc_address, None)
+            client.send_message(osc_address, None)
         
         print(f"Sent OSC: {osc_address} {parsed_args}")
         return True
@@ -318,6 +367,13 @@ def process_trigger_event(trigger_event):
 
     print(f"Processing trigger event: {trigger_name} = {trigger_value}")
 
+    # ── Scene change: update active scene and fire on_enter ──────────────────
+    if trigger_name == 'SceneChange':
+        new_scene = str(trigger_value) if trigger_value is not None else 'Unknown'
+        _set_active_mode(new_scene, fire_on_enter=True)
+        return   # scene_change is not a normal trigger mapping
+    # ─────────────────────────────────────────────────────────────────────────
+
     # ── Busy-check ────────────────────────────────────────────────────────────
     # If any sequence for this trigger is still running, suppress the new event.
     with _active_sequences_lock:
@@ -331,7 +387,7 @@ def process_trigger_event(trigger_event):
     with config_lock:
         current_mappings = list(config['mappings'])
 
-    # Collect all matching, enabled, mode-allowed mappings with their resolved steps
+    # Collect all matching, enabled, scene-allowed mappings with their resolved steps
     to_fire = []
     for mapping in current_mappings:
         if mapping.get('trigger_name') != trigger_name:
@@ -339,12 +395,22 @@ def process_trigger_event(trigger_event):
         if not mapping.get('enabled', True):
             continue
 
-        # ── Mode gate ─────────────────────────────────────────────────────────
-        allowed_modes = mapping.get('modes', [])
-        if allowed_modes and active_mode not in allowed_modes:
-            print(f"[mode] skipping mapping {mapping.get('id')} "
-                  f"(active='{active_mode}', allowed={allowed_modes})")
-            continue
+        # ── Scene gate (new single-scene model) ───────────────────────────────
+        # New mappings carry a 'scene' string.  Legacy mappings carry a 'modes' list.
+        # Empty/absent scene means "fire in every scene".
+        mapping_scene = mapping.get('scene', '') or ''
+        if mapping_scene:
+            if mapping_scene != active_mode:
+                print(f"[mode] skipping mapping {mapping.get('id')} "
+                      f"(active='{active_mode}', mapping_scene='{mapping_scene}')")
+                continue
+        else:
+            # Legacy fallback: check old 'modes' list
+            allowed_modes = mapping.get('modes', [])
+            if allowed_modes and active_mode not in allowed_modes:
+                print(f"[mode] skipping mapping {mapping.get('id')} "
+                      f"(active='{active_mode}', allowed={allowed_modes})")
+                continue
         # ──────────────────────────────────────────────────────────────────────
 
         steps = get_mapping_steps(mapping)
@@ -482,7 +548,11 @@ def index():
 @app.route('/api/config', methods=['GET'])
 def get_config():
     """Get current configuration."""
-    return jsonify(config)
+    # Serialise under config_lock so concurrent write operations (append,
+    # in-place update) cannot produce a torn JSON view.
+    with config_lock:
+        snapshot = json.dumps(config)
+    return app.response_class(snapshot, mimetype='application/json')
 
 
 @app.route('/api/config/osc-client', methods=['PUT'])
@@ -523,13 +593,25 @@ def get_triggers():
 
 @app.route('/api/mappings', methods=['GET'])
 def get_mappings():
-    """Get all trigger-to-OSC mappings."""
-    return jsonify({'mappings': config['mappings']})
+    """Get all trigger-to-OSC mappings.
+
+    Optional query param: ?scene=<name>  — return only mappings for that scene.
+    """
+    scene_filter = request.args.get('scene', '').strip()
+    with config_lock:
+        mappings = list(config['mappings'])   # shallow copy keeps list stable
+    if scene_filter:
+        mappings = [m for m in mappings if m.get('scene', '') == scene_filter]
+    return jsonify({'mappings': mappings})
 
 
 @app.route('/api/mappings', methods=['POST'])
 def add_mapping():
-    """Add a new trigger-to-OSC mapping."""
+    """Add a new trigger-to-OSC mapping.
+
+    Required body fields: trigger_name, scene (single scene name or '' for all scenes),
+    and either osc_address or sequence.
+    """
     mapping = request.get_json()
 
     # Validate required fields
@@ -548,9 +630,25 @@ def add_mapping():
     if has_address and not isinstance(mapping.get('osc_args'), list):
         return jsonify({'error': 'osc_args must be an array'}), 400
 
+    # Normalise scene field — new model uses single 'scene' string.
+    # Accept 'scene' (new) or 'modes' list (legacy).  If both, prefer 'scene'.
+    if 'scene' not in mapping:
+        legacy_modes = mapping.get('modes', [])
+        mapping['scene'] = legacy_modes[0] if len(legacy_modes) == 1 else ''
+    # Remove legacy modes list from new mappings to keep storage clean.
+    mapping.pop('modes', None)
+
     # Add metadata
     mapping['enabled'] = mapping.get('enabled', True)
     mapping['created_at'] = datetime.now().isoformat()
+
+    # Auto-register the scene entry if it doesn't exist yet
+    scene = mapping.get('scene', '')
+    if scene:
+        with config_lock:
+            scenes = config.setdefault('scenes', {})
+            if scene not in scenes:
+                scenes[scene] = {'on_enter': [], 'description': ''}
     
     with config_lock:
         # Assign ID atomically — two concurrent POSTs would otherwise compute
@@ -588,6 +686,12 @@ def update_mapping(mapping_id):
         updated_mapping['osc_args'] = []
     if has_address and not isinstance(updated_mapping.get('osc_args'), list):
         return jsonify({'error': 'osc_args must be an array'}), 400
+
+    # Normalise scene field (same logic as add_mapping)
+    if 'scene' not in updated_mapping:
+        legacy_modes = updated_mapping.get('modes', [])
+        updated_mapping['scene'] = legacy_modes[0] if len(legacy_modes) == 1 else ''
+    updated_mapping.pop('modes', None)
     
     with config_lock:
         # Find the mapping
@@ -771,17 +875,190 @@ def get_status():
     """Get server status."""
     with _active_sequences_lock:
         active_seq_count = sum(_active_sequences.values())
+    # Read all config fields atomically so a concurrent update_osc_client /
+    # add_mapping cannot produce an inconsistent status snapshot.
+    with config_lock:
+        service_port    = config['service_port']
+        osc_client_cfg  = dict(config['osc_client'])
+        gateway_url     = config['gateway_url']
+        mappings_count  = len(config['mappings'])
+        client_ready    = osc_client_instance is not None
     return jsonify({
         'service_name': SERVICE_NAME,
         'socket_server_running': server_running,
-        'socket_server_port': config['service_port'],
-        'osc_client_initialized': osc_client_instance is not None,
-        'osc_client_config': config['osc_client'],
-        'gateway_url': config['gateway_url'],
+        'socket_server_port': service_port,
+        'osc_client_initialized': client_ready,
+        'osc_client_config': osc_client_cfg,
+        'gateway_url': gateway_url,
         'active_mode': get_current_mode(),
-        'mappings_count': len(config['mappings']),
+        'mappings_count': mappings_count,
         'active_sequences': active_seq_count
     })
+
+
+@app.route('/api/refresh-mode', methods=['POST'])
+def refresh_mode():
+    """Force an immediate re-poll of the mode service and update the active scene."""
+    try:
+        url = config.get('mode_service_url', MODE_SERVICE_URL)
+        r = requests.get(f"{url}/api/modes/active", timeout=4)
+        if r.status_code == 200:
+            new_mode = r.json().get('active_mode') or 'Unknown'
+            changed = _set_active_mode(new_mode)
+            return jsonify({'active_mode': new_mode, 'changed': changed}), 200
+        else:
+            return jsonify({'error': f'Mode service returned {r.status_code}',
+                            'active_mode': get_current_mode()}), 502
+    except Exception as e:
+        return jsonify({'error': str(e), 'active_mode': get_current_mode()}), 503
+
+
+# ── Scene configuration API ─────────────────────────────────────────────────
+
+@app.route('/api/scenes', methods=['GET'])
+def get_scenes():
+    """Return all per-scene configurations plus the currently active scene."""
+    with config_lock:
+        scenes = dict(config.get('scenes', {}))
+    return jsonify({'scenes': scenes, 'active_scene': get_current_mode()}), 200
+
+
+@app.route('/api/scenes/<scene_name>/on_enter', methods=['PUT'])
+def set_scene_on_enter(scene_name):
+    """Set or replace the on_enter OSC sequence for a scene.
+
+    Body: { "on_enter": [ {"delay_ms": 0, "osc_address": "/foo", "osc_args": [1]}, ... ],
+            "description": "optional note" }
+    Creates the scene entry if it doesn't already exist.
+    """
+    data = request.get_json()
+    if not data or 'on_enter' not in data:
+        return jsonify({'error': 'on_enter array is required'}), 400
+    if not isinstance(data['on_enter'], list):
+        return jsonify({'error': 'on_enter must be an array of step objects'}), 400
+
+    with config_lock:
+        scenes = config.setdefault('scenes', {})
+        if scene_name not in scenes:
+            scenes[scene_name] = {}
+        scenes[scene_name]['on_enter'] = data['on_enter']
+        if 'description' in data:
+            scenes[scene_name]['description'] = data['description']
+        save_config()
+
+    return jsonify({'message': f'on_enter for scene "{scene_name}" saved',
+                    'scene': scene_name,
+                    'on_enter': data['on_enter']}), 200
+
+
+@app.route('/api/scenes/<scene_name>/copy', methods=['POST'])
+def copy_scene(scene_name):
+    """POST /api/scenes/<scene_name>/copy  body: {"new_name": "..."}
+
+    Deep-copy the source scene's on_enter config to a new scene name.
+    Returns 404 if the source scene doesn't exist, 409 if new_name already exists.
+    """
+    import copy as _copy
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get('new_name') or '').strip()
+    if not new_name:
+        return jsonify({'error': 'new_name is required'}), 400
+    with config_lock:
+        scenes = config.setdefault('scenes', {})
+        if scene_name not in scenes:
+            return jsonify({'error': f"Scene '{scene_name}' not found"}), 404
+        if new_name in scenes:
+            return jsonify({'error': f"Scene '{new_name}' already exists"}), 409
+        scenes[new_name] = _copy.deepcopy(scenes[scene_name])
+        # Clear the description so the copy is clearly a new scene
+        scenes[new_name].pop('description', None)
+        save_config()
+    print(f"[scene] Copied scene config: '{scene_name}' → '{new_name}'")
+    return jsonify({'scene': new_name, 'copied_from': scene_name,
+                    'config': scenes[new_name]}), 201
+
+
+@app.route('/api/scenes', methods=['POST'])
+def register_scene():
+    """Register a new scene with an empty configuration.
+
+    Body: { "scene_name": "...", "description": "..." (optional) }
+    Creates a scene entry even if no trigger mappings exist yet.
+    Returns 409 if the scene already exists.
+    """
+    data = request.get_json(silent=True) or {}
+    scene_name = (data.get('scene_name') or '').strip()
+    if not scene_name:
+        return jsonify({'error': 'scene_name is required'}), 400
+    with config_lock:
+        scenes = config.setdefault('scenes', {})
+        if scene_name in scenes:
+            return jsonify({'message': f"Scene '{scene_name}' already registered",
+                            'scene': scene_name}), 200
+        scenes[scene_name] = {
+            'on_enter': [],
+            'description': data.get('description', '').strip()
+        }
+        save_config()
+    print(f"[scene] Registered new scene: '{scene_name}'")
+    return jsonify({'message': f"Scene '{scene_name}' registered",
+                    'scene': scene_name}), 201
+
+
+@app.route('/api/scenes/sync', methods=['GET'])
+def scenes_sync():
+    """Return sync information between the mode service and locally configured scenes.
+
+    Response JSON:
+      { "configured_scenes": [...],     -- scenes in osc_proxy_config.json
+        "mode_service_scenes": [...],   -- scenes from the mode service ([] on error)
+        "active_scene": "..."           -- currently active scene
+      }
+    """
+    with config_lock:
+        configured = sorted(config.get('scenes', {}).keys())
+
+    mode_scenes = []
+    try:
+        url = config.get('mode_service_url', MODE_SERVICE_URL)
+        r = requests.get(f"{url}/api/modes", timeout=4)
+        if r.status_code == 200:
+            mode_scenes = r.json().get('modes', [])
+    except Exception as e:
+        print(f"[scene-sync] could not reach mode service: {e}")
+
+    return jsonify({
+        'configured_scenes': configured,
+        'mode_service_scenes': mode_scenes,
+        'active_scene': get_current_mode(),
+    }), 200
+
+
+@app.route('/api/scenes/<scene_name>', methods=['DELETE'])
+def delete_scene(scene_name):
+    """Delete a scene's configuration AND all trigger mappings that belong to it.
+
+    The 'Unknown' scene cannot be deleted — it is the built-in fallback.
+    """
+    if scene_name == 'Unknown':
+        return jsonify({'error': "'Unknown' is the built-in fallback scene and cannot be deleted"}), 400
+    with config_lock:
+        scenes = config.get('scenes', {})
+        if scene_name not in scenes:
+            return jsonify({'error': f"Scene '{scene_name}' not found"}), 404
+        del scenes[scene_name]
+        # Also remove all trigger mappings that belong to this scene.
+        before = len(config['mappings'])
+        config['mappings'] = [m for m in config['mappings']
+                              if m.get('scene', '') != scene_name]
+        removed = before - len(config['mappings'])
+        save_config()
+    print(f"[scene] Deleted scene '{scene_name}' + {removed} mapping(s)")
+    return jsonify({'message': f"Scene '{scene_name}' deleted",
+                    'mappings_removed': removed}), 200
+
+
+# ── End scene API ────────────────────────────────────────────────────────────
 
 
 def cleanup():

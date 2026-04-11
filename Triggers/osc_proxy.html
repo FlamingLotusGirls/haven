@@ -5,1256 +5,1193 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Haven OSC Proxy</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            padding: 20px;
-            min-height: 100vh;
+            padding: 20px; min-height: 100vh;
         }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { color: white; text-align: center; margin-bottom: 30px;
+             font-size: 2.5em; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
+        /* ── Status bar ─────────────────────────────────────────────── */
+        .status-bar { background: white; padding: 15px; border-radius: 8px;
+                      margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .status-bar h2 { margin-bottom: 10px; color: #333; font-size: 1.2em; }
+        .status-item { display: inline-block; margin-right: 12px; padding: 5px 10px;
+                       background: #f0f0f0; border-radius: 4px; font-size: 0.9em; }
+        .status-item.online  { background: #d4edda; color: #155724; }
+        .status-item.offline { background: #f8d7da; color: #721c24; }
+
+        /* ── Cards ──────────────────────────────────────────────────── */
+        .card { background: white; border-radius: 8px; padding: 20px;
+                margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .card h2 { color: #333; margin-bottom: 15px;
+                   border-bottom: 2px solid #667eea; padding-bottom: 10px; }
+        .card h3 { color: #444; margin: 16px 0 10px; font-size: 1.1em; }
+
+        /* ── Forms ──────────────────────────────────────────────────── */
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #555; font-weight: 500; }
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%; padding: 10px; border: 1px solid #ddd;
+            border-radius: 4px; font-size: 14px;
         }
-
-        h1 {
-            color: white;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .status-bar {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        .status-bar h2 {
-            margin-bottom: 10px;
-            color: #333;
-            font-size: 1.2em;
-        }
-
-        .status-item {
-            display: inline-block;
-            margin-right: 20px;
-            padding: 5px 10px;
-            background: #f0f0f0;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-
-        .status-item.online {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .status-item.offline {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .card {
-            background: white;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-
-        .card h2 {
-            color: #333;
-            margin-bottom: 15px;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
-        }
-
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 5px;
-            color: #555;
-            font-weight: 500;
-        }
-
-        input[type="text"],
-        input[type="number"],
-        select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-
-        input[type="text"]:focus,
-        input[type="number"]:focus,
-        select:focus {
-            outline: none;
-            border-color: #667eea;
+        input[type="text"]:focus, input[type="number"]:focus, select:focus {
+            outline: none; border-color: #667eea;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
+        .button-group { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
+        .two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-        .button-group {
-            display: flex;
-            gap: 10px;
-            margin-top: 15px;
-        }
+        /* ── Buttons ────────────────────────────────────────────────── */
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer;
+                 font-size: 14px; font-weight: 500; transition: all 0.3s; }
+        button.primary   { background: #667eea; color: white; }
+        button.primary:hover   { background: #5568d3; }
+        button.secondary { background: #6c757d; color: white; }
+        button.secondary:hover { background: #5a6268; }
+        button.danger    { background: #dc3545; color: white; }
+        button.danger:hover    { background: #c82333; }
+        button.success   { background: #28a745; color: white; }
+        button.success:hover   { background: #218838; }
+        button.sm { padding: 5px 10px; font-size: 12px; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
 
-        button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s;
+        /* ── Scene selector bar ─────────────────────────────────────── */
+        .scene-selector-bar {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            padding: 12px 16px; background: #f0f4ff;
+            border: 1px solid #c5d0f5; border-radius: 6px; margin-bottom: 16px;
         }
+        .scene-sel-label { font-weight: bold; color: #3a4a8a; white-space: nowrap; }
+        .scene-sel-dropdown { padding: 7px 10px; border: 1px solid #ced4da;
+                              border-radius: 4px; font-size: 1rem;
+                              min-width: 160px; flex: 1; max-width: 300px; }
 
-        button.primary {
-            background: #667eea;
-            color: white;
-        }
+        /* ── Sync warning banners ───────────────────────────────────── */
+        #scene-sync-warnings { margin-bottom: 14px; }
+        .sync-warning { display: flex; align-items: flex-start; flex-wrap: wrap;
+                        gap: 6px; padding: 10px 14px; border-radius: 5px;
+                        font-size: 0.9rem; margin-bottom: 8px; }
+        .sync-warning-red  { background: #fff0f0; border: 1px solid #f5c5c5; color: #800000; }
+        .sync-warning-blue { background: #f0f4ff; border: 1px solid #c5d0f5; color: #002080; }
+        .sync-chip { display: inline-block; padding: 2px 10px; border-radius: 12px;
+                     font-size: 0.85rem; font-weight: bold; }
+        .sync-chip-red  { background: #f5c5c5; color: #800000; }
+        .sync-chip-blue { background: #c5d0f5; color: #002080; }
 
-        button.primary:hover {
-            background: #5568d3;
-        }
+        /* ── Not-configured block ───────────────────────────────────── */
+        .scene-not-configured { padding: 20px 24px; background: #fff8f0;
+                                border: 1px solid #f5d5b5; border-radius: 6px;
+                                color: #7a3000; }
+        .scene-not-configured p { margin: 0 0 12px; }
 
-        button.secondary {
-            background: #6c757d;
-            color: white;
-        }
+        /* ── Scene badge (read-only, shown in modal) ────────────────── */
+        .form-scene-badge { display: inline-block; padding: 4px 14px;
+                            background: #e8f0fe; border: 1px solid #c5d0f5;
+                            border-radius: 20px; color: #3a4a8a;
+                            font-weight: bold; font-size: 0.95rem; }
 
-        button.secondary:hover {
-            background: #5a6268;
-        }
+        /* ── Mapping list ───────────────────────────────────────────── */
+        .mapping-item { background: #f8f9fa; padding: 15px; margin-bottom: 10px;
+                        border-radius: 4px; border-left: 4px solid #667eea;
+                        display: flex; justify-content: space-between; align-items: center; }
+        .mapping-item.disabled { opacity: 0.6; border-left-color: #6c757d; }
+        .mapping-info { flex: 1; }
+        .mapping-trigger { font-weight: bold; color: #333; margin-bottom: 5px; }
+        .mapping-seq-summary { color: #667eea; font-family: 'Courier New', monospace; }
+        .mapping-actions { display: flex; gap: 5px; }
 
-        button.danger {
-            background: #dc3545;
-            color: white;
-        }
+        /* ── Alias styles ───────────────────────────────────────────── */
+        .alias-item { background: #f8f9fa; padding: 12px 15px; margin-bottom: 8px;
+                      border-radius: 4px; border-left: 4px solid #28a745;
+                      display: flex; justify-content: space-between; align-items: center; }
+        .alias-name { font-weight: bold; color: #333; margin-bottom: 3px; }
+        .alias-osc { color: #28a745; font-family: 'Courier New', monospace; font-size: 0.9em; }
+        .alias-desc { color: #6c757d; font-size: 0.85em; margin-top: 2px; font-style: italic; }
+        .alias-badge { display: inline-block; background: #d4edda; color: #155724;
+                       border: 1px solid #c3e6cb; border-radius: 3px; padding: 1px 6px;
+                       font-size: 0.78em; font-family: 'Courier New', monospace;
+                       margin-left: 6px; opacity: 0.85; }
 
-        button.danger:hover {
-            background: #c82333;
-        }
+        /* ── Sequence step editor ───────────────────────────────────── */
+        .sequence-step-item { background: #f0f4ff; border: 1px solid #c5d0f5;
+                              border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
+        .step-header { display: flex; justify-content: space-between; align-items: center;
+                       margin-bottom: 8px; }
+        .step-label { font-weight: bold; color: #3a4a8a; font-size: 0.9em; }
+        .step-row { display: grid; grid-template-columns: 100px 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .step-row label { font-size: 0.8em; color: #555; margin-bottom: 2px; }
+        .step-args-section label { font-size: 0.8em; color: #555; }
+        .arg-item { display: flex; gap: 10px; margin-bottom: 10px; }
+        .arg-item input { flex: 1; }
+        .arg-item button { padding: 5px 10px; }
 
-        button.success {
-            background: #28a745;
-            color: white;
-        }
+        /* ── Modals ─────────────────────────────────────────────────── */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                 background: rgba(0,0,0,0.5); z-index: 1000;
+                 align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: white; border-radius: 8px; padding: 30px;
+                         max-width: 620px; width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal-header { margin-bottom: 20px; }
+        .modal-header h2 { color: #333; }
+        .close-btn { float: right; font-size: 28px; font-weight: bold; color: #aaa; cursor: pointer; }
+        .close-btn:hover { color: #000; }
 
-        button.success:hover {
-            background: #218838;
-        }
+        /* ── Alerts / Info boxes ────────────────────────────────────── */
+        .alert { padding: 12px; border-radius: 4px; margin-bottom: 15px; }
+        .alert.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert.error   { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .info-box { background: #e7f3ff; border-left: 4px solid #2196F3;
+                    padding: 12px; margin: 15px 0; border-radius: 4px; }
+        .info-box strong { color: #1976D2; }
 
-        .mappings-list {
-            margin-top: 20px;
-        }
+        /* ── On-enter sequence section ──────────────────────────────── */
+        #on-enter-section { margin-top: 20px; padding-top: 16px;
+                            border-top: 1px solid #e0e0e0; }
+        #on-enter-steps-list .sequence-step-item { background: #f5fff5;
+                                                   border-color: #b2dfdb; }
+        #on-enter-steps-list .step-label { color: #2e7d32; }
 
-        .mapping-item {
-            background: #f8f9fa;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            border-left: 4px solid #667eea;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .mapping-item.disabled {
-            opacity: 0.6;
-            border-left-color: #6c757d;
-        }
-
-        .mapping-info {
-            flex: 1;
-        }
-
-        .mapping-trigger {
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 5px;
-        }
-
-        .mapping-osc {
-            color: #667eea;
-            font-family: 'Courier New', monospace;
-        }
-
-        .mapping-args {
-            color: #6c757d;
-            font-size: 0.9em;
-            margin-top: 3px;
-        }
-
-        .mapping-actions {
-            display: flex;
-            gap: 5px;
-        }
-
-        .mapping-actions button {
-            padding: 5px 10px;
-            font-size: 12px;
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal.active {
-            display: flex;
-        }
-
-        .modal-content {
-            background: white;
-            border-radius: 8px;
-            padding: 30px;
-            max-width: 600px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-
-        .modal-header {
-            margin-bottom: 20px;
-        }
-
-        .modal-header h2 {
-            color: #333;
-        }
-
-        .close-btn {
-            float: right;
-            font-size: 28px;
-            font-weight: bold;
-            color: #aaa;
-            cursor: pointer;
-        }
-
-        .close-btn:hover {
-            color: #000;
-        }
-
-        .arg-list {
-            margin-top: 10px;
-        }
-
-        .arg-item {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-
-        .arg-item input {
-            flex: 1;
-        }
-
-        .arg-item button {
-            padding: 5px 10px;
-        }
-
-        .info-box {
-            background: #e7f3ff;
-            border-left: 4px solid #2196F3;
-            padding: 12px;
-            margin: 15px 0;
-            border-radius: 4px;
-        }
-
-        .info-box strong {
-            color: #1976D2;
-        }
-
-        .two-column {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        .alert {
-            padding: 12px;
-            border-radius: 4px;
-            margin-bottom: 15px;
-        }
-
-        .alert.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-
-        .alert.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-
-        /* ── Mode chips ───────────────────────────────────────────── */
-        .mode-chip {
-            display: inline-block;
-            background: #e8e0ff;
-            color: #4a0080;
-            border: 1px solid #b388ff;
-            border-radius: 12px;
-            padding: 2px 10px;
-            font-size: 0.8em;
-            margin: 2px 2px 0 0;
-            font-weight: 500;
-        }
-        .mode-chip.all-modes {
-            background: #e8f5e9;
-            color: #1b5e20;
-            border-color: #81c784;
-        }
-        .mode-checkboxes {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 8px;
-        }
-        .mode-checkbox-label {
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            padding: 5px 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9em;
-            transition: background 0.2s;
-        }
-        .mode-checkbox-label:hover { background: #f0eaff; }
-        .mode-checkbox-label input[type="checkbox"] { width: auto; margin: 0; }
-        .mode-checkbox-label.checked {
-            background: #e8e0ff;
-            border-color: #b388ff;
-            color: #4a0080;
-        }
-        .mode-active-badge {
-            display: inline-block;
-            background: #4a0080;
-            color: white;
-            border-radius: 12px;
-            padding: 3px 12px;
-            font-size: 0.85em;
-            font-weight: bold;
-        }
-
-        /* ── OSC Aliases ─────────────────────────────────────────── */
-        .alias-item {
-            background: #f8f9fa;
-            padding: 12px 15px;
-            margin-bottom: 8px;
-            border-radius: 4px;
-            border-left: 4px solid #28a745;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .alias-name {
-            font-weight: bold;
-            color: #333;
-            margin-bottom: 3px;
-        }
-        .alias-osc {
-            color: #28a745;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-        }
-        .alias-desc {
-            color: #6c757d;
-            font-size: 0.85em;
-            margin-top: 2px;
-            font-style: italic;
-        }
-        /* Badge shown next to the OSC address in the mapping list */
-        .alias-badge {
-            display: inline-block;
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-            border-radius: 3px;
-            padding: 1px 6px;
-            font-size: 0.78em;
-            font-weight: normal;
-            font-family: 'Courier New', monospace;
-            margin-left: 6px;
-            opacity: 0.85;
-        }
-
-        /* ── Sequence step editor ─────────────────────────────────── */
-        .sequence-step-item {
-            background: #f0f4ff;
-            border: 1px solid #c5d0f5;
-            border-radius: 6px;
-            padding: 10px 12px;
-            margin-bottom: 10px;
-        }
-        .step-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .step-label {
-            font-weight: bold;
-            color: #3a4a8a;
-            font-size: 0.9em;
-        }
-        .step-row {
-            display: grid;
-            grid-template-columns: 100px 1fr 1fr;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-        .step-row label {
-            font-size: 0.8em;
-            color: #555;
-            margin-bottom: 2px;
-        }
-        .step-args-section label {
-            font-size: 0.8em;
-            color: #555;
-        }
-        .mapping-seq-summary {
-            color: #667eea;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-        }
+        /* ── Mode active badge ──────────────────────────────────────── */
+        .mode-active-badge { display: inline-block; background: #4a0080; color: white;
+                             border-radius: 12px; padding: 3px 12px;
+                             font-size: 0.85em; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>🎵 Haven OSC Proxy</h1>
+<div class="container">
+    <h1>🎵 Haven OSC Proxy</h1>
 
-        <!-- Status Bar -->
-        <div class="status-bar">
-            <h2>Status</h2>
-            <span class="status-item" id="socketStatus">Socket: Loading...</span>
-            <span class="status-item" id="oscStatus">OSC: Loading...</span>
-            <span class="status-item" id="mappingCount">Mappings: 0</span>
-            <span class="status-item" id="modeStatus">Mode: Loading...</span>
-        </div>
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <h2>Status</h2>
+        <span class="status-item" id="socketStatus">Socket: Loading…</span>
+        <span class="status-item" id="oscStatus">OSC: Loading…</span>
+        <span class="status-item" id="mappingCount">Mappings: 0</span>
+        <span class="status-item" id="modeStatus">Scene: Loading…</span>
+        <button id="refreshSceneBtn" onclick="refreshScene()"
+                style="margin-left:8px;padding:4px 12px;font-size:0.85em;"
+                title="Force re-poll the mode service now">⟳ Refresh Scene</button>
+    </div>
 
-        <!-- OSC Client Configuration -->
-        <div class="card">
-            <h2>OSC Client Configuration</h2>
-            <div class="two-column">
-                <div class="form-group">
-                    <label for="oscHost">OSC Host/IP</label>
-                    <input type="text" id="oscHost" placeholder="127.0.0.1">
-                </div>
-                <div class="form-group">
-                    <label for="oscPort">OSC Port</label>
-                    <input type="number" id="oscPort" placeholder="8000">
-                </div>
+    <!-- OSC Client Configuration -->
+    <div class="card">
+        <h2>OSC Client Configuration</h2>
+        <div class="two-column">
+            <div class="form-group">
+                <label for="oscHost">OSC Host/IP</label>
+                <input type="text" id="oscHost" placeholder="127.0.0.1">
             </div>
-            <div class="button-group">
-                <button class="primary" onclick="updateOscConfig()">Update OSC Client</button>
-                <button class="secondary" onclick="testOscConnection()">Test Connection</button>
+            <div class="form-group">
+                <label for="oscPort">OSC Port</label>
+                <input type="number" id="oscPort" placeholder="8000">
             </div>
         </div>
-
-        <!-- OSC Aliases -->
-        <div class="card">
-            <h2>OSC Command Aliases</h2>
-            <p style="color:#555; margin-bottom:15px; font-size:0.9em;">
-                Give human-readable names to OSC addresses. When adding or editing a mapping
-                you can select an alias to auto-fill the address and default arguments —
-                you can still type any raw OSC address directly.
-            </p>
-            <button class="success" onclick="openAliasModal()">➕ Add Alias</button>
-            <div id="aliasesList" style="margin-top:15px;">
-                <p style="color:#6c757d; text-align:center; padding:15px;">Loading aliases…</p>
-            </div>
-        </div>
-
-        <!-- Trigger to OSC Mappings -->
-        <div class="card">
-            <h2>Trigger to OSC Mappings</h2>
-            <button class="success" onclick="openAddMappingModal()">➕ Add New Mapping</button>
-            
-            <div id="mappingsList" class="mappings-list">
-                <!-- Mappings will be loaded here -->
-            </div>
+        <div class="button-group">
+            <button class="primary" onclick="updateOscConfig()">Update OSC Client</button>
+            <button class="secondary" onclick="testOscConnection()">Test Connection</button>
         </div>
     </div>
 
-    <!-- Add/Edit Mapping Modal -->
-    <div id="mappingModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <span class="close-btn" onclick="closeMappingModal()">&times;</span>
-                <h2 id="modalTitle">Add New Mapping</h2>
-            </div>
-
-            <div id="modalAlert"></div>
-
-            <div class="form-group">
-                <label for="modalTrigger">Trigger</label>
-                <select id="modalTrigger">
-                    <option value="">Select a trigger...</option>
-                </select>
-            </div>
-
-            <div class="form-group">
-                <label>OSC Sequence</label>
-                <div class="info-box">
-                    <strong>Each step fires an OSC command after its delay (ms from trigger).</strong>
-                    While the sequence is playing, duplicate triggers are ignored.<br>
-                    <strong>Arg substitution:</strong>
-                    <code>${value}</code> (string) &nbsp;
-                    <code>${value:int}</code> &nbsp;
-                    <code>${value:float}</code>
-                </div>
-                <div id="sequenceStepsList"></div>
-                <button class="secondary" onclick="addMappingStep()" style="margin-top:4px;">➕ Add Step</button>
-            </div>
-
-            <div class="form-group">
-                <label>Active Modes</label>
-                <p style="font-size:0.85em;color:#666;margin-bottom:6px;">
-                    Check the modes in which this mapping should fire.
-                    Leave all unchecked to fire in <em>any</em> mode (or when no mode is active).
-                </p>
-                <div id="modeCheckboxes" class="mode-checkboxes">
-                    <em style="color:#aaa;font-size:0.9em;">Loading modes…</em>
-                </div>
-            </div>
-
-            <div class="button-group">
-                <button class="primary" onclick="saveMappingModal()">Save Mapping</button>
-                <button class="secondary" onclick="closeMappingModal()">Cancel</button>
-            </div>
+    <!-- OSC Aliases -->
+    <div class="card">
+        <h2>OSC Command Aliases</h2>
+        <p style="color:#555;margin-bottom:15px;font-size:0.9em;">
+            Give human-readable names to OSC addresses. When adding or editing a mapping
+            you can select an alias to auto-fill the address and default arguments.
+        </p>
+        <button class="success" onclick="openAliasModal()">➕ Add Alias</button>
+        <div id="aliasesList" style="margin-top:15px;">
+            <p style="color:#6c757d;text-align:center;padding:15px;">Loading aliases…</p>
         </div>
     </div>
 
-    <!-- Add/Edit Alias Modal -->
-    <div id="aliasModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <span class="close-btn" onclick="closeAliasModal()">&times;</span>
-                <h2 id="aliasModalTitle">Add Alias</h2>
-            </div>
-            <div id="aliasModalAlert"></div>
-            <div class="form-group">
-                <label for="aliasName">Alias Name</label>
-                <input type="text" id="aliasName" placeholder="e.g., Fire Poof, Bird Chirp, Lights Up">
-            </div>
-            <div class="form-group">
-                <label for="aliasOscAddress">OSC Address</label>
-                <input type="text" id="aliasOscAddress" placeholder="/example/address">
-            </div>
-            <div class="form-group">
-                <label>Default Arguments <em style="color:#999;font-size:0.85em;">(optional — pre-filled when alias is selected in a mapping)</em></label>
-                <div id="aliasArgsList" class="arg-list"></div>
-                <button class="secondary" onclick="addAliasArgument()">Add Argument</button>
-            </div>
-            <div class="form-group">
-                <label for="aliasDescription">Description <em style="color:#999;font-size:0.85em;">(optional)</em></label>
-                <input type="text" id="aliasDescription" placeholder="What does this OSC command do?">
-            </div>
-            <div class="button-group">
-                <button class="primary" onclick="saveAlias()">Save Alias</button>
-                <button class="secondary" onclick="closeAliasModal()">Cancel</button>
-            </div>
+    <!-- Scene-first Trigger Mappings -->
+    <div class="card">
+        <h2>⚡ Scene Trigger Mappings</h2>
+
+        <!-- Scene selector bar -->
+        <div class="scene-selector-bar">
+            <span class="scene-sel-label">Scene:</span>
+            <select id="sceneSelect" class="scene-sel-dropdown"
+                    onchange="onSceneSelected()">
+                <option value="">Loading scenes…</option>
+            </select>
+            <button class="secondary sm" onclick="loadSceneSync()" title="Refresh scene list">🔄 Refresh</button>
+            <button class="secondary sm" onclick="copyCurrentScene()" title="Duplicate this scene's mappings">📋 Duplicate →</button>
+        </div>
+
+        <!-- Sync warnings -->
+        <div id="scene-sync-warnings"></div>
+
+        <!-- Per-scene content area -->
+        <div id="scene-content">
+            <p style="color:#6c757d;text-align:center;padding:20px;">Select a scene above.</p>
         </div>
     </div>
+</div>
 
-    <script>
-        let config = {};
-        let triggers = [];
-        let aliases = [];
-        let currentEditingId = null;
-        let currentEditingAliasId = null;
+<!-- Add/Edit Mapping Modal -->
+<div id="mappingModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="close-btn" onclick="closeMappingModal()">&times;</span>
+            <h2 id="modalTitle">Add New Mapping</h2>
+        </div>
+        <div id="modalAlert"></div>
 
-        // Load initial data
-        async function loadData() {
-            await Promise.all([
-                loadConfig(),
-                loadTriggers(),
-                loadMappings(),
-                loadAliases()
-            ]);
-            updateStatus();
+        <div class="form-group">
+            <label>Scene</label>
+            <span id="modalSceneBadge" class="form-scene-badge">—</span>
+        </div>
+
+        <div class="form-group">
+            <label for="modalTrigger">Trigger</label>
+            <select id="modalTrigger">
+                <option value="">Select a trigger…</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>OSC Sequence</label>
+            <div class="info-box">
+                <strong>Each step fires an OSC command after its delay (ms from trigger).</strong>
+                While the sequence is playing, duplicate triggers are ignored.<br>
+                <strong>Arg substitution:</strong>
+                <code>${value}</code> &nbsp;
+                <code>${value:int}</code> &nbsp;
+                <code>${value:float}</code>
+            </div>
+            <div id="sequenceStepsList"></div>
+            <button class="secondary sm" onclick="addMappingStep()" style="margin-top:4px;">➕ Add Step</button>
+        </div>
+
+        <div class="button-group">
+            <button class="primary" onclick="saveMappingModal()">Save Mapping</button>
+            <button class="secondary" onclick="closeMappingModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Alias Modal -->
+<div id="aliasModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <span class="close-btn" onclick="closeAliasModal()">&times;</span>
+            <h2 id="aliasModalTitle">Add Alias</h2>
+        </div>
+        <div id="aliasModalAlert"></div>
+        <div class="form-group">
+            <label for="aliasName">Alias Name</label>
+            <input type="text" id="aliasName" placeholder="e.g., Fire Poof, Bird Chirp">
+        </div>
+        <div class="form-group">
+            <label for="aliasOscAddress">OSC Address</label>
+            <input type="text" id="aliasOscAddress" placeholder="/example/address">
+        </div>
+        <div class="form-group">
+            <label>Default Arguments <em style="color:#999;font-size:0.85em;">(optional)</em></label>
+            <div id="aliasArgsList" class="arg-list"></div>
+            <button class="secondary sm" onclick="addAliasArgument()">Add Argument</button>
+        </div>
+        <div class="form-group">
+            <label for="aliasDescription">Description <em style="color:#999;font-size:0.85em;">(optional)</em></label>
+            <input type="text" id="aliasDescription" placeholder="What does this OSC command do?">
+        </div>
+        <div class="button-group">
+            <button class="primary" onclick="saveAlias()">Save Alias</button>
+            <button class="secondary" onclick="closeAliasModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────
+let triggers       = [];
+let aliases        = [];
+let allMappings    = [];        // all scene mappings, flat
+let configuredScenes  = [];    // scenes with an entry in osc_proxy_config.json
+let modeServiceScenes = [];    // scenes from the mode service
+let currentEditingId      = null;
+let currentEditingAliasId = null;
+
+// ── Bootstrap ─────────────────────────────────────────────────────────────
+async function loadData() {
+    await Promise.all([
+        loadConfig(),
+        loadTriggers(),
+        loadAliases(),
+        loadSceneSync(),   // also loads all mappings
+    ]);
+    updateStatus();
+}
+
+async function loadConfig() {
+    try {
+        const r = await fetch('/api/config');
+        const cfg = await r.json();
+        document.getElementById('oscHost').value = cfg.osc_client.host;
+        document.getElementById('oscPort').value = cfg.osc_client.port;
+    } catch (e) { console.error('loadConfig:', e); }
+}
+
+async function loadTriggers() {
+    try {
+        const r = await fetch('/api/triggers');
+        const data = await r.json();
+        triggers = data.triggers || [];
+        const sel = document.getElementById('modalTrigger');
+        sel.innerHTML = '<option value="">Select a trigger…</option>';
+        triggers.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t.name;
+            opt.textContent = `${t.name} (${t.type})`;
+            sel.appendChild(opt);
+        });
+    } catch (e) { console.error('loadTriggers:', e); }
+}
+
+// ── Scene sync + selector ──────────────────────────────────────────────────
+
+async function loadSceneSync() {
+    try {
+        const [syncResp, mapResp] = await Promise.all([
+            fetch('/api/scenes/sync'),
+            fetch('/api/mappings'),
+        ]);
+        const syncData = await syncResp.json();
+        const mapData  = await mapResp.json();
+
+        configuredScenes  = syncData.configured_scenes  || [];
+        modeServiceScenes = syncData.mode_service_scenes || [];
+        allMappings       = mapData.mappings || [];
+
+        renderSceneSelector(syncData.active_scene || '');
+        renderSyncWarnings();
+        renderSceneContent();
+    } catch (e) {
+        console.error('loadSceneSync:', e);
+        document.getElementById('scene-content').innerHTML =
+            '<p style="color:#c00;padding:16px;">Error loading scene data.</p>';
+    }
+}
+
+function renderSceneSelector(activeScene) {
+    const sel = document.getElementById('sceneSelect');
+    const prev = sel.value;
+
+    // Union of both sets, sorted
+    const msSet  = new Set(modeServiceScenes);
+    const cfgSet = new Set(configuredScenes);
+    const all    = [...new Set([...msSet, ...cfgSet])].sort();
+
+    sel.innerHTML = '';
+    if (all.length === 0) {
+        sel.innerHTML = '<option value="">No scenes defined</option>';
+        return;
+    }
+    all.forEach(name => {
+        const inMS  = msSet.has(name);
+        const inCfg = cfgSet.has(name);
+        const opt   = document.createElement('option');
+        opt.value   = name;
+        if (inMS && inCfg) {
+            opt.textContent = name;
+        } else if (inMS && !inCfg) {
+            opt.textContent = `${name}  ⚠ (not configured)`;
+            opt.style.color = '#cc0000';
+        } else {
+            opt.textContent = `${name}  (not in mode service)`;
+            opt.style.color = '#0055cc';
+        }
+        sel.appendChild(opt);
+    });
+
+    // Restore previously selected scene if possible, else prefer active scene
+    const toSelect = (prev && all.includes(prev)) ? prev
+                   : (activeScene && all.includes(activeScene)) ? activeScene
+                   : all[0];
+    sel.value = toSelect;
+}
+
+function renderSyncWarnings() {
+    const msSet  = new Set(modeServiceScenes);
+    const cfgSet = new Set(configuredScenes);
+    const missingCfg  = [...msSet].filter(s => !cfgSet.has(s));
+    const orphanedCfg = [...cfgSet].filter(s => !msSet.has(s));
+
+    let html = '';
+    if (missingCfg.length > 0) {
+        const chips = missingCfg.map(s =>
+            `<span class="sync-chip sync-chip-red">${esc(s)}</span>`).join(' ');
+        html += `<div class="sync-warning sync-warning-red">
+            ⚠ <strong>${missingCfg.length} mode-service scene${missingCfg.length > 1 ? 's' : ''}
+            have no OSC configuration:</strong> ${chips}
+        </div>`;
+    }
+    if (orphanedCfg.length > 0) {
+        const chips = orphanedCfg.map(s =>
+            `<span class="sync-chip sync-chip-blue">${esc(s)}</span>`).join(' ');
+        html += `<div class="sync-warning sync-warning-blue">
+            ℹ <strong>${orphanedCfg.length} configured scene${orphanedCfg.length > 1 ? 's' : ''}
+            not found in mode service:</strong> ${chips}
+        </div>`;
+    }
+    document.getElementById('scene-sync-warnings').innerHTML = html;
+}
+
+function onSceneSelected() {
+    renderSceneContent();
+}
+
+function getSelectedScene() {
+    return document.getElementById('sceneSelect').value || '';
+}
+
+// ── Scene content area ────────────────────────────────────────────────────
+
+function renderSceneContent() {
+    const scene = getSelectedScene();
+    const container = document.getElementById('scene-content');
+    if (!scene) {
+        container.innerHTML = '<p style="color:#6c757d;padding:16px;">Select a scene above.</p>';
+        return;
+    }
+
+    const cfgSet = new Set(configuredScenes);
+    if (!cfgSet.has(scene)) {
+        // Not configured — show register button
+        container.innerHTML = `
+            <div class="scene-not-configured">
+                <p>⚠ Scene <strong>${esc(scene)}</strong> has no OSC configuration.</p>
+                <p>Register it to enable trigger mappings and on-entry sequences for this scene.
+                   You can leave it empty (quiet scene) or add mappings later.</p>
+                <button class="primary" onclick="registerScene('${esc(scene)}')">
+                    Register Scene (Create Empty Config)
+                </button>
+            </div>`;
+        return;
+    }
+
+    // Scene is configured — show on_enter editor + mappings
+    const sceneMappings = allMappings.filter(m => m.scene === scene);
+    container.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+            <span></span>
+            <button class="danger sm" onclick="deleteSceneConfig('${esc(scene)}')"
+                    ${scene === 'Unknown' ? 'disabled title="Cannot delete the fallback scene"' : ''}>
+                🗑️ Delete Scene Config
+            </button>
+        </div>
+
+        <!-- on_enter sequence editor -->
+        <div id="on-enter-section">
+            <h3>🎬 On-Entry Sequence
+                <em style="font-weight:normal;font-size:0.85em;color:#666;margin-left:8px;">
+                    (OSC commands fired when scene becomes active)</em>
+            </h3>
+            <div class="info-box" style="margin-bottom:10px;">
+                <strong>Tip:</strong> These steps run automatically whenever the mode service
+                switches to this scene. Use aliases for readability. Delay is ms after scene entry.
+            </div>
+            <div id="on-enter-steps-list"></div>
+            <div class="button-group" style="margin-bottom:6px;">
+                <button class="secondary sm" onclick="addOnEnterStep()">➕ Add Step</button>
+                <button class="primary sm" onclick="saveOnEnterSequence('${esc(scene)}')">💾 Save On-Entry Sequence</button>
+            </div>
+        </div>
+
+        <!-- Trigger mappings for this scene -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;margin-bottom:10px;">
+            <h3 style="margin:0;">Trigger → OSC Mappings</h3>
+            <button class="success sm" onclick="openAddMappingModal()">➕ Add Mapping</button>
+        </div>
+        <div id="scene-mappings-list"></div>
+    `;
+
+    // Load on_enter steps from scenes data
+    loadOnEnterSteps(scene);
+
+    // Render mappings
+    renderSceneMappings(sceneMappings);
+}
+
+// ── On-enter sequence ─────────────────────────────────────────────────────
+
+async function loadOnEnterSteps(sceneName) {
+    const listEl = document.getElementById('on-enter-steps-list');
+    if (!listEl) return;
+    try {
+        const r = await fetch('/api/scenes');
+        const data = await r.json();
+        const cfg = (data.scenes || {})[sceneName] || {};
+        const steps = cfg.on_enter || [];
+        listEl.innerHTML = '';
+        if (steps.length === 0) {
+            addOnEnterStep();  // start with one blank step
+        } else {
+            steps.forEach(s => addOnEnterStep(s));
+        }
+    } catch (e) {
+        console.error('loadOnEnterSteps:', e);
+    }
+}
+
+function addOnEnterStep(stepData = null) {
+    const list = document.getElementById('on-enter-steps-list');
+    if (!list) return;
+    const idx     = list.children.length;
+    const delay   = stepData ? (stepData.delay_ms    || 0)  : 0;
+    const address = stepData ? (stepData.osc_address || '') : '';
+    const args    = stepData ? (stepData.osc_args    || []) : [];
+    const stepDiv = document.createElement('div');
+    stepDiv.className = 'sequence-step-item';
+    const aliasOpts = aliases.map(a => {
+        const hint = a.osc_args && a.osc_args.length ? ` [${a.osc_args.join(', ')}]` : '';
+        return `<option value="${a.id}">${a.alias}  →  ${a.osc_address}${hint}</option>`;
+    }).join('');
+    stepDiv.innerHTML = `
+        <div class="step-header">
+            <span class="step-label">Step ${idx + 1}</span>
+            <button class="danger sm" onclick="this.closest('.sequence-step-item').remove();renumberOnEnterSteps()">✕</button>
+        </div>
+        <div class="step-row">
+            <div><label>Delay (ms)</label>
+                 <input type="number" class="step-delay" value="${delay}" min="0"></div>
+            <div><label>Alias <em style="color:#999;font-size:0.82em;">(opt)</em></label>
+                 <select class="step-alias-select" onchange="onStepAliasSelected(this,'on-enter-steps-list')">
+                     <option value="">— type address below —</option>${aliasOpts}
+                 </select></div>
+            <div><label>OSC Address</label>
+                 <input type="text" class="step-address" value="${address}" placeholder="/example/address"></div>
+        </div>
+        <div class="step-args-section">
+            <label>Arguments</label>
+            <div class="step-args-list arg-list"></div>
+            <button class="secondary sm" onclick="addStepArg(this)" style="margin-top:4px;">Add Arg</button>
+        </div>`;
+    list.appendChild(stepDiv);
+    if (address) {
+        const match = aliases.find(a => a.osc_address === address);
+        if (match) stepDiv.querySelector('.step-alias-select').value = match.id;
+    }
+    const argsListDiv = stepDiv.querySelector('.step-args-list');
+    args.forEach(arg => addStepArgToList(argsListDiv, arg));
+}
+
+function renumberOnEnterSteps() {
+    const list = document.getElementById('on-enter-steps-list');
+    if (!list) return;
+    Array.from(list.children).forEach((div, i) => {
+        const lbl = div.querySelector('.step-label');
+        if (lbl) lbl.textContent = `Step ${i + 1}`;
+    });
+}
+
+async function saveOnEnterSequence(sceneName) {
+    const steps = collectStepsFromList('on-enter-steps-list');
+    try {
+        const r = await fetch(`/api/scenes/${encodeURIComponent(sceneName)}/on_enter`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ on_enter: steps })
+        });
+        if (r.ok) {
+            showAlert(`On-entry sequence for "${sceneName}" saved (${steps.length} steps).`, 'success');
+        } else {
+            const d = await r.json();
+            showAlert(`Error: ${d.error || r.statusText}`, 'error');
+        }
+    } catch (e) {
+        showAlert(`Error saving on-entry sequence: ${e.message}`, 'error');
+    }
+}
+
+// ── Scene mappings ─────────────────────────────────────────────────────────
+
+function renderSceneMappings(mappings) {
+    const listEl = document.getElementById('scene-mappings-list');
+    if (!listEl) return;
+    if (mappings.length === 0) {
+        listEl.innerHTML = `<p style="color:#6c757d;text-align:center;padding:20px;">
+            No mappings yet. Click <strong>+ Add Mapping</strong> above.</p>`;
+        return;
+    }
+    listEl.innerHTML = '';
+    mappings.forEach(mapping => {
+        const item = document.createElement('div');
+        item.className = 'mapping-item' + (mapping.enabled ? '' : ' disabled');
+
+        const steps = mapping.sequence && mapping.sequence.length > 0
+            ? mapping.sequence
+            : (mapping.osc_address
+                ? [{ delay_ms: 0, osc_address: mapping.osc_address, osc_args: mapping.osc_args || [] }]
+                : []);
+
+        let seqHtml;
+        if (steps.length === 0) {
+            seqHtml = '<em style="color:#999;">no steps</em>';
+        } else {
+            const first = steps[0];
+            const aliasName = resolveAliasName(first.osc_address);
+            const firstDisplay = aliasName
+                ? `${aliasName} <span class="alias-badge">${first.osc_address}</span>`
+                : first.osc_address;
+            const extra = steps.length > 1
+                ? ` <span style="color:#6c757d;font-size:0.85em;">+${steps.length - 1} more step${steps.length > 2 ? 's' : ''}</span>`
+                : '';
+            seqHtml = firstDisplay + extra;
         }
 
-        async function loadConfig() {
-            try {
-                const response = await fetch('/api/config');
-                config = await response.json();
-                
-                document.getElementById('oscHost').value = config.osc_client.host;
-                document.getElementById('oscPort').value = config.osc_client.port;
-            } catch (error) {
-                console.error('Error loading config:', error);
-            }
+        item.innerHTML = `
+            <div class="mapping-info">
+                <div class="mapping-trigger">🎯 ${esc(mapping.trigger_name)}</div>
+                <div class="mapping-seq-summary">➜ ${seqHtml}</div>
+                <div style="color:#6c757d;font-size:0.85em;margin-top:2px;">${steps.length} step${steps.length !== 1 ? 's' : ''}</div>
+            </div>
+            <div class="mapping-actions">
+                <button class="secondary sm" onclick="toggleMapping(${mapping.id})">${mapping.enabled ? '⏸ Disable' : '▶️ Enable'}</button>
+                <button class="primary sm"   onclick="editMapping(${mapping.id})">✏️ Edit</button>
+                <button class="danger sm"    onclick="deleteMapping(${mapping.id})">🗑️ Delete</button>
+            </div>`;
+        listEl.appendChild(item);
+    });
+}
+
+// ── Scene register / delete ───────────────────────────────────────────────
+
+async function registerScene(sceneName) {
+    try {
+        const r = await fetch('/api/scenes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ scene_name: sceneName })
+        });
+        const d = await r.json();
+        if (r.ok) {
+            showAlert(`Scene "${sceneName}" registered.`, 'success');
+            await loadSceneSync();
+        } else {
+            showAlert(`Error: ${d.error || r.statusText}`, 'error');
         }
+    } catch (e) {
+        showAlert(`Error registering scene: ${e.message}`, 'error');
+    }
+}
 
-        async function loadTriggers() {
-            try {
-                const response = await fetch('/api/triggers');
-                const data = await response.json();
-                triggers = data.triggers;
-                
-                // Update trigger dropdown
-                const select = document.getElementById('modalTrigger');
-                select.innerHTML = '<option value="">Select a trigger...</option>';
-                
-                triggers.forEach(trigger => {
-                    const option = document.createElement('option');
-                    option.value = trigger.name;
-                    option.textContent = `${trigger.name} (${trigger.type})`;
-                    select.appendChild(option);
-                });
-            } catch (error) {
-                console.error('Error loading triggers:', error);
-            }
+async function deleteSceneConfig(sceneName) {
+    const mappingCount = allMappings.filter(m => m.scene === sceneName).length;
+    const msg = mappingCount > 0
+        ? `Delete scene "${sceneName}" AND its ${mappingCount} trigger mapping${mappingCount > 1 ? 's' : ''}?`
+        : `Delete on-entry configuration for scene "${sceneName}"?`;
+    if (!confirm(msg)) return;
+    try {
+        const r = await fetch(`/api/scenes/${encodeURIComponent(sceneName)}`, { method: 'DELETE' });
+        const d = await r.json();
+        if (r.ok) {
+            showAlert(`Scene "${sceneName}" deleted (${d.mappings_removed || 0} mappings removed).`, 'success');
+            await loadSceneSync();
+        } else {
+            showAlert(`Error: ${d.error || r.statusText}`, 'error');
         }
+    } catch (e) {
+        showAlert(`Error: ${e.message}`, 'error');
+    }
+}
 
-        /** Fetch modes list from /api/modes and render checkboxes inside the modal.
-         *  Pre-check any mode names in `selectedModes` (array). */
-        async function renderModeCheckboxes(selectedModes = []) {
-            const container = document.getElementById('modeCheckboxes');
-            container.innerHTML = '<em style="color:#aaa;font-size:0.9em;">Loading modes…</em>';
-            try {
-                const r = await fetch('/api/modes');
-                const data = await r.json();
-                const modes = data.modes || [];
+async function copyCurrentScene() {
+    const fromScene = getSelectedScene();
+    if (!fromScene) { showAlert('Select a scene to duplicate.', 'error'); return; }
+    const raw = prompt(`Duplicate scene "${fromScene}" to a new scene name:`);
+    if (!raw || !raw.trim()) return;
+    const toScene = raw.trim();
+    if (toScene === fromScene) { showAlert('New name must differ from source.', 'error'); return; }
 
-                if (modes.length === 0) {
-                    container.innerHTML = '<em style="color:#aaa;font-size:0.9em;">No modes defined in mode service.</em>';
-                    return;
-                }
-
-                container.innerHTML = '';
-                modes.forEach(name => {
-                    const label = document.createElement('label');
-                    label.className = 'mode-checkbox-label' + (selectedModes.includes(name) ? ' checked' : '');
-
-                    const cb = document.createElement('input');
-                    cb.type = 'checkbox';
-                    cb.className = 'mode-cb';
-                    cb.value = name;
-                    cb.checked = selectedModes.includes(name);
-                    cb.addEventListener('change', () => {
-                        label.className = 'mode-checkbox-label' + (cb.checked ? ' checked' : '');
-                    });
-
-                    label.appendChild(cb);
-                    label.appendChild(document.createTextNode(name));
-                    container.appendChild(label);
-                });
-            } catch (e) {
-                container.innerHTML = '<em style="color:#c00;font-size:0.9em;">Could not reach mode service.</em>';
-            }
-        }
-
-        async function loadMappings() {
-            try {
-                const response = await fetch('/api/mappings');
-                const data = await response.json();
-
-                const listDiv = document.getElementById('mappingsList');
-
-                if (data.mappings.length === 0) {
-                    listDiv.innerHTML = '<p style="color: #6c757d; text-align: center; padding: 20px;">No mappings configured yet. Click "Add New Mapping" to get started.</p>';
-                    return;
-                }
-
-                listDiv.innerHTML = '';
-
-                data.mappings.forEach(mapping => {
-                    const item = document.createElement('div');
-                    item.className = 'mapping-item' + (mapping.enabled ? '' : ' disabled');
-
-                    // Normalise to sequence steps (supports legacy single-command mappings too)
-                    const steps = mapping.sequence && mapping.sequence.length > 0
-                        ? mapping.sequence
-                        : (mapping.osc_address
-                            ? [{ delay_ms: 0, osc_address: mapping.osc_address, osc_args: mapping.osc_args || [] }]
-                            : []);
-
-                    // Build sequence summary HTML
-                    let seqHtml;
-                    if (steps.length === 0) {
-                        seqHtml = '<em style="color:#999;">no steps</em>';
-                    } else {
-                        const firstStep = steps[0];
-                        const aliasName = resolveAliasName(firstStep.osc_address);
-                        const firstDisplay = aliasName
-                            ? `${aliasName} <span class="alias-badge">${firstStep.osc_address}</span>`
-                            : firstStep.osc_address;
-                        const extra = steps.length > 1
-                            ? ` <span style="color:#6c757d;font-size:0.85em;">+${steps.length - 1} more step${steps.length > 2 ? 's' : ''}</span>`
-                            : '';
-                        seqHtml = firstDisplay + extra;
-                    }
-
-                    // Build mode chips HTML
-                    const modes = mapping.modes || [];
-                    const modesHtml = modes.length > 0
-                        ? modes.map(m => `<span class="mode-chip">${m}</span>`).join('')
-                        : '<span class="mode-chip all-modes">All modes</span>';
-
-                    item.innerHTML = `
-                        <div class="mapping-info">
-                            <div class="mapping-trigger">🎯 ${mapping.trigger_name}</div>
-                            <div class="mapping-seq-summary">➜ ${seqHtml}</div>
-                            <div style="color:#6c757d;font-size:0.85em;margin-top:2px;">${steps.length} step${steps.length !== 1 ? 's' : ''}</div>
-                            <div class="mapping-modes" style="margin-top:5px;">${modesHtml}</div>
-                        </div>
-                        <div class="mapping-actions">
-                            <button class="secondary" onclick="toggleMapping(${mapping.id})">${mapping.enabled ? '⏸ Disable' : '▶️ Enable'}</button>
-                            <button class="primary" onclick="editMapping(${mapping.id})">✏️ Edit</button>
-                            <button class="danger" onclick="deleteMapping(${mapping.id})">🗑️ Delete</button>
-                        </div>
-                    `;
-
-                    listDiv.appendChild(item);
-                });
-            } catch (error) {
-                console.error('Error loading mappings:', error);
-            }
-        }
-
-        async function updateStatus() {
-            try {
-                const response = await fetch('/api/status');
-                const status = await response.json();
-
-                const socketStatus = document.getElementById('socketStatus');
-                socketStatus.className = 'status-item ' + (status.socket_server_running ? 'online' : 'offline');
-                socketStatus.textContent = `Socket: ${status.socket_server_running ? 'Running on :' + status.socket_server_port : 'Offline'}`;
-
-                const oscStatus = document.getElementById('oscStatus');
-                oscStatus.className = 'status-item ' + (status.osc_client_initialized ? 'online' : 'offline');
-                oscStatus.textContent = `OSC: ${status.osc_client_initialized ? status.osc_client_config.host + ':' + status.osc_client_config.port : 'Not Configured'}`;
-
-                document.getElementById('mappingCount').textContent = `Mappings: ${status.mappings_count}`;
-
-                const modeEl = document.getElementById('modeStatus');
-                const activeMode = status.active_mode || '';
-                modeEl.className = 'status-item ' + (activeMode ? 'online' : '');
-                modeEl.textContent = activeMode ? `Mode: ${activeMode}` : 'Mode: none';
-
-                // Show active sequences if any are running
-                let seqEl = document.getElementById('seqStatus');
-                if (!seqEl) {
-                    seqEl = document.createElement('span');
-                    seqEl.id = 'seqStatus';
-                    seqEl.className = 'status-item';
-                    document.getElementById('modeStatus').insertAdjacentElement('afterend', seqEl);
-                }
-                const seqCount = status.active_sequences || 0;
-                seqEl.className = 'status-item ' + (seqCount > 0 ? 'online' : '');
-                seqEl.textContent = seqCount > 0 ? `▶ ${seqCount} sequence${seqCount > 1 ? 's' : ''} playing` : 'Sequences: idle';
-            } catch (error) {
-                console.error('Error loading status:', error);
-            }
-        }
-
-        async function updateOscConfig() {
-            const host = document.getElementById('oscHost').value;
-            const port = parseInt(document.getElementById('oscPort').value);
-            
-            if (!host || !port) {
-                alert('Please enter both host and port');
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/config/osc-client', {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ host, port })
-                });
-                
-                if (response.ok) {
-                    alert('OSC client configuration updated successfully');
-                    await loadConfig();
-                    updateStatus();
-                } else {
-                    const error = await response.json();
-                    alert('Error: ' + error.error);
-                }
-            } catch (error) {
-                console.error('Error updating OSC config:', error);
-                alert('Failed to update OSC configuration');
-            }
-        }
-
-        async function testOscConnection() {
-            try {
-                const response = await fetch('/api/test-osc', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        osc_address: '/test',
-                        osc_args: ['Hello from OSC Proxy']
-                    })
-                });
-                
-                if (response.ok) {
-                    alert('Test OSC message sent to /test with message "Hello from OSC Proxy"');
-                } else {
-                    const error = await response.json();
-                    alert('Error: ' + error.error);
-                }
-            } catch (error) {
-                console.error('Error testing OSC:', error);
-                alert('Failed to send test message');
-            }
-        }
-
-        function openAddMappingModal() {
-            currentEditingId = null;
-            document.getElementById('modalTitle').textContent = 'Add New Mapping';
-            document.getElementById('modalTrigger').value = '';
-            document.getElementById('modalAlert').innerHTML = '';
-            document.getElementById('sequenceStepsList').innerHTML = '';
-            addMappingStep();               // start with one empty step
-            renderModeCheckboxes([]);
-            document.getElementById('mappingModal').classList.add('active');
-        }
-
-        async function editMapping(id) {
-            try {
-                const response = await fetch('/api/mappings');
-                const data = await response.json();
-                const mapping = data.mappings.find(m => m.id === id);
-                if (!mapping) return;
-
-                currentEditingId = id;
-                document.getElementById('modalTitle').textContent = 'Edit Mapping';
-                document.getElementById('modalTrigger').value = mapping.trigger_name;
-                document.getElementById('modalAlert').innerHTML = '';
-
-                // Populate sequence steps (normalize legacy single-command format)
-                document.getElementById('sequenceStepsList').innerHTML = '';
-                const steps = mapping.sequence && mapping.sequence.length > 0
-                    ? mapping.sequence
-                    : (mapping.osc_address
-                        ? [{ delay_ms: 0, osc_address: mapping.osc_address, osc_args: mapping.osc_args || [] }]
-                        : []);
-                if (steps.length === 0) {
-                    addMappingStep();
-                } else {
-                    steps.forEach(step => addMappingStep(step));
-                }
-
-                renderModeCheckboxes(mapping.modes || []);
-                document.getElementById('mappingModal').classList.add('active');
-            } catch (error) {
-                console.error('Error loading mapping:', error);
-            }
-        }
-
-        function closeMappingModal() {
-            document.getElementById('mappingModal').classList.remove('active');
-        }
-
-        async function saveMappingModal() {
-            const trigger = document.getElementById('modalTrigger').value;
-            if (!trigger) {
-                showModalAlert('Please select a trigger', 'error');
-                return;
-            }
-
-            const sequence = getMappingSteps();
-            if (sequence.length === 0) {
-                showModalAlert('Please add at least one step with an OSC address', 'error');
-                return;
-            }
-
-            const selectedModes = Array.from(document.querySelectorAll('.mode-cb:checked')).map(cb => cb.value);
-
-            const mapping = {
-                trigger_name: trigger,
-                sequence: sequence,
-                modes: selectedModes,
-                enabled: true
-            };
-
-            try {
-                let response;
-                if (currentEditingId) {
-                    response = await fetch(`/api/mappings/${currentEditingId}`, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(mapping)
-                    });
-                } else {
-                    response = await fetch('/api/mappings', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(mapping)
-                    });
-                }
-
-                if (response.ok) {
-                    closeMappingModal();
-                    await loadMappings();
-                    updateStatus();
-                } else {
-                    const error = await response.json();
-                    showModalAlert('Error: ' + error.error, 'error');
-                }
-            } catch (error) {
-                console.error('Error saving mapping:', error);
-                showModalAlert('Failed to save mapping', 'error');
-            }
-        }
-
-        // ── Sequence step editor ──────────────────────────────────────────────────
-
-        /** Add a step card to the sequence editor.
-         *  stepData = { delay_ms, osc_address, osc_args } or null for a blank step. */
-        function addMappingStep(stepData = null) {
-            const list = document.getElementById('sequenceStepsList');
-            const stepIndex = list.children.length;
-            const delay   = stepData ? (stepData.delay_ms   || 0)  : 0;
-            const address = stepData ? (stepData.osc_address || '') : '';
-            const args    = stepData ? (stepData.osc_args   || []) : [];
-
-            const stepDiv = document.createElement('div');
-            stepDiv.className = 'sequence-step-item';
-
-            const aliasOpts = aliases.map(a => {
-                const hint = a.osc_args && a.osc_args.length ? ` [${a.osc_args.join(', ')}]` : '';
-                return `<option value="${a.id}">${a.alias}  →  ${a.osc_address}${hint}</option>`;
-            }).join('');
-
-            stepDiv.innerHTML = `
-                <div class="step-header">
-                    <span class="step-label">Step ${stepIndex + 1}</span>
-                    <button class="danger" onclick="removeMappingStep(this)" style="padding:3px 8px;font-size:12px;">✕ Remove</button>
-                </div>
-                <div class="step-row">
-                    <div>
-                        <label>Delay (ms)</label>
-                        <input type="number" class="step-delay" value="${delay}" min="0" placeholder="0">
-                    </div>
-                    <div>
-                        <label>Alias <em style="color:#999;font-size:0.82em;">(optional)</em></label>
-                        <select class="step-alias-select" onchange="onStepAliasSelected(this)">
-                            <option value="">— type address below —</option>
-                            ${aliasOpts}
-                        </select>
-                    </div>
-                    <div>
-                        <label>OSC Address</label>
-                        <input type="text" class="step-address" value="${address}" placeholder="/example/address">
-                    </div>
-                </div>
-                <div class="step-args-section">
-                    <label>Arguments</label>
-                    <div class="step-args-list arg-list"></div>
-                    <button class="secondary" onclick="addStepArg(this)" style="padding:4px 8px;font-size:12px;margin-top:4px;">Add Arg</button>
-                </div>
-            `;
-
-            list.appendChild(stepDiv);
-
-            // Pre-select alias if address matches a known one
-            if (address) {
-                const match = aliases.find(a => a.osc_address === address);
-                if (match) stepDiv.querySelector('.step-alias-select').value = match.id;
-            }
-
-            // Populate args
-            const argsListDiv = stepDiv.querySelector('.step-args-list');
-            args.forEach(arg => addStepArgToList(argsListDiv, arg));
-
-            renumberMappingSteps();
-        }
-
-        /** When user picks an alias in a step row, fill address + args for that step. */
-        function onStepAliasSelected(selectEl) {
-            const aliasId = parseInt(selectEl.value);
-            if (!aliasId) return;
-            const a = aliases.find(x => x.id === aliasId);
-            if (!a) return;
-            const stepDiv = selectEl.closest('.sequence-step-item');
-            stepDiv.querySelector('.step-address').value = a.osc_address;
-            const argsListDiv = stepDiv.querySelector('.step-args-list');
-            argsListDiv.innerHTML = '';
-            (a.osc_args || []).forEach(arg => addStepArgToList(argsListDiv, arg));
-        }
-
-        /** "Add Arg" button handler — btnEl is the button, its previousSibling is the list. */
-        function addStepArg(btnEl) {
-            addStepArgToList(btnEl.previousElementSibling, '');
-        }
-
-        function addStepArgToList(listDiv, value = '') {
-            const item = document.createElement('div');
-            item.className = 'arg-item';
-            item.innerHTML = `
-                <input type="text" class="step-arg-value" placeholder="e.g., \${value:int}, 100" value="${value}">
-                <button class="danger" onclick="this.parentElement.remove()" style="padding:4px 8px;">Remove</button>
-            `;
-            listDiv.appendChild(item);
-        }
-
-        function removeMappingStep(btnEl) {
-            btnEl.closest('.sequence-step-item').remove();
-            renumberMappingSteps();
-        }
-
-        function renumberMappingSteps() {
-            const list = document.getElementById('sequenceStepsList');
-            Array.from(list.children).forEach((stepDiv, i) => {
-                const label = stepDiv.querySelector('.step-label');
-                if (label) label.textContent = `Step ${i + 1}`;
+    // Copy on_enter config
+    try {
+        const r = await fetch(`/api/scenes/${encodeURIComponent(fromScene)}/copy`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ new_name: toScene })
+        });
+        // Ignore 404/409 — scene may not have an on_enter config
+        if (!r.ok && r.status !== 409) {
+            // register it empty instead
+            await fetch('/api/scenes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scene_name: toScene })
             });
         }
+    } catch (_) {}
 
-        /** Collect all step data from the sequence editor into an array. */
-        function getMappingSteps() {
-            const steps = [];
-            document.querySelectorAll('.sequence-step-item').forEach(stepDiv => {
-                const delay_ms     = parseInt(stepDiv.querySelector('.step-delay').value) || 0;
-                const osc_address  = stepDiv.querySelector('.step-address').value.trim();
-                const osc_args     = Array.from(stepDiv.querySelectorAll('.step-arg-value'))
-                                         .map(el => el.value).filter(v => v);
-                if (osc_address) {
-                    steps.push({ delay_ms, osc_address, osc_args });
-                }
+    // Copy trigger mappings
+    const fromMappings = allMappings.filter(m => m.scene === fromScene);
+    let copied = 0;
+    for (const m of fromMappings) {
+        const newM = { ...m, scene: toScene };
+        delete newM.id; delete newM.created_at; delete newM.updated_at;
+        try {
+            await fetch('/api/mappings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newM)
             });
-            return steps;
-        }
+            copied++;
+        } catch (_) {}
+    }
 
-        // ── End sequence step editor ──────────────────────────────────────────────
+    showAlert(`Duplicated to "${toScene}" (${copied} mapping${copied !== 1 ? 's' : ''} copied).`, 'success');
+    await loadSceneSync();
+    // Switch selector to new scene
+    document.getElementById('sceneSelect').value = toScene;
+    renderSceneContent();
+}
 
-        async function deleteMapping(id) {
-            if (!confirm('Are you sure you want to delete this mapping?')) {
-                return;
-            }
-            
-            try {
-                const response = await fetch(`/api/mappings/${id}`, {
-                    method: 'DELETE'
-                });
-                
-                if (response.ok) {
-                    await loadMappings();
-                    updateStatus();
-                } else {
-                    alert('Failed to delete mapping');
-                }
-            } catch (error) {
-                console.error('Error deleting mapping:', error);
-                alert('Failed to delete mapping');
-            }
-        }
+// ── Mapping modal ──────────────────────────────────────────────────────────
 
-        async function toggleMapping(id) {
-            try {
-                const response = await fetch(`/api/mappings/${id}/toggle`, {
-                    method: 'POST'
-                });
-                
-                if (response.ok) {
-                    await loadMappings();
-                } else {
-                    alert('Failed to toggle mapping');
-                }
-            } catch (error) {
-                console.error('Error toggling mapping:', error);
-                alert('Failed to toggle mapping');
-            }
-        }
+function openAddMappingModal() {
+    const scene = getSelectedScene();
+    currentEditingId = null;
+    document.getElementById('modalTitle').textContent = 'Add New Mapping';
+    document.getElementById('modalSceneBadge').textContent = scene || '—';
+    document.getElementById('modalTrigger').value = '';
+    document.getElementById('modalAlert').innerHTML = '';
+    document.getElementById('sequenceStepsList').innerHTML = '';
+    addMappingStep();
+    document.getElementById('mappingModal').classList.add('active');
+}
 
-        function showModalAlert(message, type) {
-            const alertDiv = document.getElementById('modalAlert');
-            alertDiv.innerHTML = `<div class="alert ${type}">${message}</div>`;
-            setTimeout(() => {
-                alertDiv.innerHTML = '';
-            }, 5000);
-        }
+async function editMapping(id) {
+    const mapping = allMappings.find(m => m.id === id);
+    if (!mapping) return;
+    currentEditingId = id;
+    document.getElementById('modalTitle').textContent = 'Edit Mapping';
+    document.getElementById('modalSceneBadge').textContent = mapping.scene || '(all scenes)';
+    document.getElementById('modalTrigger').value = mapping.trigger_name;
+    document.getElementById('modalAlert').innerHTML = '';
+    document.getElementById('sequenceStepsList').innerHTML = '';
+    const steps = mapping.sequence && mapping.sequence.length > 0
+        ? mapping.sequence
+        : (mapping.osc_address
+            ? [{ delay_ms: 0, osc_address: mapping.osc_address, osc_args: mapping.osc_args || [] }]
+            : []);
+    if (steps.length === 0) addMappingStep();
+    else steps.forEach(s => addMappingStep(s));
+    document.getElementById('mappingModal').classList.add('active');
+}
 
-        // ── OSC Alias management ──────────────────────────────────────────────────
+function closeMappingModal() {
+    document.getElementById('mappingModal').classList.remove('active');
+    currentEditingId = null;
+}
 
-        /** Lookup an alias name for a given osc_address, or return null. */
-        function resolveAliasName(oscAddress) {
-            const match = aliases.find(a => a.osc_address === oscAddress);
-            return match ? match.alias : null;
-        }
+async function saveMappingModal() {
+    const trigger = document.getElementById('modalTrigger').value;
+    if (!trigger) { showModalAlert('Please select a trigger', 'error'); return; }
 
-        /** Fetch aliases from the server and refresh all alias-related UI. */
-        async function loadAliases() {
-            try {
-                const r = await fetch('/api/aliases');
-                const data = await r.json();
-                aliases = data.aliases || [];
-                renderAliasList();
-            } catch (e) {
-                console.error('Error loading aliases:', e);
-                aliases = [];
-            }
-        }
+    const sequence = collectStepsFromList('sequenceStepsList');
+    if (sequence.length === 0) {
+        showModalAlert('Please add at least one step with an OSC address', 'error');
+        return;
+    }
 
-        /** Re-render the alias management list in the Aliases card. */
-        function renderAliasList() {
-            const div = document.getElementById('aliasesList');
-            if (!div) return;
-            if (aliases.length === 0) {
-                div.innerHTML = '<p style="color:#6c757d; text-align:center; padding:15px;">No aliases defined yet. Click "Add Alias" to create one.</p>';
-                return;
-            }
-            div.innerHTML = '';
-            aliases.forEach(a => {
-                const item = document.createElement('div');
-                item.className = 'alias-item';
-                const argsText = a.osc_args && a.osc_args.length > 0 ? ` [${a.osc_args.join(', ')}]` : '';
-                const descHtml = a.description ? `<div class="alias-desc">${a.description}</div>` : '';
-                item.innerHTML = `
-                    <div>
-                        <div class="alias-name">${a.alias}</div>
-                        <div class="alias-osc">${a.osc_address}${argsText}</div>
-                        ${descHtml}
-                    </div>
-                    <div style="display:flex; gap:5px;">
-                        <button class="primary" style="padding:5px 10px;font-size:12px;" onclick="openAliasModal(${a.id})">✏️ Edit</button>
-                        <button class="danger" style="padding:5px 10px;font-size:12px;" onclick="deleteAlias(${a.id})">🗑️ Delete</button>
-                    </div>
-                `;
-                div.appendChild(item);
+    const scene = document.getElementById('modalSceneBadge').textContent;
+    const mapping = {
+        trigger_name: trigger,
+        sequence: sequence,
+        scene: (scene === '(all scenes)' || scene === '—') ? '' : scene,
+        enabled: true
+    };
+
+    try {
+        let r;
+        if (currentEditingId) {
+            r = await fetch(`/api/mappings/${currentEditingId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(mapping)
+            });
+        } else {
+            r = await fetch('/api/mappings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(mapping)
             });
         }
-
-        /** Open the add/edit alias modal.  Pass an alias id to edit, or nothing to add. */
-        function openAliasModal(id = null) {
-            currentEditingAliasId = id || null;
-            document.getElementById('aliasModalTitle').textContent = id ? 'Edit Alias' : 'Add Alias';
-            document.getElementById('aliasModalAlert').innerHTML = '';
-            document.getElementById('aliasArgsList').innerHTML = '';
-            if (id) {
-                const a = aliases.find(x => x.id === id);
-                if (!a) return;
-                document.getElementById('aliasName').value = a.alias;
-                document.getElementById('aliasOscAddress').value = a.osc_address;
-                document.getElementById('aliasDescription').value = a.description || '';
-                (a.osc_args || []).forEach(arg => addAliasArgument(arg));
-            } else {
-                document.getElementById('aliasName').value = '';
-                document.getElementById('aliasOscAddress').value = '';
-                document.getElementById('aliasDescription').value = '';
-            }
-            document.getElementById('aliasModal').classList.add('active');
+        if (r.ok) {
+            closeMappingModal();
+            await loadSceneSync();
+        } else {
+            const err = await r.json();
+            showModalAlert('Error: ' + (err.error || r.statusText), 'error');
         }
+    } catch (e) {
+        showModalAlert('Failed to save mapping: ' + e.message, 'error');
+    }
+}
 
-        function closeAliasModal() {
-            document.getElementById('aliasModal').classList.remove('active');
-            currentEditingAliasId = null;
-        }
+async function deleteMapping(id) {
+    if (!confirm('Delete this mapping?')) return;
+    try {
+        const r = await fetch(`/api/mappings/${id}`, { method: 'DELETE' });
+        if (r.ok) { await loadSceneSync(); updateStatus(); }
+        else showAlert('Failed to delete mapping', 'error');
+    } catch (e) { showAlert('Error: ' + e.message, 'error'); }
+}
 
-        function addAliasArgument(value = '') {
-            const list = document.getElementById('aliasArgsList');
-            const item = document.createElement('div');
-            item.className = 'arg-item';
-            item.innerHTML = `
-                <input type="text" class="alias-arg-value" placeholder="e.g., 100, hello" value="${value}">
-                <button class="danger" onclick="this.parentElement.remove()">Remove</button>
-            `;
-            list.appendChild(item);
-        }
+async function toggleMapping(id) {
+    try {
+        const r = await fetch(`/api/mappings/${id}/toggle`, { method: 'POST' });
+        if (r.ok) await loadSceneSync();
+        else showAlert('Failed to toggle mapping', 'error');
+    } catch (e) { showAlert('Error: ' + e.message, 'error'); }
+}
 
-        async function saveAlias() {
-            const alias    = document.getElementById('aliasName').value.trim();
-            const osc_address  = document.getElementById('aliasOscAddress').value.trim();
-            const description  = document.getElementById('aliasDescription').value.trim();
-            const osc_args = Array.from(document.querySelectorAll('.alias-arg-value'))
+// ── Sequence step editor (shared by mapping modal + on-enter editor) ───────
+
+function addMappingStep(stepData = null) {
+    addStepToList('sequenceStepsList', stepData);
+}
+
+function addStepToList(listId, stepData = null) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    const idx     = list.children.length;
+    const delay   = stepData ? (stepData.delay_ms    || 0)  : 0;
+    const address = stepData ? (stepData.osc_address || '') : '';
+    const args    = stepData ? (stepData.osc_args    || []) : [];
+    const aliasOpts = aliases.map(a => {
+        const hint = a.osc_args && a.osc_args.length ? ` [${a.osc_args.join(', ')}]` : '';
+        return `<option value="${a.id}">${a.alias}  →  ${a.osc_address}${hint}</option>`;
+    }).join('');
+    const stepDiv = document.createElement('div');
+    stepDiv.className = 'sequence-step-item';
+    stepDiv.innerHTML = `
+        <div class="step-header">
+            <span class="step-label">Step ${idx + 1}</span>
+            <button class="danger sm" onclick="removeMappingStep(this,'${listId}')">✕ Remove</button>
+        </div>
+        <div class="step-row">
+            <div><label>Delay (ms)</label>
+                 <input type="number" class="step-delay" value="${delay}" min="0"></div>
+            <div><label>Alias <em style="color:#999;font-size:0.82em;">(opt)</em></label>
+                 <select class="step-alias-select" onchange="onStepAliasSelected(this,'${listId}')">
+                     <option value="">— type address below —</option>${aliasOpts}
+                 </select></div>
+            <div><label>OSC Address</label>
+                 <input type="text" class="step-address" value="${address}" placeholder="/example/address"></div>
+        </div>
+        <div class="step-args-section">
+            <label>Arguments</label>
+            <div class="step-args-list arg-list"></div>
+            <button class="secondary sm" onclick="addStepArg(this)" style="margin-top:4px;">Add Arg</button>
+        </div>`;
+    list.appendChild(stepDiv);
+    if (address) {
+        const match = aliases.find(a => a.osc_address === address);
+        if (match) stepDiv.querySelector('.step-alias-select').value = match.id;
+    }
+    const argsListDiv = stepDiv.querySelector('.step-args-list');
+    args.forEach(arg => addStepArgToList(argsListDiv, arg));
+    renumberSteps(listId);
+}
+
+function onStepAliasSelected(selectEl, listId) {
+    const aliasId = parseInt(selectEl.value);
+    if (!aliasId) return;
+    const a = aliases.find(x => x.id === aliasId);
+    if (!a) return;
+    const stepDiv = selectEl.closest('.sequence-step-item');
+    stepDiv.querySelector('.step-address').value = a.osc_address;
+    const argsListDiv = stepDiv.querySelector('.step-args-list');
+    argsListDiv.innerHTML = '';
+    (a.osc_args || []).forEach(arg => addStepArgToList(argsListDiv, arg));
+}
+
+function addStepArg(btnEl) {
+    addStepArgToList(btnEl.previousElementSibling, '');
+}
+
+function addStepArgToList(listDiv, value = '') {
+    const item = document.createElement('div');
+    item.className = 'arg-item';
+    item.innerHTML = `
+        <input type="text" class="step-arg-value" placeholder="e.g., \${value:int}, 100" value="${value}">
+        <button class="danger sm" onclick="this.parentElement.remove()">Remove</button>`;
+    listDiv.appendChild(item);
+}
+
+function removeMappingStep(btnEl, listId) {
+    btnEl.closest('.sequence-step-item').remove();
+    renumberSteps(listId);
+}
+
+function renumberSteps(listId) {
+    const list = document.getElementById(listId);
+    if (!list) return;
+    Array.from(list.children).forEach((div, i) => {
+        const lbl = div.querySelector('.step-label');
+        if (lbl) lbl.textContent = `Step ${i + 1}`;
+    });
+}
+
+function collectStepsFromList(listId) {
+    const steps = [];
+    const list = document.getElementById(listId);
+    if (!list) return steps;
+    list.querySelectorAll('.sequence-step-item').forEach(stepDiv => {
+        const delay_ms    = parseInt(stepDiv.querySelector('.step-delay').value) || 0;
+        const osc_address = stepDiv.querySelector('.step-address').value.trim();
+        const osc_args    = Array.from(stepDiv.querySelectorAll('.step-arg-value'))
                                   .map(el => el.value).filter(v => v);
+        if (osc_address) steps.push({ delay_ms, osc_address, osc_args });
+    });
+    return steps;
+}
 
-            if (!alias) { showAliasModalAlert('Please enter an alias name', 'error'); return; }
-            if (!osc_address) { showAliasModalAlert('Please enter an OSC address', 'error'); return; }
+// ── Status bar ────────────────────────────────────────────────────────────
 
-            const payload = { alias, osc_address, osc_args, description };
-            try {
-                const url    = currentEditingAliasId ? `/api/aliases/${currentEditingAliasId}` : '/api/aliases';
-                const method = currentEditingAliasId ? 'PUT' : 'POST';
-                const r = await fetch(url, {
-                    method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                if (r.ok) {
-                    closeAliasModal();
-                    await loadAliases();
-                    // Refresh mapping list so alias names update in place
-                    await loadMappings();
-                } else {
-                    const err = await r.json();
-                    showAliasModalAlert('Error: ' + err.error, 'error');
-                }
-            } catch (e) {
-                showAliasModalAlert('Failed to save alias', 'error');
-            }
+async function updateStatus() {
+    try {
+        const r = await fetch('/api/status');
+        const s = await r.json();
+
+        const socketEl = document.getElementById('socketStatus');
+        socketEl.className = 'status-item ' + (s.socket_server_running ? 'online' : 'offline');
+        socketEl.textContent = `Socket: ${s.socket_server_running ? 'Running :' + s.socket_server_port : 'Offline'}`;
+
+        const oscEl = document.getElementById('oscStatus');
+        oscEl.className = 'status-item ' + (s.osc_client_initialized ? 'online' : 'offline');
+        oscEl.textContent = `OSC: ${s.osc_client_initialized ? s.osc_client_config.host + ':' + s.osc_client_config.port : 'Not Configured'}`;
+
+        document.getElementById('mappingCount').textContent = `Mappings: ${s.mappings_count}`;
+
+        const modeEl = document.getElementById('modeStatus');
+        const activeMode = s.active_mode || 'Unknown';
+        const isUnknown = (activeMode === 'Unknown' || activeMode === '');
+        modeEl.className = 'status-item ' + (isUnknown ? '' : 'online');
+        modeEl.style.color = isUnknown ? '#b45309' : '';
+        modeEl.textContent = `Scene: ${activeMode}`;
+
+        let seqEl = document.getElementById('seqStatus');
+        if (!seqEl) {
+            seqEl = document.createElement('span');
+            seqEl.id = 'seqStatus';
+            seqEl.className = 'status-item';
+            document.getElementById('modeStatus').insertAdjacentElement('afterend', seqEl);
         }
+        const seqCount = s.active_sequences || 0;
+        seqEl.className = 'status-item ' + (seqCount > 0 ? 'online' : '');
+        seqEl.textContent = seqCount > 0 ? `▶ ${seqCount} sequence${seqCount > 1 ? 's' : ''} playing` : 'Sequences: idle';
+    } catch (e) { console.error('updateStatus:', e); }
+}
 
-        async function deleteAlias(id) {
-            if (!confirm('Delete this alias? Existing mappings using this OSC address are unaffected.')) return;
-            try {
-                const r = await fetch(`/api/aliases/${id}`, { method: 'DELETE' });
-                if (r.ok) {
-                    await loadAliases();
-                    await loadMappings();   // re-render so alias badges update
-                } else {
-                    alert('Failed to delete alias');
-                }
-            } catch (e) {
-                alert('Failed to delete alias');
-            }
+async function updateOscConfig() {
+    const host = document.getElementById('oscHost').value;
+    const port = parseInt(document.getElementById('oscPort').value);
+    if (!host || !port) { alert('Please enter both host and port'); return; }
+    try {
+        const r = await fetch('/api/config/osc-client', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host, port })
+        });
+        if (r.ok) { alert('OSC client configuration updated'); updateStatus(); }
+        else { const e = await r.json(); alert('Error: ' + e.error); }
+    } catch (e) { alert('Failed to update OSC configuration'); }
+}
+
+async function testOscConnection() {
+    try {
+        const r = await fetch('/api/test-osc', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ osc_address: '/test', osc_args: ['Hello from OSC Proxy'] })
+        });
+        if (r.ok) alert('Test OSC message sent to /test');
+        else { const e = await r.json(); alert('Error: ' + e.error); }
+    } catch (e) { alert('Failed to send test message'); }
+}
+
+async function refreshScene() {
+    const btn = document.getElementById('refreshSceneBtn');
+    btn.disabled = true; btn.textContent = '⟳ Refreshing…';
+    try {
+        const r = await fetch('/api/refresh-mode', { method: 'POST' });
+        const d = await r.json();
+        if (r.ok) {
+            const modeEl = document.getElementById('modeStatus');
+            const activeMode = d.active_mode || 'Unknown';
+            modeEl.className = 'status-item ' + (activeMode === 'Unknown' ? '' : 'online');
+            modeEl.style.color = activeMode === 'Unknown' ? '#b45309' : '';
+            modeEl.textContent = `Scene: ${activeMode}`;
+            btn.textContent = d.changed ? '⟳ Scene Updated' : '⟳ Refresh Scene';
+            await loadSceneSync();
+        } else {
+            btn.textContent = '⟳ Error – ' + (d.error || 'unknown');
         }
+    } catch (e) { btn.textContent = '⟳ Unreachable'; }
+    finally { setTimeout(() => { btn.disabled = false; btn.textContent = '⟳ Refresh Scene'; }, 3000); }
+}
 
-        function showAliasModalAlert(message, type) {
-            const div = document.getElementById('aliasModalAlert');
-            div.innerHTML = `<div class="alert ${type}">${message}</div>`;
-            setTimeout(() => { div.innerHTML = ''; }, 5000);
-        }
+// ── OSC Alias management ──────────────────────────────────────────────────
 
-        // ── End alias management ──────────────────────────────────────────────────
+function resolveAliasName(oscAddress) {
+    const match = aliases.find(a => a.osc_address === oscAddress);
+    return match ? match.alias : null;
+}
 
-        // Close modals when clicking outside
-        window.onclick = function(event) {
-            if (event.target === document.getElementById('mappingModal')) {
-                closeMappingModal();
-            }
-            if (event.target === document.getElementById('aliasModal')) {
-                closeAliasModal();
-            }
-        }
+async function loadAliases() {
+    try {
+        const r = await fetch('/api/aliases');
+        const data = await r.json();
+        aliases = data.aliases || [];
+        renderAliasList();
+    } catch (e) { console.error('loadAliases:', e); aliases = []; }
+}
 
-        // Auto-refresh status every 5 seconds
-        setInterval(updateStatus, 5000);
+function renderAliasList() {
+    const div = document.getElementById('aliasesList');
+    if (!div) return;
+    if (aliases.length === 0) {
+        div.innerHTML = '<p style="color:#6c757d;text-align:center;padding:15px;">No aliases defined. Click "Add Alias" to create one.</p>';
+        return;
+    }
+    div.innerHTML = '';
+    aliases.forEach(a => {
+        const item = document.createElement('div');
+        item.className = 'alias-item';
+        const argsText = a.osc_args && a.osc_args.length ? ` [${a.osc_args.join(', ')}]` : '';
+        const descHtml = a.description ? `<div class="alias-desc">${a.description}</div>` : '';
+        item.innerHTML = `
+            <div>
+                <div class="alias-name">${a.alias}</div>
+                <div class="alias-osc">${a.osc_address}${argsText}</div>
+                ${descHtml}
+            </div>
+            <div style="display:flex;gap:5px;">
+                <button class="primary sm" onclick="openAliasModal(${a.id})">✏️ Edit</button>
+                <button class="danger sm"  onclick="deleteAlias(${a.id})">🗑️ Delete</button>
+            </div>`;
+        div.appendChild(item);
+    });
+}
 
-        // Load data on page load
-        loadData();
-    </script>
+function openAliasModal(id = null) {
+    currentEditingAliasId = id || null;
+    document.getElementById('aliasModalTitle').textContent = id ? 'Edit Alias' : 'Add Alias';
+    document.getElementById('aliasModalAlert').innerHTML = '';
+    document.getElementById('aliasArgsList').innerHTML = '';
+    if (id) {
+        const a = aliases.find(x => x.id === id);
+        if (!a) return;
+        document.getElementById('aliasName').value = a.alias;
+        document.getElementById('aliasOscAddress').value = a.osc_address;
+        document.getElementById('aliasDescription').value = a.description || '';
+        (a.osc_args || []).forEach(arg => addAliasArgument(arg));
+    } else {
+        document.getElementById('aliasName').value = '';
+        document.getElementById('aliasOscAddress').value = '';
+        document.getElementById('aliasDescription').value = '';
+    }
+    document.getElementById('aliasModal').classList.add('active');
+}
+
+function closeAliasModal() {
+    document.getElementById('aliasModal').classList.remove('active');
+    currentEditingAliasId = null;
+}
+
+function addAliasArgument(value = '') {
+    const list = document.getElementById('aliasArgsList');
+    const item = document.createElement('div');
+    item.className = 'arg-item';
+    item.innerHTML = `
+        <input type="text" class="alias-arg-value" placeholder="e.g., 100, hello" value="${value}">
+        <button class="danger sm" onclick="this.parentElement.remove()">Remove</button>`;
+    list.appendChild(item);
+}
+
+async function saveAlias() {
+    const alias       = document.getElementById('aliasName').value.trim();
+    const osc_address = document.getElementById('aliasOscAddress').value.trim();
+    const description = document.getElementById('aliasDescription').value.trim();
+    const osc_args    = Array.from(document.querySelectorAll('.alias-arg-value'))
+                            .map(el => el.value).filter(v => v);
+    if (!alias)       { showAliasModalAlert('Please enter an alias name', 'error'); return; }
+    if (!osc_address) { showAliasModalAlert('Please enter an OSC address', 'error'); return; }
+
+    const payload = { alias, osc_address, osc_args, description };
+    try {
+        const url    = currentEditingAliasId ? `/api/aliases/${currentEditingAliasId}` : '/api/aliases';
+        const method = currentEditingAliasId ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(payload) });
+        if (r.ok) { closeAliasModal(); await loadAliases(); }
+        else { const e = await r.json(); showAliasModalAlert('Error: ' + e.error, 'error'); }
+    } catch (e) { showAliasModalAlert('Failed to save alias', 'error'); }
+}
+
+async function deleteAlias(id) {
+    if (!confirm('Delete this alias?')) return;
+    try {
+        const r = await fetch(`/api/aliases/${id}`, { method: 'DELETE' });
+        if (r.ok) { await loadAliases(); }
+        else showAlert('Failed to delete alias', 'error');
+    } catch (e) { showAlert('Error: ' + e.message, 'error'); }
+}
+
+function showAliasModalAlert(message, type) {
+    const div = document.getElementById('aliasModalAlert');
+    div.innerHTML = `<div class="alert ${type}">${message}</div>`;
+    setTimeout(() => { div.innerHTML = ''; }, 5000);
+}
+
+function showModalAlert(message, type) {
+    const alertDiv = document.getElementById('modalAlert');
+    alertDiv.innerHTML = `<div class="alert ${type}">${message}</div>`;
+    setTimeout(() => { alertDiv.innerHTML = ''; }, 5000);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+
+function esc(text) {
+    const d = document.createElement('div');
+    d.textContent = String(text);
+    return d.innerHTML;
+}
+
+function showAlert(msg, type) {
+    let banner = document.getElementById('_globalAlert');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = '_globalAlert';
+        banner.style.cssText = 'position:fixed;top:16px;right:16px;z-index:9999;' +
+            'padding:12px 18px;border-radius:6px;font-size:0.95em;max-width:400px;' +
+            'box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+        document.body.appendChild(banner);
+    }
+    banner.className = 'alert ' + type;
+    banner.textContent = msg;
+    banner.style.display = 'block';
+    clearTimeout(banner._t);
+    banner._t = setTimeout(() => { banner.style.display = 'none'; }, 4000);
+}
+
+// Close modals when clicking outside
+window.onclick = function(event) {
+    if (event.target === document.getElementById('mappingModal')) closeMappingModal();
+    if (event.target === document.getElementById('aliasModal'))   closeAliasModal();
+};
+
+// Auto-refresh status every 5 s
+setInterval(updateStatus, 5000);
+
+// Load on page load
+loadData();
+</script>
 </body>
 </html>
