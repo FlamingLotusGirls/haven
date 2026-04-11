@@ -70,6 +70,20 @@
                 <span>Ring 2 (1 nozzle per section)</span>
             </div>
         </div>
+        <div class="legend" style="margin-top: 8px;">
+            <div class="legend-item">
+                <div style="width:18px;height:18px;background:rgba(192,57,43,0.35);border:2px solid #c0392b;border-radius:3px;"></div>
+                <span style="color:#e07060;font-weight:bold;">Board 1 (slices 1–2)</span>
+            </div>
+            <div class="legend-item">
+                <div style="width:18px;height:18px;background:rgba(39,174,96,0.35);border:2px solid #27ae60;border-radius:3px;"></div>
+                <span style="color:#5dba85;font-weight:bold;">Board 2 (slices 3–4)</span>
+            </div>
+            <div class="legend-item">
+                <div style="width:18px;height:18px;background:rgba(41,128,185,0.35);border:2px solid #2980b9;border-radius:3px;"></div>
+                <span style="color:#5ba8d8;font-weight:bold;">Board 3 (slices 5–6)</span>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -95,6 +109,11 @@
         
         // Colors for different rings
         const ringColors = ['#ff6b6b', '#4ecdc4', '#45b7d1'];
+        
+        // Board color assignments: slices 0-1 = Board 1, slices 2-3 = Board 2, slices 4-5 = Board 3
+        const boardColors = ['#c0392b', '#27ae60', '#2980b9']; // Board 1, 2, 3
+        const boardColorsFill = ['rgba(192,57,43,0.18)', 'rgba(39,174,96,0.18)', 'rgba(41,128,185,0.18)'];
+        function sliceToBoard(sectionIdx) { return Math.floor(sectionIdx / 2); }
         
         // Generate nozzle positions
         const nozzles = [];
@@ -167,6 +186,39 @@
             ctx.stroke();
             
             ctx.setLineDash([]);
+            
+            // Draw board-colored slice backgrounds
+            const sliceRadius = 310; // slightly larger than nozzle reach
+            for (let section = 0; section < 6; section++) {
+                const boardIdx = sliceToBoard(section);
+                const startAngle = section * Math.PI * 2.0 / 6.0;
+                const endAngle = (section + 1) * Math.PI * 2.0 / 6.0;
+                
+                // Convert from our coordinate system (0=up, CW) to canvas angles (0=right, CW)
+                const canvasStart = startAngle - Math.PI / 2;
+                const canvasEnd = endAngle - Math.PI / 2;
+                
+                ctx.fillStyle = boardColorsFill[boardIdx];
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.arc(centerX, centerY, sliceRadius, canvasStart, canvasEnd);
+                ctx.closePath();
+                ctx.fill();
+                
+                // Draw board label at midpoint of the two-slice span (once per board)
+                if (section % 2 === 0) {
+                    const midAngle = startAngle + Math.PI / 3.0;
+                    const labelRadius = 235;
+                    const labelX = centerX + Math.sin(midAngle) * labelRadius;
+                    const labelY = centerY - Math.cos(midAngle) * labelRadius;
+                    
+                    ctx.fillStyle = boardColors[boardIdx];
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(`Board ${boardIdx + 1}`, labelX, labelY);
+                }
+            }
             
             // Draw center point
             ctx.fillStyle = '#fff';
