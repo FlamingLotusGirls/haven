@@ -27,6 +27,7 @@ import tempfile
 import threading
 import logging
 import argparse
+import requests
 from datetime import datetime, date
 
 app = Flask(__name__, static_folder='.', static_url_path='')
@@ -34,6 +35,12 @@ app = Flask(__name__, static_folder='.', static_url_path='')
 # Configuration
 MODES_FILE = 'modes.json'
 DEFAULT_PORT = 5003
+
+# Trigger gateway integration — the mode service acts as a trigger device and fires
+# a 'SceneChange' Discrete trigger whenever the active scene changes.
+GATEWAY_URL = os.environ.get('GATEWAY_URL', 'http://localhost:5002')
+SCENE_TRIGGER_NAME = 'SceneChange'
+DEVICE_NAME        = 'ModeService'
 
 # Set up logging
 logging.basicConfig(
@@ -55,6 +62,9 @@ class ModeManager:
         self._lock = threading.Lock()
         self.load_modes()
         self._start_scheduler()
+        # Best-effort: register this service as a device in the gateway at startup.
+        threading.Thread(target=self._register_with_gateway,
+                         daemon=True, name='scene-trigger-init').start()
 
     # ------------------------------------------------------------------
     # Persistence
@@ -133,6 +143,9 @@ class ModeManager:
             self.save_modes()
 
         logger.info(f"Created mode: {name}")
+        # Re-register with the gateway so the SceneChange trigger range includes the new mode.
+        threading.Thread(target=self._register_with_gateway,
+                         daemon=True, name='scene-trigger-update').start()
         return True, f"Mode '{name}' created"
 
     def delete_mode(self, name):
@@ -152,11 +165,18 @@ class ModeManager:
             self.save_modes()
 
         logger.info(f"Deleted mode: {name}")
+        # Re-register with the gateway so the SceneChange trigger range drops the deleted mode.
+        threading.Thread(target=self._register_with_gateway,
+                         daemon=True, name='scene-trigger-update').start()
         return True, f"Mode '{name}' deleted"
 
     def get_modes(self):
         """Get sorted list of all modes."""
-        return sorted(list(self.modes))
+        # Must hold the lock: list(set) iterates the set, and a concurrent
+        # create_mode/delete_mode can mutate it mid-iteration, raising
+        # RuntimeError: Set changed size during iteration.
+        with self._lock:
+            return sorted(self.modes)
 
     def set_active_mode(self, name):
         """Set the active mode (None clears it)."""
@@ -174,11 +194,69 @@ class ModeManager:
             self.save_modes()
 
         logger.info(f"Set active mode: {name}")
+        # Push scene_change trigger to gateway so all services update immediately.
+        threading.Thread(target=self._push_scene_trigger, args=(name,),
+                         daemon=True, name='scene-push').start()
         return True, f"Active mode set to '{name}'"
+
+    # ------------------------------------------------------------------
+    # Scene trigger dispatch
+    # ------------------------------------------------------------------
+
+    def _push_scene_trigger(self, scene_name):
+        """POST a SceneChange trigger event to the trigger gateway (non-blocking)."""
+        url = f"{GATEWAY_URL}/api/trigger-event"
+        payload = {'name': SCENE_TRIGGER_NAME, 'value': scene_name}
+        try:
+            resp = requests.post(url, json=payload, timeout=3)
+            if resp.status_code == 200:
+                logger.info(f"SceneChange trigger dispatched → gateway (scene={scene_name})")
+            else:
+                logger.warning(f"Gateway returned {resp.status_code} for SceneChange: {resp.text}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not reach trigger gateway for SceneChange: {e}")
+
+    def _register_with_gateway(self):
+        """Register this service as a device in the trigger gateway.
+
+        Uses POST /api/register-device so the gateway tracks ModeService as an
+        online/offline device and keeps the SceneChange trigger's discrete value
+        list in sync with the current set of modes.
+
+        Called at startup and after every create_mode / delete_mode.
+        """
+        # get_modes() acquires self._lock briefly — must be called OUTSIDE any
+        # existing lock to avoid a deadlock.
+        modes = self.get_modes()
+        url = f"{GATEWAY_URL}/api/register-device"
+        payload = {
+            'name': DEVICE_NAME,
+            'ip': 'localhost',
+            'triggers': [{
+                'name': SCENE_TRIGGER_NAME,
+                'type': 'Discrete',
+                'range': {'values': modes},
+                'description': 'Active scene broadcast by mode_service on every mode change',
+            }],
+        }
+        try:
+            resp = requests.post(url, json=payload, timeout=3)
+            if resp.ok:
+                logger.info(
+                    f"Registered '{SCENE_TRIGGER_NAME}' trigger with gateway "
+                    f"(device='{DEVICE_NAME}', modes={modes})"
+                )
+            else:
+                logger.warning(
+                    f"Gateway device registration failed: {resp.status_code} {resp.text}"
+                )
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Could not reach trigger gateway for device registration: {e}")
 
     def get_active_mode(self):
         """Get the active mode."""
-        return self.active_mode
+        with self._lock:
+            return self.active_mode
 
     # ------------------------------------------------------------------
     # Schedule management
@@ -294,6 +372,8 @@ class ModeManager:
         today_str = date.today().isoformat()
         fired_ids = []
 
+        fired_mode = None
+
         with self._lock:
             for schedule in self.schedules:
                 if schedule['time'] != now_str:
@@ -308,6 +388,7 @@ class ModeManager:
                 mode = schedule['mode']
                 if mode in self.modes:
                     self.active_mode = mode
+                    fired_mode = mode   # track for trigger push (works for daily AND once)
                     schedule['last_fired'] = datetime.now().isoformat()
                     logger.info(f"Scheduler: activated mode '{mode}' (schedule {schedule['id']})")
                 else:
@@ -322,6 +403,11 @@ class ModeManager:
 
             if self.active_mode or fired_ids:
                 self.save_modes()
+
+        # Push scene_change trigger for scheduler-activated modes (outside the lock).
+        if fired_mode:
+            threading.Thread(target=self._push_scene_trigger, args=(fired_mode,),
+                             daemon=True, name='scene-push-sched').start()
 
 
 # ---------------------------------------------------------------------------
@@ -439,17 +525,109 @@ def delete_schedule(schedule_id):
 
 
 # ---------------------------------------------------------------------------
+# Scene Status  (aggregates config from flame service + OSC proxy)
+# ---------------------------------------------------------------------------
+
+# Service URLs — override with env vars when the services run on different hosts.
+_FLAME_URL   = os.environ.get('FLAME_SERVICE_URL', 'http://localhost:5001')
+_OSC_URL     = os.environ.get('OSC_PROXY_URL',     'http://localhost:5004')
+_MURMURA_URL = os.environ.get('MURMURA_URL',       'http://localhost:8765')
+
+
+@app.route('/api/scene-status', methods=['GET'])
+def scene_status():
+    """GET /api/scene-status
+
+    Returns the current scene's configuration aggregated from:
+      - The flame service  (trigger-to-flame-sequence mappings for the scene)
+      - The OSC proxy      (on_enter OSC sequence configured for the scene)
+
+    Also returns service URLs so the UI can build clickable links.
+
+    Response shape:
+    {
+      "active_scene": str | null,
+      "flame_service": {
+        "url": str,
+        "reachable": bool,
+        "mappings": [...],   // trigger mappings whose modes contain active_scene
+        "configured": bool   // true iff mappings is non-empty
+      },
+      "osc_proxy": {
+        "url": str,
+        "reachable": bool,
+        "on_enter": [...],   // OSC steps from scenes[active_scene].on_enter
+        "description": str,
+        "configured": bool
+      },
+      "murmura_url": str     // link only — not polled
+    }
+    """
+    active_scene = mode_manager.get_active_mode()
+
+    # ── Flame service ──────────────────────────────────────────────────────
+    flame = {'url': _FLAME_URL, 'reachable': False, 'mappings': [], 'configured': False}
+    try:
+        r = requests.get(f"{_FLAME_URL}/trigger-integration/mappings", timeout=3)
+        if r.status_code == 200:
+            flame['reachable'] = True
+            all_mappings = r.json().get('mappings', [])
+            if active_scene:
+                scene_mappings = [m for m in all_mappings
+                                  if active_scene in m.get('modes', [])]
+            else:
+                scene_mappings = []
+            flame['mappings']   = scene_mappings
+            flame['configured'] = len(scene_mappings) > 0
+    except Exception as e:
+        logger.warning("Could not reach flame service for scene-status: %s", e)
+
+    # ── OSC proxy ──────────────────────────────────────────────────────────
+    osc = {'url': _OSC_URL, 'reachable': False, 'on_enter': [],
+           'mappings': [], 'description': '', 'configured': False}
+    try:
+        r = requests.get(f"{_OSC_URL}/api/scenes", timeout=3)
+        if r.status_code == 200:
+            osc['reachable'] = True
+            scenes = r.json().get('scenes', {})
+            if active_scene and active_scene in scenes:
+                scene_cfg = scenes[active_scene]
+                on_enter  = scene_cfg.get('on_enter', [])
+                osc['on_enter']    = on_enter
+                osc['description'] = scene_cfg.get('description', '')
+
+        # Also fetch trigger mappings for this scene (new scene-first API)
+        if active_scene and osc['reachable']:
+            mr = requests.get(f"{_OSC_URL}/api/mappings",
+                              params={'scene': active_scene}, timeout=3)
+            if mr.status_code == 200:
+                osc['mappings'] = mr.json().get('mappings', [])
+
+        osc['configured'] = len(osc['on_enter']) > 0 or len(osc['mappings']) > 0
+    except Exception as e:
+        logger.warning("Could not reach OSC proxy for scene-status: %s", e)
+
+    return jsonify({
+        'active_scene':  active_scene,
+        'flame_service': flame,
+        'osc_proxy':     osc,
+        'murmura_url':   _MURMURA_URL,
+    }), 200
+
+
+# ---------------------------------------------------------------------------
 # Health check
 # ---------------------------------------------------------------------------
 
 @app.route('/health', methods=['GET'])
 def health():
+    # Use the thread-safe accessor methods rather than reading attributes directly.
     return jsonify({
         'status': 'healthy',
         'service': 'mode_service',
-        'modes_count': len(mode_manager.modes),
-        'active_mode': mode_manager.active_mode,
-        'schedules_count': len(mode_manager.schedules),
+        'modes_count': len(mode_manager.get_modes()),
+        'active_mode': mode_manager.get_active_mode(),
+        'schedules_count': len(mode_manager.get_schedules()),
     }), 200
 
 

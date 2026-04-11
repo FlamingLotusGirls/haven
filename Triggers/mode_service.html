@@ -251,6 +251,69 @@
     .empty-state { color: #777; font-style: italic; text-align: center; padding: 18px 0; }
     .section-sub { font-size: 0.82rem; color: #999; margin-bottom: 12px; }
     .refresh-time { font-size: 0.75rem; color: #888; text-align: right; margin-top: 10px; }
+
+    /* ── Scene status card ───────────────────────────────────────── */
+    .svc-link {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 14px;
+      background: rgba(123,79,166,.25);
+      border: 1px solid rgba(123,79,166,.5);
+      border-radius: 8px;
+      color: #c390ff; text-decoration: none;
+      font-size: 0.88rem; font-weight: bold;
+      transition: all .2s;
+    }
+    .svc-link:hover { background: rgba(123,79,166,.45); color: #fff; transform: translateY(-1px); }
+
+    .svc-panel {
+      background: rgba(0,0,0,.2);
+      border: 1px solid rgba(123,79,166,.2);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-top: 10px;
+    }
+    .svc-panel-header {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .svc-panel-title { font-weight: bold; font-size: 0.95rem; color: #e0e0e0; flex: 1; }
+
+    .svc-badge { font-size: 0.72rem; padding: 2px 8px; border-radius: 20px; font-weight: bold; white-space: nowrap; }
+    .svc-badge-ok    { background: #1a7a4a; color: #a6ffd2; }
+    .svc-badge-warn  { background: #5a3200; color: #ffd8a0; }
+    .svc-badge-error { background: #7a1a1a; color: #ffaaaa; }
+    .svc-badge-info  { background: rgba(40,100,160,.35); color: #a6d4ff; }
+
+    .unconfigured-warning {
+      background: rgba(180,90,0,.18);
+      border: 1px solid rgba(200,120,0,.35);
+      color: #ffd8a0; border-radius: 6px;
+      padding: 10px 14px; font-size: 0.88rem;
+    }
+
+    .mapping-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 8px; }
+    .mapping-table th {
+      background: rgba(123,79,166,.2); color: #b88aff;
+      padding: 7px 10px; text-align: left;
+      font-size: 0.78rem; text-transform: uppercase; letter-spacing: .5px;
+      border-bottom: 1px solid rgba(123,79,166,.3);
+    }
+    .mapping-table td {
+      padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.05);
+      color: #ddd; vertical-align: top;
+    }
+    .mapping-table tr:last-child td { border-bottom: none; }
+    .mapping-table tr:hover td { background: rgba(123,79,166,.08); }
+
+    .osc-step {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.05);
+      font-size: 0.85rem; flex-wrap: wrap;
+    }
+    .osc-step:last-child { border-bottom: none; }
+    .osc-delay   { color: #888; font-size: 0.78rem; min-width: 90px; }
+    .osc-address { color: #a6e0ff; font-family: 'Courier New', monospace; }
+    .osc-args    { color: #aaa; font-family: 'Courier New', monospace; font-size: 0.78rem; }
   </style>
 </head>
 <body>
@@ -332,6 +395,27 @@
         <div class="empty-state">Loading…</div>
       </div>
       <div class="refresh-time" id="sched-refresh-time"></div>
+    </div>
+
+    <!-- ── Scene Status card ──────────────────────────────────── -->
+    <div class="card full-width">
+      <h2>🔍 Current Scene Configuration</h2>
+
+      <!-- Quick-navigation links to each service -->
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+        <a class="svc-link" href="http://localhost:5001" target="_blank">🔥 Flame Service</a>
+        <a class="svc-link" href="http://localhost:5004" target="_blank">🎵 OSC Proxy</a>
+        <a class="svc-link" href="http://localhost:8765" target="_blank">🔊 Sound / Murmura Gateway</a>
+      </div>
+
+      <div id="scene-status-content">
+        <div class="empty-state">Loading…</div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+        <button class="btn btn-ghost btn-sm" onclick="loadSceneStatus()">🔄 Refresh</button>
+        <span class="refresh-time" id="scene-status-time"></span>
+      </div>
     </div>
 
   </div><!-- /grid -->
@@ -699,6 +783,7 @@ async function setActiveModeFromBanner() {
     await apiPost('/api/modes/active', { name });
     toast(name ? `Active mode set to "${name}".` : 'Active mode cleared.', 'success');
     await loadAll();
+    loadSceneStatus();   // refresh scene config panel immediately after mode change
   } catch (e) { toast(e.message, 'error'); }
 }
 
@@ -725,6 +810,199 @@ async function deleteSchedule(id) {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+// ─── Scene Status ─────────────────────────────────────────────────────────────
+
+async function loadSceneStatus() {
+  const container = document.getElementById('scene-status-content');
+  try {
+    const data = await apiGet('/api/scene-status');
+    renderSceneStatus(data, container);
+    document.getElementById('scene-status-time').textContent = nowLabel();
+  } catch (e) {
+    container.innerHTML =
+      `<div class="empty-state" style="color:#dc3545">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderSceneStatus(data, container) {
+  const scene     = data.active_scene;
+  const flame     = data.flame_service;
+  const osc       = data.osc_proxy;
+  const murmurUrl = data.murmura_url || 'http://localhost:8765';
+
+  let html = '';
+
+  // ── Active-scene header ────────────────────────────────────────────────
+  if (!scene) {
+    html += `<div class="unconfigured-warning" style="margin-bottom:14px;">
+      ⚠️ <strong>No active scene set.</strong>
+      Use the "Change to" selector above to set an active scene.
+    </div>`;
+  } else {
+    html += `<div style="margin-bottom:16px;font-size:1rem;color:#e0e0e0;">
+      Active scene: <strong style="color:#c390ff;font-size:1.25rem;">${esc(scene)}</strong>
+    </div>`;
+  }
+
+  // ── Flame Service panel ────────────────────────────────────────────────
+  html += buildSvcPanelHeader('🔥 Flame Service — Trigger Mappings', flame, scene);
+
+  if (!flame.reachable) {
+    html += `<div class="unconfigured-warning">⚠️ Could not reach the Flame Service at
+      <code>${esc(flame.url)}</code>. Is it running?</div>`;
+  } else if (!scene) {
+    html += `<div style="color:#888;font-size:0.85rem;">Set an active scene to see trigger mappings.</div>`;
+  } else if (!flame.configured) {
+    html += `<div class="unconfigured-warning">⚠️ <strong>No trigger mappings configured for
+      scene "${esc(scene)}".</strong><br>All trigger dispatch for this scene is
+      currently <strong>disabled</strong> — add mappings in the Flame Service UI.</div>`;
+  } else {
+    html += `<table class="mapping-table"><thead><tr>
+      <th>Trigger</th><th>Value / Range</th><th>Flame Sequence</th><th>Override</th>
+    </tr></thead><tbody>`;
+    flame.mappings.forEach(m => {
+      let val;
+      if (m.trigger_value_min !== undefined && m.trigger_value_max !== undefined)
+        val = `${m.trigger_value_min} – ${m.trigger_value_max}`;
+      else if (m.trigger_value_min !== undefined) val = `≥ ${m.trigger_value_min}`;
+      else if (m.trigger_value_max !== undefined) val = `≤ ${m.trigger_value_max}`;
+      else if (m.trigger_value)                   val = esc(m.trigger_value);
+      else                                         val = '<em style="color:#666">any</em>';
+
+      html += `<tr>
+        <td>${esc(m.trigger_name)}</td>
+        <td>${val}</td>
+        <td><code style="color:#a6e0ff">${esc(m.flame_sequence)}</code></td>
+        <td style="text-align:center">${m.allow_override ? '✓' : '—'}</td>
+      </tr>`;
+    });
+    html += `</tbody></table>`;
+  }
+  html += `</div>`;   // end flame svc-panel
+
+  // ── OSC Proxy panel ────────────────────────────────────────────────────
+  html += buildSvcPanelHeader('🎵 OSC Proxy — Scene Config', osc, scene);
+
+  if (osc.description) {
+    html += `<div style="font-size:0.82rem;color:#999;font-style:italic;margin-bottom:8px;">${esc(osc.description)}</div>`;
+  }
+
+  if (!osc.reachable) {
+    html += `<div class="unconfigured-warning">⚠️ Could not reach the OSC Proxy at
+      <code>${esc(osc.url)}</code>. Is it running?</div>`;
+  } else if (!scene) {
+    html += `<div style="color:#888;font-size:0.85rem;">Set an active scene to see the OSC configuration.</div>`;
+  } else if (!osc.configured) {
+    html += `<div class="unconfigured-warning">ℹ️ No on_enter sequence or trigger mappings configured
+      for scene "${esc(scene)}". Add them in the OSC Proxy UI.</div>`;
+  } else {
+    // ── On-entry sequence ──
+    if (osc.on_enter && osc.on_enter.length > 0) {
+      html += `<div style="font-size:0.82rem;color:#b88aff;font-weight:bold;margin:4px 0 6px;">On-Entry Sequence</div>`;
+      osc.on_enter.forEach(step => {
+        const delay   = step.delay_ms ? `+${step.delay_ms} ms` : 'immediately';
+        const argsStr = step.osc_args && step.osc_args.length
+            ? step.osc_args.map(a => JSON.stringify(a)).join(', ')
+            : '';
+        html += `<div class="osc-step">
+          <span class="osc-delay">${esc(delay)}</span>
+          <span class="osc-address">${esc(step.osc_address || '')}</span>
+          ${argsStr ? `<span class="osc-args">[${esc(argsStr)}]</span>` : ''}
+        </div>`;
+      });
+    } else {
+      html += `<div style="color:#777;font-size:0.83rem;font-style:italic;margin-bottom:8px;">No on_enter sequence configured.</div>`;
+    }
+
+    // ── Trigger mappings ──
+    const oscMappings = osc.mappings || [];
+    if (oscMappings.length > 0) {
+      html += `<div style="font-size:0.82rem;color:#b88aff;font-weight:bold;margin:14px 0 6px;">Trigger → OSC Mappings</div>`;
+      html += `<table class="mapping-table"><thead><tr>
+        <th>Trigger</th><th>OSC Sequence</th><th>Enabled</th>
+      </tr></thead><tbody>`;
+      oscMappings.forEach(m => {
+        const steps = (m.sequence && m.sequence.length > 0)
+            ? m.sequence
+            : (m.osc_address
+                ? [{ osc_address: m.osc_address, delay_ms: 0, osc_args: m.osc_args || [] }]
+                : []);
+        let seqHtml;
+        if (steps.length === 0) {
+          seqHtml = '<em style="color:#666">—</em>';
+        } else {
+          const first   = steps[0];
+          const argsStr = first.osc_args && first.osc_args.length
+              ? ` [${first.osc_args.map(a => JSON.stringify(a)).join(', ')}]`
+              : '';
+          const extra   = steps.length > 1
+              ? ` <span style="color:#888;font-size:0.82em;">+${steps.length - 1} more</span>`
+              : '';
+          seqHtml = `<code style="color:#a6e0ff">${esc((first.osc_address || '') + argsStr)}</code>${extra}`;
+        }
+        html += `<tr>
+          <td>${esc(m.trigger_name)}</td>
+          <td>${seqHtml}</td>
+          <td style="text-align:center">${m.enabled !== false ? '✓' : '—'}</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+    } else {
+      html += `<div style="color:#777;font-size:0.83rem;font-style:italic;margin-top:10px;">No trigger mappings configured for this scene.</div>`;
+    }
+  }
+  html += `</div>`;   // end osc svc-panel
+
+  // ── Sound / Murmura panel ──────────────────────────────────────────────
+  html += `<div class="svc-panel" style="margin-top:12px;">
+    <div class="svc-panel-header">
+      <span class="svc-panel-title">🔊 Sound Service — Murmura Gateway</span>
+      <span class="svc-badge svc-badge-info">Link only</span>
+      <a class="svc-link" href="${esc(murmurUrl)}" target="_blank"
+         style="padding:4px 10px;font-size:0.78rem;">Open ↗</a>
+    </div>
+    <div style="font-size:0.85rem;color:#aaa;">
+      The sound service has its own configuration UI.
+      <a href="${esc(murmurUrl)}" target="_blank"
+         style="color:#a6d4ff;text-decoration:none;">Open the Murmura Gateway →</a>
+    </div>
+  </div>`;
+
+  container.innerHTML = html;
+}
+
+/** Build the opening div + header for a service panel, including status badge + "Open" link. */
+function buildSvcPanelHeader(title, svc, scene) {
+  let badge;
+  if (!svc.reachable) {
+    badge = `<span class="svc-badge svc-badge-error">Unreachable</span>`;
+  } else if (!scene) {
+    badge = `<span class="svc-badge svc-badge-warn">No scene set</span>`;
+  } else if (!svc.configured) {
+    badge = `<span class="svc-badge svc-badge-warn">Not configured</span>`;
+  } else {
+    // Build a composite count badge when both on_enter steps and trigger mappings are present
+    const mapCount  = Array.isArray(svc.mappings) ? svc.mappings.length : 0;
+    const stepCount = Array.isArray(svc.on_enter) ? svc.on_enter.length : 0;
+    if (mapCount > 0 && stepCount > 0) {
+      badge = `<span class="svc-badge svc-badge-ok">${mapCount} mapping${mapCount !== 1 ? 's' : ''}, ${stepCount} on_enter step${stepCount !== 1 ? 's' : ''}</span>`;
+    } else if (mapCount > 0) {
+      badge = `<span class="svc-badge svc-badge-ok">${mapCount} mapping${mapCount !== 1 ? 's' : ''}</span>`;
+    } else if (stepCount > 0) {
+      badge = `<span class="svc-badge svc-badge-ok">${stepCount} on_enter step${stepCount !== 1 ? 's' : ''}</span>`;
+    } else {
+      badge = `<span class="svc-badge svc-badge-ok">configured</span>`;
+    }
+  }
+  return `<div class="svc-panel" style="margin-top:12px;">
+    <div class="svc-panel-header">
+      <span class="svc-panel-title">${title}</span>
+      ${badge}
+      <a class="svc-link" href="${esc(svc.url)}" target="_blank"
+         style="padding:4px 10px;font-size:0.78rem;">Open ↗</a>
+    </div>`;
+}
+
 // ─── Event bindings ───────────────────────────────────────────────────────────
 document.getElementById('create-mode-btn').addEventListener('click', createMode);
 document.getElementById('new-mode-name').addEventListener('keydown', e => {
@@ -736,6 +1014,10 @@ document.getElementById('add-sched-btn').addEventListener('click', addSchedule);
 // Initial load + 30-second auto-refresh
 loadAll();
 setInterval(loadAll, 30000);
+
+// Scene status: initial load + 30-second refresh
+loadSceneStatus();
+setInterval(loadSceneStatus, 30000);
 </script>
 </body>
 </html>
