@@ -494,24 +494,24 @@ def send_via_persistent_socket(service_name, sock, event_data):
 # Service Registration and Trigger Dispatch Endpoints
 
 def load_registrations():
-    """Load service registrations from file."""
+    """Load service registrations from file.
+
+    Only restores the registry data — does NOT establish socket
+    connections.  Services will re-register on their own and trigger
+    fresh connections at that point.  Eagerly connecting here would
+    race with the incoming re-registration POST and cause a
+    double-connect / immediate-drop cycle.
+    """
     global service_registry
     if not os.path.exists(REGISTRATION_FILE):
         service_registry = []
         return
-    
+
     try:
         with open(REGISTRATION_FILE, 'r') as f:
             service_registry = json.load(f)
-        
-        # Re-establish TCP_SOCKET connections for registered services
-        for service in service_registry:
-            if service['protocol'] == 'TCP_SOCKET':
-                host = service.get('host', 'localhost')
-                sock = establish_socket_connection(service['name'], host, service['port'])
-                if sock:
-                    with socket_lock:
-                        service_sockets[service['name']] = sock
+        logger.info(f"Loaded {len(service_registry)} registration(s) from {REGISTRATION_FILE} "
+              "(sockets will be established on re-registration)")
     except Exception as e:
         logger.error("Error loading registrations: %s", e)
         service_registry = []
@@ -576,7 +576,12 @@ def register_service():
     # old socket may appear valid on our end but is actually dead.
     if protocol == 'TCP_SOCKET':
         if existing:
+            had_socket = data['name'] in service_sockets
+            print(f"Re-registration from {data['name']} ({host}:{data['port']}), "
+                  f"closing old socket (had_socket={had_socket})")
             close_socket_connection(data['name'])
+        else:
+            print(f"New registration from {data['name']} ({host}:{data['port']})")
 
         sock = establish_socket_connection(data['name'], host, data['port'])
         if sock:
@@ -941,10 +946,8 @@ if __name__ == '__main__':
 
     # When debug mode is on, Werkzeug's reloader runs this script TWICE:
     # once in an outer watcher process, and once in the real server child
-    # (which sets WERKZEUG_RUN_MAIN=true).  We must only establish TCP socket
-    # connections in the child process, or the outer process's sockets are
-    # leaked when the child takes over.  When debug is off there is only one
-    # process, so we always initialise.
+    # (which sets WERKZEUG_RUN_MAIN=true).  We only load registrations and
+    # start the health-check thread in the real server process.
     if not args.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         logger.info("Loading service registrations...")
         load_registrations()
