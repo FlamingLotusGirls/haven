@@ -14,6 +14,7 @@ Additionally handles:
 from collections import deque
 from flask import Flask, request, jsonify, send_from_directory
 import json
+import logging
 import os
 import select
 import socket
@@ -21,6 +22,21 @@ import tempfile
 import threading
 import time
 from datetime import datetime, timedelta
+
+# ---------------------------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------------------------
+# Configure the root logger so all messages (including our named logger and
+# Flask/Werkzeug) are written to stderr.  systemd captures stderr reliably
+# regardless of Python's stdout buffering mode.
+# Format matches journalctl's own timestamp, so we keep it lean here.
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s [%(name)s] %(message)s',
+    datefmt='%Y-%m-%dT%H:%M:%S',
+    handlers=[logging.StreamHandler()],   # StreamHandler defaults to stderr
+)
+logger = logging.getLogger('trigger_gateway')
 
 app = Flask(__name__)
 
@@ -75,7 +91,7 @@ def load_config():
         with open(CONFIG_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
-        print(f"Error loading config: {e}")
+        logger.error("Error loading config: %s", e)
         return {'triggers': [], 'last_modified': None}
 
 
@@ -97,7 +113,7 @@ def save_config(config):
         os.replace(tmpname, CONFIG_FILE)
         return True
     except Exception as e:
-        print(f"Error saving config: {e}")
+        logger.error("Error saving config: %s", e)
         if tmpname:
             try:
                 os.unlink(tmpname)
@@ -151,7 +167,7 @@ def calculate_device_status(last_seen):
     Returns: 'online' or 'offline'
     """
     if not last_seen:
-        print(f"DEBUG: No last_seen, returning offline")
+        logger.debug("No last_seen, returning offline")
         return 'offline'
     
     try:
@@ -171,19 +187,17 @@ def calculate_device_status(last_seen):
         time_delta = now - last_seen_dt
         minutes_ago = time_delta.total_seconds() / 60
         
-        print(f"DEBUG: last_seen={last_seen}, now={now.isoformat()}, minutes_ago={minutes_ago:.2f}")
-        
+        logger.debug("last_seen=%s, now=%s, minutes_ago=%.2f", last_seen, now.isoformat(), minutes_ago)
+
         # Consider device online if seen within last 5 minutes
         if minutes_ago < 5:
-            print(f"DEBUG: Returning online (< 5 minutes)")
+            logger.debug("Returning online (< 5 minutes)")
             return 'online'
         else:
-            print(f"DEBUG: Returning offline (>= 5 minutes)")
+            logger.debug("Returning offline (>= 5 minutes)")
             return 'offline'
     except Exception as e:
-        print(f"Error parsing last_seen '{last_seen}': {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Error parsing last_seen '%s': %s", last_seen, e)
         return 'offline'
 
 
@@ -304,7 +318,7 @@ def register_device():
     device_ip = data.get('ip', 'unknown')
     triggers_data = data['triggers']
     
-    print(f"Device registration request from {device_name} ({device_ip})")
+    logger.info("Device registration request from %s (%s)", device_name, device_ip)
 
     # Stamp last_seen before waiting for the lock so the timestamp reflects when
     # the request arrived, not when the lock was eventually granted.
@@ -363,7 +377,7 @@ def register_device():
             if errors:
                 response['errors'] = errors
 
-            print(f"Device {device_name} registered: {len(created)} created, {len(updated)} updated")
+            logger.info("Device %s registered: %d created, %d updated", device_name, len(created), len(updated))
             return jsonify(response), 200
         else:
             return jsonify({'error': 'Failed to save trigger configuration'}), 500
@@ -382,10 +396,10 @@ def establish_socket_connection(service_name, host, port):
         sock.settimeout(10)  # 10 second timeout for connection
         sock.connect((host, port))
         sock.settimeout(None)  # Remove timeout for ongoing communication
-        print(f"Established persistent socket to {service_name} on {host}:{port}")
+        logger.info("Established persistent socket to %s on %s:%s", service_name, host, port)
         return sock
     except Exception as e:
-        print(f"Failed to establish socket to {service_name} on {host}:{port}: {e}")
+        logger.error("Failed to establish socket to %s on %s:%s: %s", service_name, host, port, e)
         return None
 
 
@@ -395,9 +409,9 @@ def close_socket_connection(service_name):
         if service_name in service_sockets:
             try:
                 service_sockets[service_name].close()
-                print(f"Closed socket connection to {service_name}")
+                logger.info("Closed socket connection to %s", service_name)
             except Exception as e:
-                print(f"Error closing socket to {service_name}: {e}")
+                logger.error("Error closing socket to %s: %s", service_name, e)
             finally:
                 del service_sockets[service_name]
 
@@ -446,13 +460,13 @@ def _socket_health_check_loop():
                 with socket_lock:
                     sock = service_sockets.get(name)
                 if sock and not _is_socket_alive(sock):
-                    print(f"Health check: socket to {name} is dead, removing")
+                    logger.warning("Health check: socket to %s is dead, removing", name)
                     close_socket_connection(name)
 
 
 def reconnect_socket(service_name, host, port):
     """Attempt to reconnect a broken socket."""
-    print(f"Attempting to reconnect to {service_name}...")
+    logger.info("Attempting to reconnect to %s...", service_name)
     close_socket_connection(service_name)
     
     sock = establish_socket_connection(service_name, host, port)
@@ -473,7 +487,7 @@ def send_via_persistent_socket(service_name, sock, event_data):
         sock.sendall(message.encode('utf-8'))
         return True
     except (socket.error, BrokenPipeError, ConnectionResetError) as e:
-        print(f"Socket error sending to {service_name}: {e}")
+        logger.error("Socket error sending to %s: %s", service_name, e)
         return False
 
 
@@ -499,7 +513,7 @@ def load_registrations():
                     with socket_lock:
                         service_sockets[service['name']] = sock
     except Exception as e:
-        print(f"Error loading registrations: {e}")
+        logger.error("Error loading registrations: %s", e)
         service_registry = []
 
 
@@ -514,7 +528,7 @@ def save_registrations():
         os.replace(tmpname, REGISTRATION_FILE)
         return True
     except Exception as e:
-        print(f"Error saving registrations: {e}")
+        logger.error("Error saving registrations: %s", e)
         if tmpname:
             try:
                 os.unlink(tmpname)
@@ -651,25 +665,25 @@ def dispatch_trigger_event(trigger_event):
                     if sock:
                         success = send_via_persistent_socket(service_name, sock, event_data)
                         if success:
-                            print(f"Sent trigger event to {service_name} via persistent socket")
+                            logger.info("Sent trigger event to %s via persistent socket", service_name)
                         else:
                             # Attempt reconnection
                             if reconnect_socket(service_name, host, port):
                                 with socket_lock:
                                     sock = service_sockets.get(service_name)
                                 if sock and send_via_persistent_socket(service_name, sock, event_data):
-                                    print(f"Sent trigger event to {service_name} after reconnection")
+                                    logger.info("Sent trigger event to %s after reconnection", service_name)
                                 else:
-                                    print(f"Failed to send after reconnection to {service_name}")
+                                    logger.error("Failed to send after reconnection to %s", service_name)
                             else:
-                                print(f"Failed to reconnect to {service_name}")
+                                logger.error("Failed to reconnect to %s", service_name)
                     else:
-                        print(f"No socket connection for {service_name}, attempting to establish...")
+                        logger.warning("No socket connection for %s, attempting to establish...", service_name)
                         if reconnect_socket(service_name, host, port):
                             with socket_lock:
                                 sock = service_sockets.get(service_name)
                             if sock and send_via_persistent_socket(service_name, sock, event_data):
-                                print(f"Sent trigger event to {service_name} after establishing connection")
+                                logger.info("Sent trigger event to %s after establishing connection", service_name)
             
             elif protocol == 'TCP_CONNECT':
                 # Create new connection for each event
@@ -679,18 +693,18 @@ def dispatch_trigger_event(trigger_event):
                     sock.connect((host, port))
                     message = json.dumps(event_data) + '\n'
                     sock.sendall(message.encode('utf-8'))
-                    print(f"Sent trigger event to {service_name} via TCP_CONNECT")
+                    logger.info("Sent trigger event to %s via TCP_CONNECT", service_name)
                 except Exception as e:
-                    print(f"Error sending via TCP_CONNECT to {service_name}: {e}")
+                    logger.error("Error sending via TCP_CONNECT to %s: %s", service_name, e)
                 finally:
                     sock.close()
             
             elif protocol == 'OSC':
                 # OSC protocol placeholder
-                print(f"OSC protocol not yet implemented for {service_name}")
-                
+                logger.warning("OSC protocol not yet implemented for %s", service_name)
+
         except Exception as e:
-            print(f"Error dispatching to {service_name}: {e}")
+            logger.error("Error dispatching to %s: %s", service_name, e)
     
     # Dispatch to all registered services in separate threads
     for service in service_registry:
@@ -709,7 +723,7 @@ def trigger_event():
     """
     data = request.get_json()
 
-    print(f"DATA is: {data}")
+    logger.debug("trigger-event data: %s", data)
 
     if 'name' not in data or not data['name']:
         return jsonify({'error': 'Trigger name is required'}), 400
@@ -722,7 +736,7 @@ def trigger_event():
     
     if not trigger_def:
         error_msg = f"Trigger '{trigger_name}' not found in configuration"
-        print(f"ERROR: {error_msg}")
+        logger.error(error_msg)
         return jsonify({'error': error_msg}), 404
     
     # Build trigger event
@@ -904,7 +918,7 @@ def set_forwarding():
         forwarding_enabled = bool(data['enabled'])
         enabled = forwarding_enabled
     state = 'enabled' if enabled else 'disabled'
-    print(f"Trigger forwarding {state}")
+    logger.info("Trigger forwarding %s", state)
     return jsonify({'enabled': enabled, 'message': f'Forwarding {state}'})
 
 
@@ -921,9 +935,9 @@ if __name__ == '__main__':
 
     port = args.port
 
-    print("Haven Trigger Server starting...")
-    print(f"Configuration file: {CONFIG_FILE}")
-    print(f"Registration file: {REGISTRATION_FILE}")
+    logger.info("Haven Trigger Server starting...")
+    logger.info("Configuration file: %s", CONFIG_FILE)
+    logger.info("Registration file: %s", REGISTRATION_FILE)
 
     # When debug mode is on, Werkzeug's reloader runs this script TWICE:
     # once in an outer watcher process, and once in the real server child
@@ -932,22 +946,22 @@ if __name__ == '__main__':
     # leaked when the child takes over.  When debug is off there is only one
     # process, so we always initialise.
     if not args.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
-        print("Loading service registrations...")
+        logger.info("Loading service registrations...")
         load_registrations()
-        print(f"Loaded {len(service_registry)} registered service(s)")
+        logger.info("Loaded %d registered service(s)", len(service_registry))
         # Start background health checker so dead sockets are pruned
         # even if the remote side never re-registers.
         health_thread = threading.Thread(target=_socket_health_check_loop, daemon=True)
         health_thread.start()
-        print("Socket health-check thread started (every 15s)")
+        logger.info("Socket health-check thread started (every 15s)")
     else:
-        print("(Reloader outer process — skipping socket initialisation)")
+        logger.info("(Reloader outer process — skipping socket initialisation)")
 
-    print(f"Web interface: http://localhost:{port}")
-    print("API endpoints:")
-    print(f"  - Trigger Configuration: http://localhost:{port}/api/triggers")
-    print(f"  - Service Registration: http://localhost:{port}/api/register")
-    print(f"  - Trigger Events: http://localhost:{port}/api/trigger-event")
-    print(f"  - Trigger Status: http://localhost:{port}/api/trigger-status")
+    logger.info("Web interface: http://localhost:%d", port)
+    logger.info("API endpoints:")
+    logger.info("  - Trigger Configuration: http://localhost:%d/api/triggers", port)
+    logger.info("  - Service Registration:  http://localhost:%d/api/register", port)
+    logger.info("  - Trigger Events:        http://localhost:%d/api/trigger-event", port)
+    logger.info("  - Trigger Status:        http://localhost:%d/api/trigger-status", port)
 
     app.run(host='0.0.0.0', port=port, debug=args.debug)
