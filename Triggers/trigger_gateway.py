@@ -15,9 +15,11 @@ from collections import deque
 from flask import Flask, request, jsonify, send_from_directory
 import json
 import os
+import select
 import socket
 import tempfile
 import threading
+import time
 from datetime import datetime, timedelta
 
 app = Flask(__name__)
@@ -400,6 +402,54 @@ def close_socket_connection(service_name):
                 del service_sockets[service_name]
 
 
+def _is_socket_alive(sock):
+    """Check whether a TCP socket is still connected.
+
+    Uses select() to test if the socket is readable.  On an idle
+    connection nothing should be readable — if select says it is, the
+    remote end has either closed or the connection errored out.
+    Works on both Windows and Linux with no OS-specific constants.
+    """
+    try:
+        readable, _, errored = select.select([sock], [], [sock], 0)
+        if errored:
+            return False
+        if readable:
+            # Readable on an idle socket means EOF or error
+            data = sock.recv(1, socket.MSG_PEEK)
+            if not data:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _socket_health_check_loop():
+    """Background thread: periodically prune dead sockets from service_sockets.
+
+    Acquires the per-service send lock before probing so we never
+    select()/recv() on a socket while a dispatch thread is mid-sendall().
+    Lock ordering matches dispatch: send_lock → socket_lock.
+    """
+    while True:
+        time.sleep(15)
+        with socket_lock:
+            names = list(service_sockets.keys())
+        for name in names:
+            # Get or create the per-service send lock (same as dispatch does)
+            with socket_lock:
+                if name not in service_send_locks:
+                    service_send_locks[name] = threading.Lock()
+                send_lock = service_send_locks[name]
+
+            with send_lock:
+                with socket_lock:
+                    sock = service_sockets.get(name)
+                if sock and not _is_socket_alive(sock):
+                    print(f"Health check: socket to {name} is dead, removing")
+                    close_socket_connection(name)
+
+
 def reconnect_socket(service_name, host, port):
     """Attempt to reconnect a broken socket."""
     print(f"Attempting to reconnect to {service_name}...")
@@ -506,49 +556,22 @@ def register_service():
         'registered_at': datetime.now().isoformat()
     }
     
-    # For TCP_SOCKET, manage persistent connection
+    # For TCP_SOCKET, manage persistent connection.
+    # Always close any existing socket and reconnect — a re-registration
+    # means the remote side restarted and needs a fresh connection.  The
+    # old socket may appear valid on our end but is actually dead.
     if protocol == 'TCP_SOCKET':
         if existing:
-            existing_host = existing.get('host', 'localhost')
-            existing_port = existing.get('port')
+            close_socket_connection(data['name'])
 
-            if host == existing_host and data['port'] == existing_port:
-                # Same endpoint — keep the existing healthy connection
-                with socket_lock:
-                    sock = service_sockets.get(data['name'])
-                if sock:
-                    registration['socket_status'] = 'connected'
-                else:
-                    # No live socket despite existing registration — reconnect
-                    sock = establish_socket_connection(data['name'], host, data['port'])
-                    if sock:
-                        with socket_lock:
-                            service_sockets[data['name']] = sock
-                        registration['socket_status'] = 'connected'
-                    else:
-                        registration['socket_status'] = 'failed'
-                        return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
-            else:
-                # Different endpoint — close stale connection, open new one
-                close_socket_connection(data['name'])
-                sock = establish_socket_connection(data['name'], host, data['port'])
-                if sock:
-                    with socket_lock:
-                        service_sockets[data['name']] = sock
-                    registration['socket_status'] = 'connected'
-                else:
-                    registration['socket_status'] = 'failed'
-                    return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
+        sock = establish_socket_connection(data['name'], host, data['port'])
+        if sock:
+            with socket_lock:
+                service_sockets[data['name']] = sock
+            registration['socket_status'] = 'connected'
         else:
-            # Brand new registration
-            sock = establish_socket_connection(data['name'], host, data['port'])
-            if sock:
-                with socket_lock:
-                    service_sockets[data['name']] = sock
-                registration['socket_status'] = 'connected'
-            else:
-                registration['socket_status'] = 'failed'
-                return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
+            registration['socket_status'] = 'failed'
+            return jsonify({'error': f'Failed to establish socket connection to {host}:{data["port"]}'}), 500
     
     if existing:
         # Update existing registration
@@ -912,6 +935,11 @@ if __name__ == '__main__':
         print("Loading service registrations...")
         load_registrations()
         print(f"Loaded {len(service_registry)} registered service(s)")
+        # Start background health checker so dead sockets are pruned
+        # even if the remote side never re-registers.
+        health_thread = threading.Thread(target=_socket_health_check_loop, daemon=True)
+        health_thread.start()
+        print("Socket health-check thread started (every 15s)")
     else:
         print("(Reloader outer process — skipping socket initialisation)")
 
