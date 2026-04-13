@@ -1,14 +1,17 @@
 # Scene Management Service
 
-A simple REST API service for managing scenes. Only one scene can be active at a time.
+A REST API service for managing scenes. Only one scene can be active at a time.
+Scenes (and schedules) are persisted to `scenes.json` between reboots.
 
 ## Features
 
 - Create and delete scenes
-- List all scenes
-- Set and get the active scene
-- Persistent storage (survives reboots)
-- Simple REST API
+- List all scenes and query the active scene
+- Set the active scene — fires a `SceneChange` trigger to all registered services
+- **Scene scheduling** — activate a scene automatically at a specific time (daily or once)
+- Persistent storage (survives reboots, atomic writes)
+- Simple web UI at `/`
+- REST API
 
 ## Running the Service
 
@@ -20,69 +23,60 @@ The service runs on **port 5003** by default.
 
 ### Custom Port
 
-To run on a different port:
-
 ```bash
 python3 scene_service.py --port 8080
 # or
 python3 scene_service.py -p 8080
 ```
 
-### Command-Line Options
+### Environment Variables
 
-```bash
-python3 scene_service.py --help
-```
+| Variable | Default | Purpose |
+|---|---|---|
+| `GATEWAY_URL` | `http://localhost:5002` | Trigger gateway — receives `SceneChange` events and device registration |
+| `FLAME_SERVICE_URL` | `http://localhost:5001` | Flame service — polled by `/api/scene-status` |
+| `OSC_PROXY_URL` | `http://localhost:5004` | OSC proxy — polled by `/api/scene-status` |
+| `MURMURA_URL` | `http://localhost:8765` | Sound service — linked in `/api/scene-status` (not polled) |
 
-Options:
-- `-p, --port PORT` - Port to run the service on (default: 5003)
+---
 
 ## API Endpoints
 
-### Create a Scene
+### Scenes
 
-```bash
+#### Create a Scene
+
+```
 POST /api/scenes
 Content-Type: application/json
 
-{
-  "name": "performance"
-}
+{"name": "performance"}
 ```
 
-**Response:**
+Response `201`:
 ```json
-{
-  "message": "Scene 'performance' created",
-  "scene": "performance"
-}
+{"message": "Scene 'performance' created", "scene": "performance"}
 ```
 
-### Delete a Scene
+#### Delete a Scene
 
-```bash
+```
 DELETE /api/scenes/<name>
 ```
 
-**Example:**
+The currently active scene cannot be deleted (returns `400`).
+
 ```bash
 curl -X DELETE http://localhost:5003/api/scenes/performance
 ```
 
-**Response:**
-```json
-{
-  "message": "Scene 'performance' deleted"
-}
+#### Get All Scenes
+
 ```
-
-### Get All Scenes
-
-```bash
 GET /api/scenes
 ```
 
-**Response:**
+Response `200`:
 ```json
 {
   "scenes": ["idle", "performance", "show"],
@@ -91,64 +85,173 @@ GET /api/scenes
 }
 ```
 
-### Set Active Scene
+#### Set Active Scene
 
-```bash
+```
 POST /api/scenes/active
 Content-Type: application/json
 
-{
-  "name": "show"
-}
+{"name": "show"}
 ```
 
-**Response:**
+Response `200`:
 ```json
-{
-  "message": "Active scene set to 'show'",
-  "active_scene": "show"
-}
+{"message": "Active scene set to 'show'", "active_scene": "show"}
 ```
 
-**To clear the active scene:**
-```json
-{
-  "name": null
-}
+Setting `"name": null` clears the active scene.
+
+When the active scene changes, the service immediately POSTs a `SceneChange` trigger
+to the trigger gateway (non-blocking background thread), so all subscribed services
+update without polling.
+
+#### Get Active Scene
+
 ```
-
-### Get Active Scene
-
-```bash
 GET /api/scenes/active
 ```
 
-**Response:**
+Response `200`:
+```json
+{"active_scene": "show"}
+```
+
+---
+
+### Schedules
+
+Schedules activate a scene automatically at a specific time of day.
+
+#### List Schedules
+
+```
+GET /api/schedules
+```
+
+Response `200`:
 ```json
 {
-  "active_scene": "show"
+  "schedules": [
+    {
+      "id": "b3d2…",
+      "scene": "daytime",
+      "time": "08:00",
+      "repeat": "daily",
+      "created": "2026-04-13T09:00:00",
+      "last_fired": null
+    }
+  ]
 }
 ```
 
+#### Create a Schedule
+
+```
+POST /api/schedules
+Content-Type: application/json
+
+{"scene": "daytime", "time": "08:00", "repeat": "daily"}
+```
+
+| Field | Values | Required |
+|---|---|---|
+| `scene` | must be an existing scene name | ✓ |
+| `time` | `"HH:MM"` 24-hour local time | ✓ |
+| `repeat` | `"daily"` or `"once"` | ✓ |
+
+Response `201`:
+```json
+{
+  "message": "Schedule created",
+  "schedule": {"id": "b3d2…", "scene": "daytime", "time": "08:00", "repeat": "daily", …}
+}
+```
+
+One-shot (`"repeat": "once"`) schedules are automatically removed after they fire.
+
+#### Update a Schedule
+
+```
+PUT /api/schedules/<id>
+Content-Type: application/json
+
+{"scene": "nighttime", "time": "20:00", "repeat": "daily"}
+```
+
+All three fields are required. `last_fired` is reset so the updated schedule can fire
+at the new time.
+
+Response `200`:
+```json
+{"message": "Schedule updated", "schedule": {…}}
+```
+
+#### Delete a Schedule
+
+```
+DELETE /api/schedules/<id>
+```
+
+Response `200`:
+```json
+{"message": "Schedule 'b3d2…' deleted"}
+```
+
+---
+
+### Scene Status
+
+```
+GET /api/scene-status
+```
+
+Aggregates configuration for the current scene from the flame service and OSC proxy.
+Useful for a dashboard showing what's configured for the active scene.
+
+Response `200`:
+```json
+{
+  "active_scene": "show",
+  "flame_service": {
+    "url": "http://localhost:5001",
+    "reachable": true,
+    "mappings": […],
+    "configured": true
+  },
+  "osc_proxy": {
+    "url": "http://localhost:5004",
+    "reachable": true,
+    "on_enter": […],
+    "mappings": […],
+    "description": "Main show scene",
+    "configured": true
+  },
+  "murmura_url": "http://localhost:8765"
+}
+```
+
+---
+
 ### Health Check
 
-```bash
+```
 GET /health
 ```
 
-**Response:**
+Response `200`:
 ```json
 {
   "status": "healthy",
   "service": "scene_service",
   "scenes_count": 3,
-  "active_scene": "show"
+  "active_scene": "show",
+  "schedules_count": 1
 }
 ```
 
-## Usage Examples
+---
 
-### Create some scenes
+## Usage Examples
 
 ```bash
 # Create scenes
@@ -158,80 +261,95 @@ curl -X POST http://localhost:5003/api/scenes \
 
 curl -X POST http://localhost:5003/api/scenes \
   -H "Content-Type: application/json" \
-  -d '{"name": "performance"}'
+  -d '{"name": "daytime"}'
 
 curl -X POST http://localhost:5003/api/scenes \
   -H "Content-Type: application/json" \
   -d '{"name": "show"}'
-```
 
-### List all scenes
-
-```bash
+# List all scenes
 curl http://localhost:5003/api/scenes | python3 -m json.tool
-```
 
-### Set active scene
-
-```bash
+# Set active scene
 curl -X POST http://localhost:5003/api/scenes/active \
   -H "Content-Type: application/json" \
   -d '{"name": "show"}'
-```
 
-### Get active scene
-
-```bash
+# Get active scene
 curl http://localhost:5003/api/scenes/active | python3 -m json.tool
-```
 
-### Delete a scene
+# Schedule daytime scene at 08:00 every day
+curl -X POST http://localhost:5003/api/schedules \
+  -H "Content-Type: application/json" \
+  -d '{"scene": "daytime", "time": "08:00", "repeat": "daily"}'
 
-```bash
+# Schedule show scene at 21:30, one time only
+curl -X POST http://localhost:5003/api/schedules \
+  -H "Content-Type: application/json" \
+  -d '{"scene": "show", "time": "21:30", "repeat": "once"}'
+
+# List schedules
+curl http://localhost:5003/api/schedules | python3 -m json.tool
+
+# Delete a schedule
+curl -X DELETE http://localhost:5003/api/schedules/<id>
+
+# Delete a scene
 curl -X DELETE http://localhost:5003/api/scenes/idle
 ```
 
+---
+
 ## Data Persistence
 
-Scenes are stored in `scenes.json` in the same directory as the service. This file is automatically created and updated when scenes are created, deleted, or the active scene changes.
+Scenes and schedules are stored in `scenes.json` (same directory as the service).
+Writes are atomic (temp-file + rename) so a crash mid-write never corrupts the file.
 
 **Example `scenes.json`:**
 ```json
 {
-  "scenes": [
-    "idle",
-    "performance",
-    "show"
-  ],
+  "scenes": ["idle", "daytime", "show"],
   "active_scene": "show",
-  "last_updated": "2026-01-24T17:43:00.123456"
+  "schedules": [
+    {
+      "id": "b3d2…",
+      "scene": "daytime",
+      "time": "08:00",
+      "repeat": "daily",
+      "created": "2026-04-13T09:00:00",
+      "last_fired": "2026-04-13T08:00:01"
+    }
+  ],
+  "last_updated": "2026-04-13T08:00:01.123456"
 }
 ```
+
+---
 
 ## Error Handling
 
-The API returns appropriate HTTP status codes:
-
-- **200 OK**: Successful operation
-- **201 Created**: Scene successfully created
-- **400 Bad Request**: Invalid input or scene already exists
-- **404 Not Found**: Scene doesn't exist
+| Status | Meaning |
+|---|---|
+| `200 OK` | Successful operation |
+| `201 Created` | Scene or schedule created |
+| `400 Bad Request` | Invalid input, duplicate name, or attempting to delete the active scene |
+| `404 Not Found` | Scene or schedule does not exist |
 
 **Example error response:**
 ```json
-{
-  "error": "Scene 'unknown' does not exist"
-}
+{"error": "Scene 'unknown' does not exist"}
 ```
+
+---
 
 ## Running as a Service
 
-To run as a systemd service, install `scene.service` to `/etc/systemd/system/scene.service`:
+The `scene.service` systemd unit file:
 
 ```ini
 [Unit]
 Description=FLG Haven Scene Management Service
-After=network-online.target
+After=network-online.target trigger.service
 Wants=network-online.target
 
 [Service]
@@ -248,23 +366,33 @@ User=flaming
 WantedBy=multi-user.target
 ```
 
-Then enable and start:
+Install and enable:
 ```bash
 sudo systemctl enable scene.service
 sudo systemctl start scene.service
 sudo systemctl status scene.service
 ```
 
+> **Note:** `After=trigger.service` is listed as a soft dependency. The scene service
+> starts and serves requests immediately regardless; it retries gateway registration
+> in the background (up to 30 attempts × 2 s) so a brief startup race is handled
+> automatically.
+
+---
+
 ## Integration
 
-The scene service integrates with other Haven services to change behavior based on the current scene:
+The scene service integrates with other Haven services:
 
-- **Trigger Gateway** — registered as the `SceneService` device; fires a `SceneChange` Discrete trigger whenever the active scene changes.
-- **Flame Service** — trigger-to-flame-sequence mappings can be filtered by scene.
+- **Trigger Gateway** — registered as the `SceneService` device at startup
+  (with background retry). Fires a `SceneChange` Discrete trigger on every active-scene
+  change (manual *and* scheduled), so downstream services update without polling.
+- **Flame Service** — trigger-to-flame-sequence mappings are organised by scene; the
+  flame service subscribes to `SceneChange` via the gateway.
 - **OSC Proxy** — per-scene `on_enter` sequences and trigger→OSC mappings.
 - **Sound / Murmura** — can be linked from the scene service web UI.
 
-Other services can query the active scene:
+Other services can query the active scene directly:
 ```bash
 ACTIVE_SCENE=$(curl -s http://localhost:5003/api/scenes/active | jq -r '.active_scene')
 echo "Current scene: $ACTIVE_SCENE"
