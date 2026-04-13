@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mode Manager</title>
+  <title>Scene Manager</title>
   <style>
     /* ── Reset & base ────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -30,7 +30,7 @@
     header h1 { font-size: 2rem; color: #fff; text-shadow: 1px 1px 4px rgba(0,0,0,.5); }
     header p  { color: #d4b8f0; margin-top: 6px; font-size: 0.95rem; }
 
-    /* ── Active mode banner ──────────────────────────────────────── */
+    /* ── Active scene banner ──────────────────────────────────────── */
     #active-banner {
       border-radius: 12px;
       margin-bottom: 22px;
@@ -41,11 +41,11 @@
       flex-wrap: wrap;
       transition: all .4s ease;
     }
-    #active-banner.has-mode {
+    #active-banner.has-scene {
       background: rgba(83,52,131,.45);
       border: 1px solid #7b4fa6;
     }
-    #active-banner.no-mode {
+    #active-banner.no-scene {
       background: rgba(50,50,60,.45);
       border: 1px solid #444;
     }
@@ -58,16 +58,16 @@
       letter-spacing: .7px;
       white-space: nowrap;
     }
-    #banner-mode-name {
+    #banner-scene-name {
       font-size: 1.45rem;
       font-weight: bold;
       flex: 1;
       color: #c390ff;
       min-width: 100px;
     }
-    #active-banner.no-mode #banner-mode-name { color: #888; }
+    #active-banner.no-scene #banner-scene-name { color: #888; }
 
-    /* Inline active-mode selector */
+    /* Inline active-scene selector */
     .banner-selector {
       display: flex;
       align-items: center;
@@ -79,7 +79,7 @@
       color: #b88aff;
       white-space: nowrap;
     }
-    #banner-mode-select {
+    #banner-scene-select {
       padding: 7px 10px;
       border: 1px solid rgba(123,79,166,.5);
       border-radius: 7px;
@@ -134,7 +134,7 @@
     .input-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
     input[type="text"], input[type="time"], select,
-    #banner-mode-select {
+    #banner-scene-select {
       flex: 1; min-width: 120px;
       padding: 9px 12px;
       border: 1px solid rgba(123,79,166,.4);
@@ -150,10 +150,10 @@
     }
     input::placeholder { color: #777; }
 
-    /* ── Mode list ───────────────────────────────────────────────── */
-    #mode-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+    /* ── scene list ───────────────────────────────────────────────── */
+    #scene-list { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
 
-    .mode-row {
+    .scene-row {
       display: flex; align-items: center; gap: 10px;
       background: rgba(0,0,0,.25);
       border: 1px solid rgba(123,79,166,.2);
@@ -161,10 +161,10 @@
       padding: 10px 14px;
       transition: background .2s;
     }
-    .mode-row:hover { background: rgba(123,79,166,.12); }
-    .mode-row.is-active { border-color: #7b4fa6; background: rgba(83,52,131,.3); }
-    .mode-row .name { flex: 1; font-weight: bold; color: #ddd; word-break: break-all; }
-    .mode-row.is-active .name { color: #c390ff; }
+    .scene-row:hover { background: rgba(123,79,166,.12); }
+    .scene-row.is-active { border-color: #7b4fa6; background: rgba(83,52,131,.3); }
+    .scene-row .name { flex: 1; font-weight: bold; color: #ddd; word-break: break-all; }
+    .scene-row.is-active .name { color: #c390ff; }
 
     .active-badge {
       background: #7b4fa6; color: #fff;
@@ -197,7 +197,7 @@
       background: rgba(83,52,131,.18);
     }
     .sched-info { flex: 1; }
-    .sched-info .sched-mode { font-weight: bold; color: #c390ff; font-size: 1rem; }
+    .sched-info .sched-scene { font-weight: bold; color: #c390ff; font-size: 1rem; }
     .sched-info .sched-meta { font-size: 0.82rem; color: #aaa; margin-top: 2px; }
 
     /* Inline edit controls inside a row */
@@ -320,19 +320,19 @@
 <div class="page">
 
   <header>
-    <h1>🎭 Mode Manager</h1>
-    <p>Create modes, set the active mode, and schedule automatic activations.</p>
+    <h1>🎭 Scene Manager</h1>
+    <p>Create scenes, set the active scene, and schedule automatic activations.</p>
   </header>
 
-  <!-- ── Active mode banner ──────────────────────────────────────── -->
-  <div id="active-banner" class="no-mode">
-    <span class="banner-label">Active Mode</span>
-    <span id="banner-mode-name">— none —</span>
+  <!-- ── Active scene banner ──────────────────────────────────────── -->
+  <div id="active-banner" class="no-scene">
+    <span class="banner-label">Active Scene</span>
+    <span id="banner-scene-name">— none —</span>
 
-    <!-- Inline selector: choose mode (or "none" to clear) + Set button -->
+    <!-- Inline selector: choose scene (or "none" to clear) + Set button -->
     <div class="banner-selector">
-      <label for="banner-mode-select">Change to:</label>
-      <select id="banner-mode-select">
+      <label for="banner-scene-select">Change to:</label>
+      <select id="banner-scene-select">
         <option value="">— none (clear) —</option>
       </select>
       <button class="btn btn-primary" id="banner-set-btn">Set</button>
@@ -341,36 +341,36 @@
 
   <div class="grid">
 
-    <!-- ── Modes card ─────────────────────────────────────────── -->
+    <!-- ── scenes card ─────────────────────────────────────────── -->
     <div class="card full-width">
-      <h2>🗂️ Modes</h2>
+      <h2>🗂️ Scenes</h2>
 
       <div class="input-row">
-        <input type="text" id="new-mode-name" placeholder="New mode name…" maxlength="64">
-        <button class="btn btn-success" id="create-mode-btn">+ Create</button>
+        <input type="text" id="new-scene-name" placeholder="New scene name…" maxlength="64">
+        <button class="btn btn-success" id="create-scene-btn">+ Create</button>
       </div>
 
-      <div id="mode-list">
+      <div id="scene-list">
         <div class="empty-state">Loading…</div>
       </div>
 
-      <!-- Service status tucked below the mode list -->
+      <!-- Service status tucked below the scene list -->
       <div class="status-block" id="health-display">Checking service status…</div>
-      <div class="refresh-time" id="modes-refresh-time"></div>
+      <div class="refresh-time" id="scenes-refresh-time"></div>
     </div>
 
     <!-- ── Schedules card ─────────────────────────────────────── -->
     <div class="card full-width">
-      <h2>🕐 Scheduled Mode Changes</h2>
+      <h2>🕐 Scheduled Scene Changes</h2>
       <p class="section-sub">
-        The scheduler wakes every 30 s and activates the mode when the clock matches.
+        The scheduler wakes every 30 s and activates the scene when the clock matches.
         <em>Daily</em> schedules repeat every day; <em>Once</em> schedules are removed after firing.
       </p>
 
       <div class="form-row">
         <div class="form-group">
-          <label>Mode</label>
-          <select id="sched-mode-select">
+          <label>Scene</label>
+          <select id="sched-scene-select">
             <option value="">— choose —</option>
           </select>
         </div>
@@ -494,7 +494,7 @@ async function apiDelete(path) {
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
-let currentModes = [];
+let currentScenes = [];
 let currentActive = null;
 let currentSchedules = [];
 let editingScheduleId = null;  // id of the schedule row currently being edited
@@ -502,56 +502,56 @@ let editingScheduleId = null;  // id of the schedule row currently being edited
 // ─── Render: Banner ───────────────────────────────────────────────────────────
 function renderBanner() {
   const banner   = document.getElementById('active-banner');
-  const nameEl   = document.getElementById('banner-mode-name');
-  const selector = document.getElementById('banner-mode-select');
+  const nameEl   = document.getElementById('banner-scene-name');
+  const selector = document.getElementById('banner-scene-select');
 
   // Update big name display
   if (currentActive) {
-    banner.className = 'has-mode';
+    banner.className = 'has-scene';
     nameEl.textContent = currentActive;
   } else {
-    banner.className = 'no-mode';
+    banner.className = 'no-scene';
     nameEl.textContent = '— none —';
   }
 
-  // Rebuild dropdown: "none" option + all modes
+  // Rebuild dropdown: "none" option + all scenes
   const prev = selector.value;
   selector.innerHTML = '<option value="">— none (clear) —</option>';
-  currentModes.forEach(name => {
+  currentScenes.forEach(name => {
     const opt = document.createElement('option');
     opt.value = name;
     opt.textContent = name;
     selector.appendChild(opt);
   });
   // Restore selection or pre-select current active
-  if (prev && currentModes.includes(prev)) {
+  if (prev && currentScenes.includes(prev)) {
     selector.value = prev;
   } else if (currentActive) {
     selector.value = currentActive;
   }
 }
 
-// ─── Render: Mode list ────────────────────────────────────────────────────────
-function renderModes() {
-  const list       = document.getElementById('mode-list');
-  const schedSel   = document.getElementById('sched-mode-select');
+// ─── Render: Scene list ────────────────────────────────────────────────────────
+function renderScenes() {
+  const list       = document.getElementById('scene-list');
+  const schedSel   = document.getElementById('sched-scene-select');
 
   // Rebuild schedule-form dropdown
   const prevSched = schedSel.value;
   schedSel.innerHTML = '<option value="">— choose —</option>';
 
-  if (currentModes.length === 0) {
-    list.innerHTML = '<div class="empty-state">No modes yet. Create one above!</div>';
-    document.getElementById('modes-refresh-time').textContent = nowLabel();
+  if (currentScenes.length === 0) {
+    list.innerHTML = '<div class="empty-state">No scenes yet. Create one above!</div>';
+    document.getElementById('scenes-refresh-time').textContent = nowLabel();
     return;
   }
 
   list.innerHTML = '';
-  currentModes.forEach(name => {
+  currentScenes.forEach(name => {
     const isActive = name === currentActive;
 
     const row = document.createElement('div');
-    row.className = 'mode-row' + (isActive ? ' is-active' : '');
+    row.className = 'scene-row' + (isActive ? ' is-active' : '');
 
     const nameSpan = document.createElement('span');
     nameSpan.className = 'name';
@@ -565,13 +565,13 @@ function renderModes() {
       row.appendChild(badge);
     }
 
-    // Delete (disabled for active mode)
+    // Delete (disabled for active scene)
     const delBtn = document.createElement('button');
     delBtn.className = 'btn btn-danger btn-sm';
     delBtn.textContent = '🗑';
-    delBtn.title = isActive ? 'Cannot delete the active mode' : `Delete "${name}"`;
+    delBtn.title = isActive ? 'Cannot delete the active scene' : `Delete "${name}"`;
     delBtn.disabled = isActive;
-    delBtn.addEventListener('click', () => deleteMode(name));
+    delBtn.addEventListener('click', () => deleteScene(name));
     row.appendChild(delBtn);
 
     list.appendChild(row);
@@ -582,8 +582,8 @@ function renderModes() {
     schedSel.appendChild(opt);
   });
 
-  if (prevSched && currentModes.includes(prevSched)) schedSel.value = prevSched;
-  document.getElementById('modes-refresh-time').textContent = nowLabel();
+  if (prevSched && currentScenes.includes(prevSched)) schedSel.value = prevSched;
+  document.getElementById('scenes-refresh-time').textContent = nowLabel();
 }
 
 // ─── Render: Schedules ────────────────────────────────────────────────────────
@@ -610,7 +610,7 @@ function renderSchedules() {
       const info = document.createElement('div');
       info.className = 'sched-info';
       info.innerHTML = `
-        <div class="sched-mode">${esc(s.mode)}</div>
+        <div class="sched-scene">${esc(s.scene)}</div>
         <div class="sched-meta">
           ⏰ ${esc(fmt24to12(s.time))}
           ${s.last_fired ? `&nbsp;|&nbsp; Last fired: ${fmtTime(s.last_fired)}` : ''}
@@ -653,14 +653,14 @@ function startEditSchedule(s) {
   row.className = 'sched-row editing';
   row.innerHTML = '';   // clear existing content
 
-  // Mode dropdown
-  const modeSelect = document.createElement('select');
-  modeSelect.className = 'edit-mode-sel';
-  currentModes.forEach(name => {
+  // Scene dropdown
+  const sceneSelect = document.createElement('select');
+  sceneSelect.className = 'edit-scene-sel';
+  currentScenes.forEach(name => {
     const opt = document.createElement('option');
     opt.value = name; opt.textContent = name;
-    if (name === s.mode) opt.selected = true;
-    modeSelect.appendChild(opt);
+    if (name === s.scene) opt.selected = true;
+    sceneSelect.appendChild(opt);
   });
 
   // Time input
@@ -681,7 +681,7 @@ function startEditSchedule(s) {
   // Wrap fields
   const fields = document.createElement('div');
   fields.className = 'edit-fields';
-  fields.appendChild(modeSelect);
+  fields.appendChild(sceneSelect);
   fields.appendChild(timeInput);
   fields.appendChild(repeatSelect);
 
@@ -690,12 +690,12 @@ function startEditSchedule(s) {
   saveBtn.className = 'btn btn-success btn-sm';
   saveBtn.textContent = '💾 Save';
   saveBtn.addEventListener('click', async () => {
-    const mode   = modeSelect.value;
+    const scene   = sceneSelect.value;
     const time   = timeInput.value;
     const repeat = repeatSelect.value;
     if (!time) { toast('Please enter a time.', 'error'); return; }
     try {
-      await apiPut(`/api/schedules/${s.id}`, { mode, time, repeat });
+      await apiPut(`/api/schedules/${s.id}`, { scene, time, repeat });
       toast('Schedule updated.', 'success');
       editingScheduleId = null;
       await loadAll();
@@ -722,9 +722,9 @@ async function loadHealth() {
     const h = await apiGet('/health');
     document.getElementById('health-display').innerHTML =
       `Status: <strong style="color:#5cff8f">${h.status}</strong> &nbsp;|&nbsp; ` +
-      `Modes: <strong>${h.modes_count}</strong> &nbsp;|&nbsp; ` +
+      `Scenes: <strong>${h.scenes_count}</strong> &nbsp;|&nbsp; ` +
       `Schedules: <strong>${h.schedules_count}</strong> &nbsp;|&nbsp; ` +
-      `Active: <strong>${h.active_mode || 'none'}</strong>`;
+      `Active: <strong>${h.active_scene || 'none'}</strong>`;
   } catch {
     document.getElementById('health-display').textContent = 'Could not reach service.';
   }
@@ -733,13 +733,13 @@ async function loadHealth() {
 // ─── Full data load ───────────────────────────────────────────────────────────
 async function loadAll() {
   try {
-    const data = await apiGet('/api/modes');
-    currentModes  = data.modes || [];
-    currentActive = data.active_mode || null;
+    const data = await apiGet('/api/scenes');
+    currentScenes  = data.scenes || [];
+    currentActive = data.active_scene || null;
     renderBanner();
-    renderModes();
+    renderScenes();
   } catch (e) {
-    document.getElementById('mode-list').innerHTML =
+    document.getElementById('scene-list').innerHTML =
       `<div class="empty-state" style="color:#dc3545">Error: ${e.message}</div>`;
   }
 
@@ -756,46 +756,46 @@ async function loadAll() {
 }
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
-async function createMode() {
-  const input = document.getElementById('new-mode-name');
+async function createScene() {
+  const input = document.getElementById('new-scene-name');
   const name = input.value.trim();
-  if (!name) { toast('Please enter a mode name.', 'error'); return; }
+  if (!name) { toast('Please enter a scene name.', 'error'); return; }
   try {
-    await apiPost('/api/modes', { name });
-    toast(`Mode "${name}" created.`, 'success');
+    await apiPost('/api/scenes', { name });
+    toast(`Scene "${name}" created.`, 'success');
     input.value = '';
     await loadAll();
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function deleteMode(name) {
-  if (!confirm(`Delete mode "${name}"?`)) return;
+async function deleteScene(name) {
+  if (!confirm(`Delete scene "${name}"?`)) return;
   try {
-    await apiDelete(`/api/modes/${encodeURIComponent(name)}`);
-    toast(`Mode "${name}" deleted.`, 'success');
+    await apiDelete(`/api/scenes/${encodeURIComponent(name)}`);
+    toast(`Scene "${name}" deleted.`, 'success');
     await loadAll();
   } catch (e) { toast(e.message, 'error'); }
 }
 
-async function setActiveModeFromBanner() {
-  const name = document.getElementById('banner-mode-select').value || null;
+async function setActiveSceneFromBanner() {
+  const name = document.getElementById('banner-scene-select').value || null;
   try {
-    await apiPost('/api/modes/active', { name });
-    toast(name ? `Active mode set to "${name}".` : 'Active mode cleared.', 'success');
+    await apiPost('/api/scenes/active', { name });
+    toast(name ? `Active scene set to "${name}".` : 'Active scene cleared.', 'success');
     await loadAll();
-    loadSceneStatus();   // refresh scene config panel immediately after mode change
+    loadSceneStatus();   // refresh scene config panel immediately after scene change
   } catch (e) { toast(e.message, 'error'); }
 }
 
 async function addSchedule() {
-  const mode   = document.getElementById('sched-mode-select').value;
+  const scene   = document.getElementById('sched-scene-select').value;
   const time   = document.getElementById('sched-time').value;
   const repeat = document.getElementById('sched-repeat').value;
-  if (!mode) { toast('Please select a mode.', 'error'); return; }
+  if (!scene) { toast('Please select a scene.', 'error'); return; }
   if (!time) { toast('Please enter a time.', 'error'); return; }
   try {
-    await apiPost('/api/schedules', { mode, time, repeat });
-    toast(`Schedule added: "${mode}" @ ${time} (${repeat}).`, 'success');
+    await apiPost('/api/schedules', { scene, time, repeat });
+    toast(`Schedule added: "${scene}" @ ${time} (${repeat}).`, 'success');
     document.getElementById('sched-time').value = '';
     await loadAll();
   } catch (e) { toast(e.message, 'error'); }
@@ -1004,11 +1004,11 @@ function buildSvcPanelHeader(title, svc, scene) {
 }
 
 // ─── Event bindings ───────────────────────────────────────────────────────────
-document.getElementById('create-mode-btn').addEventListener('click', createMode);
-document.getElementById('new-mode-name').addEventListener('keydown', e => {
-  if (e.key === 'Enter') createMode();
+document.getElementById('create-scene-btn').addEventListener('click', createScene);
+document.getElementById('new-scene-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') createScene();
 });
-document.getElementById('banner-set-btn').addEventListener('click', setActiveModeFromBanner);
+document.getElementById('banner-set-btn').addEventListener('click', setActiveSceneFromBanner);
 document.getElementById('add-sched-btn').addEventListener('click', addSchedule);
 
 // Initial load + 30-second auto-refresh

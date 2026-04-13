@@ -156,8 +156,8 @@
                                                    border-color: #b2dfdb; }
         #on-enter-steps-list .step-label { color: #2e7d32; }
 
-        /* ── Mode active badge ──────────────────────────────────────── */
-        .mode-active-badge { display: inline-block; background: #4a0080; color: white;
+        /* ── Scene active badge ─────────────────────────────────────── */
+        .scene-active-badge { display: inline-block; background: #4a0080; color: white;
                              border-radius: 12px; padding: 3px 12px;
                              font-size: 0.85em; font-weight: bold; }
     </style>
@@ -172,10 +172,10 @@
         <span class="status-item" id="socketStatus">Socket: Loading…</span>
         <span class="status-item" id="oscStatus">OSC: Loading…</span>
         <span class="status-item" id="mappingCount">Mappings: 0</span>
-        <span class="status-item" id="modeStatus">Scene: Loading…</span>
+        <span class="status-item" id="sceneStatus">Scene: Loading…</span>
         <button id="refreshSceneBtn" onclick="refreshScene()"
                 style="margin-left:8px;padding:4px 12px;font-size:0.85em;"
-                title="Force re-poll the mode service now">⟳ Refresh Scene</button>
+                title="Force re-poll the scene service now">⟳ Refresh Scene</button>
     </div>
 
     <!-- OSC Client Configuration -->
@@ -315,7 +315,7 @@ let triggers       = [];
 let aliases        = [];
 let allMappings    = [];        // all scene mappings, flat
 let configuredScenes  = [];    // scenes with an entry in osc_proxy_config.json
-let modeServiceScenes = [];    // scenes from the mode service
+let sceneServiceScenes = [];    // scenes from the scene service
 let currentEditingId      = null;
 let currentEditingAliasId = null;
 
@@ -367,7 +367,7 @@ async function loadSceneSync() {
         const mapData  = await mapResp.json();
 
         configuredScenes  = syncData.configured_scenes  || [];
-        modeServiceScenes = syncData.mode_service_scenes || [];
+        sceneServiceScenes = syncData.scene_service_scenes || [];
         allMappings       = mapData.mappings || [];
 
         renderSceneSelector(syncData.active_scene || '');
@@ -385,7 +385,7 @@ function renderSceneSelector(activeScene) {
     const prev = sel.value;
 
     // Union of both sets, sorted
-    const msSet  = new Set(modeServiceScenes);
+    const msSet  = new Set(sceneServiceScenes);
     const cfgSet = new Set(configuredScenes);
     const all    = [...new Set([...msSet, ...cfgSet])].sort();
 
@@ -405,7 +405,7 @@ function renderSceneSelector(activeScene) {
             opt.textContent = `${name}  ⚠ (not configured)`;
             opt.style.color = '#cc0000';
         } else {
-            opt.textContent = `${name}  (not in mode service)`;
+            opt.textContent = `${name}  (not in scene service)`;
             opt.style.color = '#0055cc';
         }
         sel.appendChild(opt);
@@ -419,7 +419,7 @@ function renderSceneSelector(activeScene) {
 }
 
 function renderSyncWarnings() {
-    const msSet  = new Set(modeServiceScenes);
+    const msSet  = new Set(sceneServiceScenes);
     const cfgSet = new Set(configuredScenes);
     const missingCfg  = [...msSet].filter(s => !cfgSet.has(s));
     const orphanedCfg = [...cfgSet].filter(s => !msSet.has(s));
@@ -429,7 +429,7 @@ function renderSyncWarnings() {
         const chips = missingCfg.map(s =>
             `<span class="sync-chip sync-chip-red">${esc(s)}</span>`).join(' ');
         html += `<div class="sync-warning sync-warning-red">
-            ⚠ <strong>${missingCfg.length} mode-service scene${missingCfg.length > 1 ? 's' : ''}
+            ⚠ <strong>${missingCfg.length} scene-service scene${missingCfg.length > 1 ? 's' : ''}
             have no OSC configuration:</strong> ${chips}
         </div>`;
     }
@@ -438,7 +438,7 @@ function renderSyncWarnings() {
             `<span class="sync-chip sync-chip-blue">${esc(s)}</span>`).join(' ');
         html += `<div class="sync-warning sync-warning-blue">
             ℹ <strong>${orphanedCfg.length} configured scene${orphanedCfg.length > 1 ? 's' : ''}
-            not found in mode service:</strong> ${chips}
+            not found in scene service:</strong> ${chips}
         </div>`;
     }
     document.getElementById('scene-sync-warnings').innerHTML = html;
@@ -495,7 +495,7 @@ function renderSceneContent() {
                     (OSC commands fired when scene becomes active)</em>
             </h3>
             <div class="info-box" style="margin-bottom:10px;">
-                <strong>Tip:</strong> These steps run automatically whenever the mode service
+                <strong>Tip:</strong> These steps run automatically whenever the scene service
                 switches to this scene. Use aliases for readability. Delay is ms after scene entry.
             </div>
             <div id="on-enter-steps-list"></div>
@@ -971,19 +971,19 @@ async function updateStatus() {
 
         document.getElementById('mappingCount').textContent = `Mappings: ${s.mappings_count}`;
 
-        const modeEl = document.getElementById('modeStatus');
-        const activeMode = s.active_mode || 'Unknown';
-        const isUnknown = (activeMode === 'Unknown' || activeMode === '');
-        modeEl.className = 'status-item ' + (isUnknown ? '' : 'online');
-        modeEl.style.color = isUnknown ? '#b45309' : '';
-        modeEl.textContent = `Scene: ${activeMode}`;
+        const sceneEl = document.getElementById('sceneStatus');
+        const activeScene = s.active_scene || 'Unknown';
+        const isUnknown = (activeScene === 'Unknown' || activeScene === '');
+        sceneEl.className = 'status-item ' + (isUnknown ? '' : 'online');
+        sceneEl.style.color = isUnknown ? '#b45309' : '';
+        sceneEl.textContent = `Scene: ${activeScene}`;
 
         let seqEl = document.getElementById('seqStatus');
         if (!seqEl) {
             seqEl = document.createElement('span');
             seqEl.id = 'seqStatus';
             seqEl.className = 'status-item';
-            document.getElementById('modeStatus').insertAdjacentElement('afterend', seqEl);
+            document.getElementById('sceneStatus').insertAdjacentElement('afterend', seqEl);
         }
         const seqCount = s.active_sequences || 0;
         seqEl.className = 'status-item ' + (seqCount > 0 ? 'online' : '');
@@ -1020,14 +1020,14 @@ async function refreshScene() {
     const btn = document.getElementById('refreshSceneBtn');
     btn.disabled = true; btn.textContent = '⟳ Refreshing…';
     try {
-        const r = await fetch('/api/refresh-mode', { method: 'POST' });
+        const r = await fetch('/api/refresh-scene', { method: 'POST' });
         const d = await r.json();
         if (r.ok) {
-            const modeEl = document.getElementById('modeStatus');
-            const activeMode = d.active_mode || 'Unknown';
-            modeEl.className = 'status-item ' + (activeMode === 'Unknown' ? '' : 'online');
-            modeEl.style.color = activeMode === 'Unknown' ? '#b45309' : '';
-            modeEl.textContent = `Scene: ${activeMode}`;
+            const sceneEl = document.getElementById('sceneStatus');
+            const activeScene  = d.active_scene || 'Unknown';
+            sceneEl.className = 'status-item ' + (activeScene === 'Unknown' ? '' : 'online');
+            sceneEl.style.color = activeScene === 'Unknown' ? '#b45309' : '';
+            sceneEl.textContent = `Scene: ${activeScene}`;
             btn.textContent = d.changed ? '⟳ Scene Updated' : '⟳ Refresh Scene';
             await loadSceneSync();
         } else {

@@ -1,11 +1,11 @@
 [Unit]
-Description=FLG Haven Mode Management Service
+Description=FLG Haven Scene Management Service
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Environment="PYTHONPATH=/home/flaming/haven/util"
-ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/mode_service.py
+ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/scene_service.py
 WorkingDirectory=/home/flaming/haven/Triggers
 Restart=always
 RestartSec=5

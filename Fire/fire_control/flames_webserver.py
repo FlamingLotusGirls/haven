@@ -379,58 +379,58 @@ def trigger_integration_triggers():
     else:
         return CORSResponse("Trigger integration not initialized", 503)
 
-@app.route("/trigger-integration/modes", methods=['GET'])
-def trigger_integration_modes():
-    '''GET /trigger-integration/modes: Get available modes from mode service.
+@app.route("/trigger-integration/scenes", methods=['GET'])
+def trigger_integration_scenes():
+    '''GET /trigger-integration/scenes: Get available scenes from scene service.
 
     Response JSON:
-      { "modes": [...],              -- scene names from the mode service
-        "active_mode": "...",        -- currently active scene
+      { "scenes": [...],             -- scene names from the scene service
+        "active_scene": "...",       -- currently active scene
         "configured_scenes": [...] } -- scenes registered in the flames config
     '''
     integration = trigger_integration.get_integration()
     if integration:
-        modes             = integration.get_available_modes()
-        active_mode       = integration.get_active_mode()
+        scenes             = integration.get_available_scenes()
+        active_scene       = integration.get_active_scene()
         configured_scenes = integration.get_configured_scenes()
         return JSONResponse(json.dumps({
-            'modes':             modes,
-            'active_mode':       active_mode,
+            'scenes':            scenes,
+            'active_scene':      active_scene,
             'configured_scenes': configured_scenes,
         }))
     else:
         return CORSResponse("Trigger integration not initialized", 503)
 
-@app.route("/trigger-integration/modes/active", methods=['GET'])
-def trigger_integration_active_mode():
-    '''GET /trigger-integration/modes/active: Get currently active mode'''
+@app.route("/trigger-integration/scenes/active", methods=['GET'])
+def trigger_integration_active_scenes():
+    '''GET /trigger-integration/scenes/active: Get currently active scene'''
     integration = trigger_integration.get_integration()
     if integration:
-        active_mode = integration.get_active_mode()
-        return JSONResponse(json.dumps({'active_mode': active_mode}))
+        active_scene = integration.get_active_scene()
+        return JSONResponse(json.dumps({'active_scene': active_scene}))
     else:
         return CORSResponse("Trigger integration not initialized", 503)
 
 
-@app.route("/api/refresh-mode", methods=['POST'])
-def refresh_mode():
-    '''POST /api/refresh-mode: Force an immediate re-fetch of the active
-    scene/mode from the mode service and return the result.
+@app.route("/api/refresh-scene", methods=['POST'])
+def refresh_scene():
+    '''POST /api/refresh-scene: Force an immediate re-fetch of the active
+    scene from the scene service and return the result.
 
     Response JSON:
-      { "active_mode": "<name>"|null, "refreshed": true|false }
+      { "active_scene": "<name>"|null, "refreshed": true|false }
 
-    "refreshed" is true when the mode service responded with HTTP 200,
-    false when it was unreachable (active_mode then reflects the last
+    "refreshed" is true when the scene service responded with HTTP 200,
+    false when it was unreachable (active_scene then reflects the last
     known cached value, which may still be "Unknown" at boot).
     '''
     integration = trigger_integration.get_integration()
     if not integration:
         return CORSResponse("Trigger integration not initialized", 503)
 
-    ok, active_mode = integration.refresh_active_mode()
+    ok, active_scene = integration.refresh_active_scene()
     return JSONResponse(json.dumps({
-        'active_mode': active_mode,
+        'active_scene': active_scene,
         'refreshed': ok,
     }))
 

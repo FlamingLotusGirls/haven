@@ -6,7 +6,7 @@ Integrates the Flame Control system with the Haven Trigger Server.
 Handles:
 - Registration with trigger server (with automatic retry)
 - Listening for trigger events via TCP socket
-- Managing trigger-to-flame-sequence mappings (scene-forward data model)
+- Managing trigger-to-flame-sequence mappings
 - Triggering flame sequences based on incoming triggers
 - Preventing duplicate sequence execution
 
@@ -20,10 +20,6 @@ JSON data model (trigger_mappings.json):
         "DayScene": []          <- explicitly configured, no mappings (valid "quiet scene")
       }
     }
-
-The top-level grouping is the SCENE, not the individual trigger mapping.
-Individual mappings no longer carry a "modes" list; scene membership is
-expressed by which scene key the mapping lives under.
 
 An entry with an empty list means the scene is explicitly configured with
 no fire mappings — this is a valid operational state ("quiet scene") and is
@@ -46,10 +42,10 @@ logger = logging.getLogger("flames")
 
 class TriggerIntegration:
     def __init__(self, trigger_server_url="http://localhost:5002",
-                 listen_port=6000, mode_service_url="http://localhost:5003"):
+                 listen_port=6000, scene_service_url="http://localhost:5003"):
         self.trigger_server_url = trigger_server_url
         self.listen_port = listen_port
-        self.mode_service_url = mode_service_url
+        self.scene_service_url = scene_service_url
         self.service_name = "FlameServer"
 
         # Thread / running state
@@ -71,15 +67,15 @@ class TriggerIntegration:
         self.triggers_lock = Lock()
 
         # Mode management.
-        # "Unknown" is the boot-time sentinel; replaced only when the mode
-        # service returns a real (non-null) mode name.
-        self.available_modes = []
-        self.active_mode = "Unknown"
-        self.modes_lock = Lock()
+        # "Unknown" is the boot-time sentinel; replaced only when the scene
+        # service returns a real (non-null) scene name.
+        self.available_scenes = []
+        self.active_scene = "Unknown"
+        self.scenes_lock = Lock()
 
         # True when the active scene is known but NOT present in scene_data.
         # A scene present in scene_data with zero mappings is NOT unconfigured.
-        # Protected by modes_lock.
+        # Protected by scenes_lock.
         self.scene_unconfigured = False
 
         # Socket server
@@ -109,9 +105,9 @@ class TriggerIntegration:
             target=self._refresh_triggers_loop, daemon=True)
         self.refresh_thread.start()
 
-        self.mode_refresh_thread = threading.Thread(
-            target=self._refresh_modes_loop, daemon=True)
-        self.mode_refresh_thread.start()
+        self.scene_refresh_thread = threading.Thread(
+            target=self._refresh_scenes_loop, daemon=True)
+        self.scene_refresh_thread.start()
 
         logger.info("Trigger Integration started")
 
@@ -238,28 +234,28 @@ class TriggerIntegration:
                 logger.error(f"Error refreshing triggers: {e}")
             time.sleep(300)
 
-    def _refresh_modes_loop(self):
-        """Poll the mode service at 1 s until a real mode is known, then 10 s."""
+    def _refresh_scenes_loop(self):
+        """Poll the scene service at 1 s until a real scene is known, then 10 s."""
         fast_poll = True
         while self.running:
             try:
-                self._fetch_modes()
-                self._fetch_active_mode()
+                self._fetch_scenes()
+                self._fetch_active_scene()
                 if fast_poll:
-                    with self.modes_lock:
-                        known = self.active_mode not in (None, "Unknown")
+                    with self.scenes_lock:
+                        known = self.active_scene not in (None, "Unknown")
                     if known:
                         fast_poll = False
-                        logger.info("Known mode received; switching to 10 s poll interval")
+                        logger.info("Known scene received; switching to 10 s poll interval")
             except Exception as e:
-                logger.error(f"Error refreshing modes: {e}")
+                logger.error(f"Error refreshing scenes: {e}")
             time.sleep(1 if fast_poll else 10)
 
     # =========================================================================
-    # Mode / scene helpers
+    # Scene helpers
     # =========================================================================
 
-    # Name of the special trigger pushed by mode_service on every scene change.
+    # Name of the special trigger pushed by scene_service on every scene change.
     SCENE_TRIGGER_NAME = 'SceneChange'
 
     def _update_scene_configured_flag(self):
@@ -268,23 +264,23 @@ class TriggerIntegration:
         A scene is "configured" if it has ANY entry in scene_data, even with
         an empty mappings list (quiet / intentionally-silent scene).
         The 'Unknown' boot-time sentinel is always treated as configured so
-        dispatch is not suppressed before the mode service responds.
+        dispatch is not suppressed before the scene service responds.
 
-        Updates self.scene_unconfigured (protected by modes_lock).
+        Updates self.scene_unconfigured (protected by scenes_lock).
         Must be called with neither lock held.
         """
-        with self.modes_lock:
-            scene = self.active_mode
+        with self.scenes_lock:
+            scene = self.active_scene
 
         if scene in (None, 'Unknown'):
-            with self.modes_lock:
+            with self.scenes_lock:
                 self.scene_unconfigured = False
             return
 
         with self.mappings_lock:
             configured = scene in self.scene_data
 
-        with self.modes_lock:
+        with self.scenes_lock:
             was_unconfigured = self.scene_unconfigured
             self.scene_unconfigured = not configured
 
@@ -300,61 +296,61 @@ class TriggerIntegration:
                 scene
             )
 
-    def _fetch_modes(self):
+    def _fetch_scenes(self):
         try:
             response = requests.get(
-                f"{self.mode_service_url}/api/modes", timeout=5)
+                f"{self.scene_service_url}/api/scenes", timeout=5)
             if response.status_code == 200:
                 data = response.json()
-                with self.modes_lock:
-                    self.available_modes = data.get('modes', [])
-                logger.debug(f"Fetched {len(self.available_modes)} modes")
+                with self.scenes_lock:
+                    self.available_scenes = data.get('scenes', [])
+                logger.debug(f"Fetched {len(self.available_scenes)} scenes")
                 return True
-            logger.debug(f"Failed to fetch modes: {response.status_code}")
+            logger.debug(f"Failed to fetch scenes: {response.status_code}")
             return False
         except requests.exceptions.ConnectionError:
-            logger.debug(f"Cannot connect to Mode Service at {self.mode_service_url}")
+            logger.debug(f"Cannot connect to Scene Service at {self.scene_service_url}")
             return False
         except Exception as e:
-            logger.debug(f"Error fetching modes: {e}")
+            logger.debug(f"Error fetching scenes: {e}")
             return False
 
-    def _fetch_active_mode(self):
-        """Fetch the active mode. Never replaces a known mode with null."""
+    def _fetch_active_scene(self):
+        """Fetch the active scene. Never replaces a known scene with null."""
         try:
             response = requests.get(
-                f"{self.mode_service_url}/api/modes/active", timeout=5)
+                f"{self.scene_service_url}/api/scenes/active", timeout=5)
             if response.status_code == 200:
                 data = response.json()
-                active_mode = data.get('active_mode')
+                active_scene = data.get('active_scene')
                 _changed = False
-                with self.modes_lock:
-                    if active_mode is not None:
-                        if self.active_mode != active_mode:
-                            logger.info(f"Active mode: {self.active_mode} -> {active_mode}")
-                            self.active_mode = active_mode
+                with self.scenes_lock:
+                    if active_scene is not None:
+                        if self.active_scene != active_scene:
+                            logger.info(f"Active scene: {self.active_scene} -> {active_scene}")
+                            self.active_scene = active_scene
                             _changed = True
                     else:
                         logger.warning(
-                            "Mode service has no active mode set; "
-                            "retaining current mode=%r", self.active_mode)
+                            "Scene service has no active scene set; "
+                            "retaining current scene=%r", self.active_scene)
                 if _changed:
                     self._update_scene_configured_flag()
                 return True
-            logger.debug(f"Failed to fetch active mode: {response.status_code}")
+            logger.debug(f"Failed to fetch active scene: {response.status_code}")
             return False
         except requests.exceptions.ConnectionError:
-            logger.debug(f"Cannot connect to Mode Service at {self.mode_service_url}")
+            logger.debug(f"Cannot connect to Scene Service at {self.scene_service_url}")
             return False
         except Exception as e:
-            logger.debug(f"Error fetching active mode: {e}")
+            logger.debug(f"Error fetching active scene: {e}")
             return False
 
-    def refresh_active_mode(self):
-        """Force a synchronous re-fetch. Returns (success, active_mode)."""
-        ok = self._fetch_active_mode()
-        with self.modes_lock:
-            return ok, self.active_mode
+    def refresh_active_scene(self):
+        """Force a synchronous re-fetch. Returns (success, active_scene)."""
+        ok = self._fetch_active_scene()
+        with self.scenes_lock:
+            return ok, self.active_scene
 
     def _fetch_available_triggers(self):
         try:
@@ -395,28 +391,28 @@ class TriggerIntegration:
         # ── Scene-change fast path ───────────────────────────────────────────
         if trigger_name == self.SCENE_TRIGGER_NAME and trigger_value is not None:
             scene_changed = False
-            with self.modes_lock:
-                if self.active_mode != trigger_value:
-                    logger.info(f"Scene updated via trigger: {self.active_mode} -> {trigger_value}")
-                    self.active_mode = trigger_value
+            with self.scenes_lock:
+                if self.active_scene != trigger_value:
+                    logger.info(f"Scene updated via trigger: {self.active_scene} -> {trigger_value}")
+                    self.active_scene = trigger_value
                     scene_changed = True
             if scene_changed:
                 self._update_scene_configured_flag()
             # Fall through so any flame mapping on SceneChange still fires.
 
-        with self.modes_lock:
-            current_mode      = self.active_mode
+        with self.scenes_lock:
+            current_scene      = self.active_scene
             scene_unconfigured = self.scene_unconfigured
 
         if scene_unconfigured:
             logger.info(
                 "Trigger '%s' suppressed — scene '%s' has no trigger configuration",
-                trigger_name, current_mode)
+                trigger_name, current_scene)
             return
 
         # Get a snapshot of the current scene's mappings (outside the lock)
         with self.mappings_lock:
-            scene_mappings = list(self.scene_data.get(current_mode, []))
+            scene_mappings = list(self.scene_data.get(current_scene, []))
 
         for mapping in scene_mappings:
             if mapping['trigger_name'] != trigger_name:
@@ -714,23 +710,19 @@ class TriggerIntegration:
         with self.triggers_lock:
             return self.available_triggers.copy()
 
-    def get_available_modes(self):
-        """Return cached mode list (maintained by _refresh_modes_loop). Never blocks."""
-        with self.modes_lock:
-            return self.available_modes.copy()
+    def get_available_scenes(self):
+        """Return cached scene list (maintained by _refresh_scenes_loop). Never blocks."""
+        with self.scenes_lock:
+            return self.available_scenes.copy()
 
-    def get_active_mode(self):
-        """Return cached active mode (maintained by _refresh_modes_loop). Never blocks."""
-        with self.modes_lock:
-            return self.active_mode
-
-    def get_active_mode_cached(self):
-        """Alias for get_active_mode — kept for backward compatibility."""
-        return self.get_active_mode()
+    def get_active_scene(self):
+        """Return cached active scene (maintained by _refresh_scenes_loop). Never blocks."""
+        with self.scenes_lock:
+            return self.active_scene
 
     def get_status(self):
-        with self.modes_lock:
-            active_mode       = self.active_mode
+        with self.scenes_lock:
+            active_scene       = self.active_scene
             scene_unconfigured = self.scene_unconfigured
         with self.mappings_lock:
             total_mappings    = sum(len(v) for v in self.scene_data.values())
@@ -741,8 +733,8 @@ class TriggerIntegration:
             'listen_port':             self.listen_port,
             'mapping_count':           total_mappings,
             'available_triggers_count': len(self.available_triggers),
-            'available_modes_count':   len(self.available_modes),
-            'active_mode':             active_mode,
+            'available_scenes_count':   len(self.available_scenes),
+            'active_scene':             active_scene,
             'scene_unconfigured':      scene_unconfigured,
             'configured_scenes':       configured_scenes,
         }

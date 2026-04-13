@@ -14,7 +14,7 @@ class FlameController {
         this.loadPatterns();
         this.loadSceneStatus();
         // Poll scene status every 5 s so the header chip and warning banner
-        // update automatically whenever the mode service changes the scene.
+        // update automatically whenever the scene service changes the scene.
         setInterval(() => this.loadSceneStatus(), 5000);
     }
 
@@ -72,7 +72,7 @@ class FlameController {
         document.getElementById('globalPlay').addEventListener('click', () => this.setGlobalState('play'));
         document.getElementById('globalPause').addEventListener('click', () => this.setGlobalState('pause'));
         document.getElementById('refreshStatus').addEventListener('click', () => this.loadSystemStatus());
-        document.getElementById('refreshScene').addEventListener('click', () => this.refreshMode());
+        document.getElementById('refreshScene').addEventListener('click', () => this.refreshScene());
         document.getElementById('refreshPatterns').addEventListener('click', () => this.loadPatterns());
 
         // Poofer toggle buttons
@@ -395,11 +395,11 @@ class FlameController {
     }
 
     // =========================================================================
-    // Scene / Mode Display
+    // Scene Display
     // =========================================================================
 
     /**
-     * Fetch trigger-integration status (includes active_mode AND scene_unconfigured)
+     * Fetch trigger-integration status (includes active_scene AND scene_unconfigured)
      * and update both the scene display pill and the unconfigured-scene banner.
      */
     async loadSceneStatus() {
@@ -407,8 +407,8 @@ class FlameController {
             const response = await fetch(`${this.baseUrl}/trigger-integration/status`);
             if (response.ok) {
                 const data = await response.json();
-                this.displayScene(data.active_mode);
-                this.updateUnconfiguredBanner(data.scene_unconfigured, data.active_mode);
+                this.displayScene(data.active_scene);
+                this.updateUnconfiguredBanner(data.scene_unconfigured, data.active_scene);
             } else {
                 this.displayScene(null, /*error=*/true);
                 this.updateUnconfiguredBanner(false, null);
@@ -420,26 +420,26 @@ class FlameController {
     }
 
     /**
-     * POST /api/refresh-mode — force the flame server to re-fetch from the
-     * mode service right now, then update the scene display and banner.
+     * POST /api/refresh-scene — force the flame server to re-fetch from the
+     * scene service right now, then update the scene display and banner.
      */
-    async refreshMode() {
+    async refreshScene() {
         const btn = document.getElementById('refreshScene');
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = '⏳ Refreshing…';
 
         try {
-            const response = await fetch(`${this.baseUrl}/api/refresh-mode`, {
+            const response = await fetch(`${this.baseUrl}/api/refresh-scene`, {
                 method: 'POST',
             });
 
             if (response.ok) {
                 const data = await response.json();
                 if (data.refreshed) {
-                    this.showMessage(`Scene refreshed: ${data.active_mode ?? '(none)'}`, 'success');
+                    this.showMessage(`Scene refreshed: ${data.active_scene ?? '(none)'}`, 'success');
                 } else {
-                    this.showMessage('Mode service unreachable; showing last known scene', 'info');
+                    this.showMessage('Scene service unreachable; showing last known scene', 'info');
                 }
                 // Reload full status so both the scene pill and the banner are updated.
                 await this.loadSceneStatus();
@@ -1340,7 +1340,7 @@ class FlameController {
     }
 
     // =========================================================================
-    // Trigger Integration Functions  (scene-first model)
+    // Trigger Integration Functions 
     // =========================================================================
 
     /**
@@ -1382,10 +1382,10 @@ class FlameController {
         } catch (e) {
             console.error('_loadScenesAndMappings:', e);
             // Always leave the selector in a usable state even on hard failure
-            this._buildSceneSelector(this.availableModesData   || [],
+            this._buildSceneSelector(this.availableScenesData   || [],
                                      this.configuredScenesData || [],
                                      null);
-            this._renderSyncWarnings(this.availableModesData   || [],
+            this._renderSyncWarnings(this.availableScenesData   || [],
                                      this.configuredScenesData || []);
             this._renderMappingsForSelectedScene();
         }
@@ -1426,30 +1426,30 @@ class FlameController {
     }
 
     /**
-     * Fetch modes + all mappings, populate the scene selector, render the table.
+     * Fetch scenes + all mappings, populate the scene selector, render the table.
      * Called on tab open and after duplicate/copy operations.
      * Always initialises instance variables so downstream code never sees undefined.
      */
     async _loadScenesAndMappings() {
         // Initialise to safe defaults so we never pass undefined to _buildSceneSelector
         // even when a fetch returns a non-200 status code (which doesn't throw).
-        if (!Array.isArray(this.availableModesData))   this.availableModesData   = [];
+        if (!Array.isArray(this.availableScenesData))   this.availableScenesData   = [];
         if (!Array.isArray(this.configuredScenesData)) this.configuredScenesData = [];
         if (!Array.isArray(this._allMappings))         this._allMappings         = [];
 
         try {
-            const modeResp = await this._fetchWithTimeout(
-                `${this.baseUrl}/trigger-integration/modes`);
-            if (modeResp.ok) {
-                const md = await modeResp.json();
-                this.availableModesData   = md.modes             || [];
-                this.activeModeData       = md.active_mode       || null;
-                this.configuredScenesData = md.configured_scenes || [];
+            const sceneResp = await this._fetchWithTimeout(
+                `${this.baseUrl}/trigger-integration/scenes`);
+            if (sceneResp.ok) {
+                const md = await sceneResp.json();
+                this.availableScenesData   = md.scenes             || [];
+                this.activeSceneData       = md.active_scene       || null;
+                this.configuredScenesData  = md.configured_scenes || [];
             } else {
-                console.warn(`/trigger-integration/modes returned ${modeResp.status}`);
+                console.warn(`/trigger-integration/scenes returned ${sceneResp.status}`);
             }
         } catch (err) {
-            console.warn('Could not reach /trigger-integration/modes:', err.message || err);
+            console.warn('Could not reach /trigger-integration/scenes:', err.message || err);
         }
 
         try {
@@ -1466,24 +1466,24 @@ class FlameController {
         }
 
         this._buildSceneSelector(
-            this.availableModesData, this.configuredScenesData, this.activeModeData);
-        this._renderSyncWarnings(this.availableModesData, this.configuredScenesData);
+            this.availableScenesData, this.configuredScenesData, this.activeSceneData);
+        this._renderSyncWarnings(this.availableScenesData, this.configuredScenesData);
         this._renderMappingsForSelectedScene();
     }
 
     /**
      * Rebuild the scene selector dropdown.
-     * Sources: mode-service scene list + flame configured-scenes list (union).
+     * Sources: scene-service scene list + flame configured-scenes list (union).
      * Options are colour-coded:
-     *   default (black) — present in both mode service AND flame config
-     *   red             — mode service only (flame config missing)
-     *   blue            — flame config only (not in mode service, likely orphaned)
+     *   default (black) — present in both scene service AND flame config
+     *   red             — scene service only (flame config missing)
+     *   blue            — flame config only (not in scene service, likely orphaned)
      */
-    _buildSceneSelector(modeServiceScenes, configuredScenes, defaultScene) {
+    _buildSceneSelector(sceneServiceScenes, configuredScenes, defaultScene) {
         const select = document.getElementById('trigger-scene-select');
         if (!select) return;
 
-        const msSet  = new Set(modeServiceScenes  || []);
+        const msSet  = new Set(sceneServiceScenes  || []);
         const cfgSet = new Set(configuredScenes   || []);
         const allScenes = [...new Set([...msSet, ...cfgSet])].sort();
 
@@ -1508,9 +1508,9 @@ class FlameController {
                 opt.textContent = name;                             // both — standard
             } else if (inMS && !inCfg) {
                 opt.textContent  = `${name}  ⚠ (not configured)`;
-                opt.style.color  = '#cc0000';                      // mode-service only
+                opt.style.color  = '#cc0000';                      // scene service only
             } else {
-                opt.textContent  = `${name}  (not in mode service)`;
+                opt.textContent  = `${name}  (not in scene service)`;
                 opt.style.color  = '#0055cc';                      // flame config only
             }
             select.appendChild(opt);
@@ -1525,14 +1525,14 @@ class FlameController {
 
     /**
      * Render sync-warning banners between the scene selector and the status box.
-     * Red  = scenes in mode service with no flame config.
-     * Blue = scenes in flame config not present in mode service (orphaned).
+     * Red  = scenes in scene service with no flame config.
+     * Blue = scenes in flame config not present in scene service (orphaned).
      */
-    _renderSyncWarnings(modeServiceScenes, configuredScenes) {
+    _renderSyncWarnings(sceneServiceScenes, configuredScenes) {
         const container = document.getElementById('scene-sync-warnings');
         if (!container) return;
 
-        const msSet  = new Set(modeServiceScenes  || []);
+        const msSet  = new Set(sceneServiceScenes  || []);
         const cfgSet = new Set(configuredScenes   || []);
 
         const missingConfig  = [...msSet].filter(s => !cfgSet.has(s));
@@ -1545,7 +1545,7 @@ class FlameController {
                 .join(' ');
             html += `<div class="sync-warning sync-warning-red">
                 ⚠ <strong>${missingConfig.length} scene${missingConfig.length > 1 ? 's' : ''}
-                from the mode service have no flame configuration:</strong> ${chips}
+                from the scene service have no flame configuration:</strong> ${chips}
             </div>`;
         }
         if (orphanedConfig.length > 0) {
@@ -1554,7 +1554,7 @@ class FlameController {
                 .join(' ');
             html += `<div class="sync-warning sync-warning-blue">
                 ℹ <strong>${orphanedConfig.length} flame config scene${orphanedConfig.length > 1 ? 's' : ''}
-                not found in the mode service:</strong> ${chips}
+                not found in the scene service:</strong> ${chips}
             </div>`;
         }
         container.innerHTML = html;
@@ -1720,7 +1720,7 @@ class FlameController {
 
     /**
      * Render `mappings` (already filtered to one scene) into the table.
-     * No "Modes" column — the scene context is already clear from the selector.
+     * No "Scenes" column — the scene context is already clear from the selector.
      */
     displayTriggerMappings(mappings, scene) {
         const container = document.getElementById('trigger-mappings-table');

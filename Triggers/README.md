@@ -127,10 +127,10 @@ will create a problem on the outgoing socket. Need to check that.
     - ? Can we use different colors in the webpage
     - ? pretty print std_sequences.json, because having it all on one line is unreadable
     - Raspberry Pi the services
-- Mode service
-    - * Test mode service
-    - * Test mode service integration with flame server
-    - Create mode box? Or something that can change the mode (and maybe show the current mode)?
+- Scene service
+    - * Test scene service
+    - * Test scene service integration with flame server
+    - Create scene box? Or something that can change the scene (and maybe show the current scene)?
 - Esp32:
     - ? Ping/listener?
     - ? Don't sleep if not registered!

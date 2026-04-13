@@ -1373,58 +1373,6 @@ body.modal-open {
     }
 }
 
-/* Mode Management Styles */
-.mode-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    margin: 2px;
-    background: #17a2b8;
-    color: white;
-    border-radius: 3px;
-    font-size: 0.85em;
-}
-
-.mode-badge-none {
-    display: inline-block;
-    padding: 2px 8px;
-    color: #6c757d;
-    font-style: italic;
-}
-
-.mode-checkbox-label {
-    display: inline-block;
-    margin-right: 15px;
-    margin-bottom: 8px;
-    color: white;
-}
-
-.mode-checkbox {
-    margin-right: 5px;
-}
-
-.mode-checkboxes {
-    margin-bottom: 8px;
-}
-
-.active-mode-indicator {
-    padding: 10px;
-    margin-bottom: 15px;
-    border-radius: 4px;
-    font-size: 0.95em;
-}
-
-.active-mode-indicator.active {
-    background: #d4edda;
-    border: 1px solid #c3e6cb;
-    color: #155724;
-}
-
-.active-mode-indicator.inactive {
-    background: #f8d7da;
-    border: 1px solid #f5c6cb;
-    color: #721c24;
-}
-
 /* =========================================================================
    Poofer Mapping Tab Styles
    ========================================================================= */
@@ -1652,8 +1600,8 @@ body.modal-open {
  * Scene Status Bar (System Status card)
  * ---------------------------------------------------------------------------
  * Shows the current scene name with colour-coded feedback:
- *   scene-known   → green  (a real mode name is active)
- *   scene-unknown → amber  ("Unknown" boot-time sentinel or no mode set)
+ *   scene-known   → green  (a real scene name is active)
+ *   scene-unknown → amber  ("Unknown" boot-time sentinel or no scene set)
  *   scene-error   → red    (flame server unreachable)
  */
 
