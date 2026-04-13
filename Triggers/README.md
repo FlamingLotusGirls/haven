@@ -19,8 +19,8 @@ There are three main parts of the Trigger System:
 - DeviceTriggerManager. These objects are responsible for detecting the events that cause
 TriggerEvents, and sending those events to the central switchboard, the Trigger Gateway.
 A DeviceTriggerManager is usually instatiated on some embedded device, such as an ESP32. See the ESP32
-DeviceTrigger library in this directory.
-- Triggers. An abstract representation of the physical object that will cause the TriggerEvent.
+DeviceTrigger.h library in this directory.
+- Triggers. An abstract representation of the object that will cause the TriggerEvent.
 Triggers come in three types - ButtonTrigger (think on/off switch), DiscreteTrigger (think knob
 with distinct settings), ContinuousTrigger (think slider), and OneShotTrigger (think motion detector).
 A DeviceTriggerManager will manage one or more Triggers.
@@ -30,7 +30,7 @@ Triggers with the TriggerGateway, and will send TriggerEvent data to the gateway
 is detected. Services that wish to use TriggerEvents can query the Trigger Gateway for available
 Triggers, and can register to receive TriggerEvents from the Gateway.
 - Sculpture Services. These are service that use the TriggerEvents to do something on the sculpture.
-Key services include the Flame Server, the Sound Server, and the OSC Proxy server, which generates
+Key services include the Flame Server, the Sound (Murmura) clients, and the OSC Proxy server, which generates
 OSC messages for Chromatik (the lighting server). (In the future Chromatik may be configured to
 handle fire and sound as well as lighting, but that is not the case now and I do not want to
 condition operation of the sculpture on that happening.)
@@ -115,26 +115,9 @@ runs on port 5001.
     - * There's a question of concurrency here - whether two triggers coming in at the same time
 will create a problem on the outgoing socket. Need to check that.
     - * Check end to end when flame server starts before trigger server
-    - * Test port changes for webservers
-    - Trigger gateway. Allow registration for specific events, filter on the gateway. (maybe.)
-      Registration for a specific event is of the form:
-        - Trigger Name + range 
-           POST /listen_trigger {name:triggerName, value: [set of values], or value: {max: , min: }}
     - * Trigger gateway. What happens if multiple triggers have the same name? (Seems unfortunate but legitimate, actually. Check concurrency in this situation.)
-- Expansion Boards
-    - Having this run on the expansion board in the flame control box
-- Misc
-    - ? Can we use different colors in the webpage
-    - ? pretty print std_sequences.json, because having it all on one line is unreadable
-    - Raspberry Pi the services
-- Scene service
-    - * Test scene service
-    - * Test scene service integration with flame server
-    - Create scene box? Or something that can change the scene (and maybe show the current scene)?
 - Esp32:
-    - ? Ping/listener?
     - ? Don't sleep if not registered!
-    - * Async http requests
     - * ESP32 sleep mode. Let's see if I can get this thing working with a battery
 
 

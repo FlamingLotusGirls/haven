@@ -232,6 +232,6 @@ curl -X POST http://localhost:5004/api/test-osc \
 ## Next Steps
 
 - Full documentation: `OSC_PROXY_README.md`
-- Trigger types and gateway setup: `README_USAGE.md`
+- Trigger types and gateway setup: `TRIGGERS_USAGE.md`
 - Trigger dispatch internals: `TRIGGER_DISPATCH.md`
 - Scene management: `SCENE_SERVICE.md`

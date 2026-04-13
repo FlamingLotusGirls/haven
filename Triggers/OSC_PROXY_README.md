@@ -694,5 +694,5 @@ server.serve_forever()
 - `osc_proxy.service` — systemd unit file
 - `trigger_gateway.py` — trigger gateway
 - `scene_service.py` + `SCENE_SERVICE.md` — scene management
-- `README_USAGE.md` — trigger system overview
+- `TRIGGERS_USAGE.md` — trigger system overview
 - `TRIGGER_DISPATCH.md` — trigger dispatch documentation
