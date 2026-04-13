@@ -120,11 +120,11 @@
         let nozzleIdx = 0;
         
         for (let sectionIdx = 0; sectionIdx < 6; sectionIdx++) {
-            const baseAngle = sectionIdx * Math.PI / 3.0;
+            const baseAngle = -sectionIdx * Math.PI / 3.0;
             
             for (let ringIdx = 0; ringIdx < 3; ringIdx++) {
                 for (let pos = 0; pos < ringCount[ringIdx]; pos++) {
-                    const fullAngle = baseAngle + ringBaseAngle[ringIdx] + posAngle[ringIdx][pos];
+                    const fullAngle = baseAngle - ringBaseAngle[ringIdx] - posAngle[ringIdx][pos];
                     const radius = ringRadius[ringIdx];
                     
                     const x = Math.sin(fullAngle) * radius;
@@ -191,23 +191,23 @@
             const sliceRadius = 310; // slightly larger than nozzle reach
             for (let section = 0; section < 6; section++) {
                 const boardIdx = sliceToBoard(section);
-                const startAngle = section * Math.PI * 2.0 / 6.0;
-                const endAngle = (section + 1) * Math.PI * 2.0 / 6.0;
+                const startAngle = -section * Math.PI * 2.0 / 6.0;
+                const endAngle = -(section + 1) * Math.PI * 2.0 / 6.0;
                 
-                // Convert from our coordinate system (0=up, CW) to canvas angles (0=right, CW)
+                // Convert from our coordinate system (0=up, CCW) to canvas angles (0=right, CW)
                 const canvasStart = startAngle - Math.PI / 2;
                 const canvasEnd = endAngle - Math.PI / 2;
                 
                 ctx.fillStyle = boardColorsFill[boardIdx];
                 ctx.beginPath();
                 ctx.moveTo(centerX, centerY);
-                ctx.arc(centerX, centerY, sliceRadius, canvasStart, canvasEnd);
+                ctx.arc(centerX, centerY, sliceRadius, canvasStart, canvasEnd, true);
                 ctx.closePath();
                 ctx.fill();
                 
                 // Draw board label at midpoint of the two-slice span (once per board)
                 if (section % 2 === 0) {
-                    const midAngle = startAngle + Math.PI / 3.0;
+                    const midAngle = startAngle - Math.PI / 3.0;
                     const labelRadius = 235;
                     const labelX = centerX + Math.sin(midAngle) * labelRadius;
                     const labelY = centerY - Math.cos(midAngle) * labelRadius;
@@ -256,7 +256,7 @@
             ctx.setLineDash([2, 2]);
             
             for (let section = 0; section < 6; section++) {
-                const angle = section * Math.PI * 2.0 / 6.0;
+                const angle = -section * Math.PI * 2.0 / 6.0;
                 const endX = centerX + Math.sin(angle) * 300;
                 const endY = centerY - Math.cos(angle) * 300;
                 
