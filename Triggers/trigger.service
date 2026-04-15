@@ -1,0 +1,17 @@
+[Unit]
+Description=FLG Haven Trigger Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment="PYTHONPATH=/home/flaming/haven/util"
+ExecStart=/usr/bin/python3 /home/flaming/haven/Triggers/trigger_gateway.py
+WorkingDirectory=/home/flaming/haven/Triggers
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+User=flaming
+
+[Install]
+WantedBy=multi-user.target

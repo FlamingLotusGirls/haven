@@ -5,18 +5,190 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Flame Control Dashboard</title>
     <link rel="stylesheet" href="styles.css">
+    <style>
+        /* ── Header status bar ─────────────────────────────────────────────── */
+        .header-status-bar {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+        /* Shared class for all label/value text in the status bar */
+        .hdr-label {
+            font-size: 1.25rem;
+            font-weight: normal;
+            color: rgba(255, 255, 255, 0.9);
+            white-space: nowrap;
+        }
+        .hdr-label.hdr-key {
+            font-weight: bold;
+        }
+        /* Extra right margin on the scene value to separate it from "Status:" */
+        #headerSceneValue { margin-right: 1rem; }
+        /* Strip the pill decoration from header chip — no background or border */
+        .hdr-label.scene-known,
+        .hdr-label.scene-unknown  { background: transparent; border: none; padding: 0; }
+        /* Scene-value colour modifiers — only error state deviates from white */
+        .hdr-label.scene-error    { color: #ff9999; background: transparent; border: none; padding: 0; }
+
+        /* ── Trigger tab: scene selector bar ──────────────────────────────── */
+        .scene-selector-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+            padding: 12px 16px;
+            background: #f0f4ff;
+            border: 1px solid #c5d0f5;
+            border-radius: 6px;
+        }
+        .scene-sel-label {
+            font-weight: bold;
+            color: #3a4a8a;
+            font-size: 1rem;
+            white-space: nowrap;
+        }
+        .scene-sel-dropdown {
+            padding: 7px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 1rem;
+            min-width: 160px;
+            flex: 1;
+            max-width: 300px;
+        }
+        /* read-only scene badge shown inside the Add/Edit form */
+        .form-scene-badge {
+            display: inline-block;
+            padding: 4px 14px;
+            background: #e8f0fe;
+            border: 1px solid #c5d0f5;
+            border-radius: 20px;
+            color: #3a4a8a;
+            font-weight: bold;
+            font-size: 0.95rem;
+        }
+        /* ── Scene sync warnings ───────────────────────────────────────────── */
+        .sync-warning {
+            display: flex;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 10px 14px;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+        .sync-warning-red  { background: #fff0f0; border: 1px solid #f5c5c5; color: #800000; }
+        .sync-warning-blue { background: #f0f4ff; border: 1px solid #c5d0f5; color: #002080; }
+        .sync-scene-chip {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .sync-chip-red  { background: #f5c5c5; color: #800000; }
+        .sync-chip-blue { background: #c5d0f5; color: #002080; }
+        /* "not configured" message inside the mappings area */
+        .scene-not-configured {
+            padding: 20px 24px;
+            background: #fff8f0;
+            border: 1px solid #f5d5b5;
+            border-radius: 6px;
+            color: #7a3000;
+        }
+        .scene-not-configured p { margin: 0 0 12px; }
+
+        /* ── Unconfigured-scene warning banner ─────────────────────────────── */
+        #unconfigured-scene-banner {
+            display: none;          /* shown by JS when scene_unconfigured=true */
+            align-items: flex-start;
+            gap: 14px;
+            padding: 16px 20px;
+            background: #b71c1c;
+            color: #fff;
+            border-left: 8px solid #7f0000;
+            border-radius: 6px;
+            margin: 14px 0;
+            font-size: 1rem;
+            line-height: 1.55;
+        }
+        #unconfigured-scene-banner .ubanner-icon {
+            font-size: 2rem;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        #unconfigured-scene-banner .ubanner-body {
+            flex: 1;
+        }
+        #unconfigured-scene-banner .ubanner-body strong {
+            font-size: 1.1rem;
+            display: block;
+            margin-bottom: 4px;
+        }
+        #unconfigured-scene-banner .ubanner-btn {
+            background: #fff;
+            color: #b71c1c;
+            border: none;
+            padding: 9px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.95rem;
+            white-space: nowrap;
+            flex-shrink: 0;
+            align-self: center;
+        }
+        #unconfigured-scene-banner .ubanner-btn:hover {
+            background: #ffd7d7;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
         <header>
             <h1>🔥 Flame Control Dashboard</h1>
-            <div class="global-controls">
+            <!-- Status bar: Scene · Status · Play/Pause — single centered row -->
+            <div class="header-status-bar">
+                <span class="hdr-label hdr-key">Scene:</span>
+                <span id="headerSceneValue" class="hdr-label scene-unknown">…</span>
+                <span class="hdr-label hdr-key">Status:</span>
+                <span id="globalStatus" class="hdr-label">…</span>
                 <button id="globalPlay" class="btn btn-success">Play</button>
                 <button id="globalPause" class="btn btn-warning">Pause</button>
-                <span id="globalStatus" class="status-indicator"></span>
             </div>
         </header>
 
+        <!-- Unconfigured-scene warning banner ─────────────────────────────── -->
+        <!-- Shown (by app.js) whenever the active scene has no trigger       -->
+        <!-- mappings, meaning ALL trigger dispatch is currently suppressed.  -->
+        <div id="unconfigured-scene-banner">
+            <span class="ubanner-icon">🚨</span>
+            <div class="ubanner-body">
+                <strong>Scene Not Configured — Trigger Dispatch DISABLED</strong>
+                <span id="unconfigured-scene-msg">The current scene has no trigger mappings.</span>
+                All trigger dispatch is <strong>disabled</strong> until mappings are added for this scene.
+                Please go to the <strong>Trigger Mappings</strong> tab and create mappings for the current scene.
+            </div>
+            <button class="ubanner-btn" onclick="flameController.switchTab('triggers')">
+                Go to Trigger Mappings →
+            </button>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-navigation">
+            <button class="tab-button active" data-tab="control">Control</button>
+            <button class="tab-button" data-tab="patterns">Pattern Manager</button>
+            <button class="tab-button" data-tab="triggers">Trigger Mappings</button>
+            <button class="tab-button" data-tab="poofer-mappings">Poofer Mappings</button>
+        </div>
+
+        <!-- Tab: Control -->
+        <div id="tab-control" class="tab-content active">
         <div class="dashboard-grid">
             <!-- Default Sequences Section -->
             <section class="card">
@@ -34,9 +206,9 @@
                                 <span class="repeat-status" data-sequence="__Cockatoo_birds_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Cockatoo_birds_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                         <div class="sequence-item">
@@ -46,9 +218,9 @@
                                 <span class="repeat-status" data-sequence="__Cockatoo_bigBird_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Cockatoo_bigBird_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                         <div class="sequence-item">
@@ -58,9 +230,9 @@
                                 <span class="repeat-status" data-sequence="__Cockatoo_bigBird_chase">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Cockatoo_bigBird_chase" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                         <div class="sequence-item">
@@ -70,9 +242,9 @@
                                 <span class="repeat-status" data-sequence="__Cockatoo_birds_chase">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Cockatoo_birds_chase" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                     </div>
@@ -89,9 +261,9 @@
                                 <span class="repeat-status" data-sequence="__Osprey_birds_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Osprey_birds_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                         <div class="sequence-item">
@@ -101,9 +273,9 @@
                                 <span class="repeat-status" data-sequence="__Osprey_bigbird_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Osprey_bigbird_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                     </div>
@@ -120,9 +292,9 @@
                                 <span class="repeat-status" data-sequence="__Magpie_birds_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Magpie_birds_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                         <div class="sequence-item">
@@ -132,9 +304,9 @@
                                 <span class="repeat-status" data-sequence="__Magpie_bigbird_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Magpie_bigbird_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                     </div>
@@ -151,9 +323,9 @@
                                 <span class="repeat-status" data-sequence="__Perch_birds_allpoof">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Perch_birds_allpoof" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                         <div class="sequence-item">
@@ -163,9 +335,9 @@
                                 <span class="repeat-status" data-sequence="__Perch_birds_chase">Stopped</span>
                             </div>
                             <div class="repeat-controls">
-                                <label>Repeat every:</label>
-                                <input type="number" class="repeat-interval" data-sequence="__Perch_birds_chase" min="1" value="10" step="1">
-                                <span>seconds</span>
+                                <select class="repeat-mode"><option value="interval">Fixed interval:</option><option value="gap">After pattern ends +</option></select>
+                                <input type="number" class="repeat-interval" min="0" value="10" step="0.5">
+                                <span class="repeat-unit">s</span>
                             </div>
                         </div>
                     </div>
@@ -422,13 +594,23 @@
             <!-- System Status Section -->
             <section class="card">
                 <h2>System Status</h2>
+                <div id="sceneStatus" class="scene-status-bar">
+                    <span class="scene-label">Current Scene:</span>
+                    <span id="sceneValue" class="scene-value">…</span>
+                    <button id="refreshScene" class="btn btn-secondary btn-sm">🔄 Refresh Scene</button>
+                </div>
                 <div id="systemStatus">
                     <div class="loading">Loading system status...</div>
                 </div>
                 <button id="refreshStatus" class="btn btn-secondary">Refresh Status</button>
             </section>
 
-            <!-- Patterns Control Section -->
+        </div>
+        </div>
+        <!-- End Tab: Control -->
+
+        <!-- Tab: Patterns -->
+        <div id="tab-patterns" class="tab-content">
             <section class="card">
                 <h2>Pattern Management</h2>
                 <div class="pattern-controls">
@@ -439,8 +621,141 @@
                     <div class="loading">Loading patterns...</div>
                 </div>
             </section>
-
         </div>
+        <!-- End Tab: Patterns -->
+
+        <!-- Tab: Trigger Mappings -->
+        <div id="tab-triggers" class="tab-content">
+            <section class="card">
+                <h2>⚡ Trigger Mappings</h2>
+
+                <!-- Scene selector bar -->
+                <div class="scene-selector-row">
+                    <span class="scene-sel-label">Scene:</span>
+                    <select id="trigger-scene-select" class="scene-sel-dropdown">
+                        <option value="">Loading scenes…</option>
+                    </select>
+                    <button id="duplicate-scene-btn" class="btn btn-secondary btn-sm">
+                        📋 Duplicate →
+                    </button>
+                </div>
+
+                <!-- Sync warnings (scene service ↔ flame config) -->
+                <div id="scene-sync-warnings"></div>
+
+                <!-- Integration status -->
+                <div id="trigger-status-box"></div>
+
+                <!-- Add Mapping button -->
+                <button id="add-trigger-mapping-btn" class="btn btn-primary" style="margin-bottom: 20px;">
+                    + Add Mapping for this Scene
+                </button>
+
+                <!-- Add / Edit form -->
+                <div id="trigger-mapping-form-container" style="display: none;">
+                    <h3 id="trigger-form-title">Add New Mapping</h3>
+                    <form id="triggerMappingForm">
+                        <input type="hidden" id="trigger-mapping-id" value="">
+
+                        <div class="form-group">
+                            <label>Scene</label>
+                            <span id="trigger-form-scene" class="form-scene-badge">—</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="trigger-name">Trigger *</label>
+                            <select id="trigger-name" required>
+                                <option value="">Select a trigger...</option>
+                            </select>
+                            <div class="help-text">Select from available triggers on the Trigger Server</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="trigger-value">Trigger Value (optional)</label>
+                            <input type="text" id="trigger-value" placeholder="e.g., On, Off, 5">
+                            <div class="help-text">Leave empty to trigger on any value</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="flame-sequence">Flame Sequence *</label>
+                            <select id="flame-sequence" required>
+                                <option value="">Select a flame sequence...</option>
+                            </select>
+                            <div class="help-text">The flame pattern to trigger</div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" id="allow-override">
+                                Allow Override
+                            </label>
+                            <div class="help-text">If checked, will restart the sequence if already running</div>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary">Save Mapping</button>
+                        <button type="button" id="cancel-trigger-btn" class="btn btn-secondary">Cancel</button>
+                    </form>
+                </div>
+
+                <!-- Mappings table for the selected scene -->
+                <div style="display:flex;justify-content:space-between;align-items:center;
+                            margin-top:20px;margin-bottom:10px;">
+                    <h3 id="scene-mappings-title" style="margin:0;">Mappings</h3>
+                    <button id="refresh-mappings-btn" class="btn btn-success btn-sm"
+                            onclick="flameController.refreshMappings()">🔄 Refresh</button>
+                </div>
+                <div id="trigger-mappings-table"></div>
+            </section>
+        </div>
+        <!-- End Tab: Triggers -->
+
+        <!-- Tab: Poofer Mappings -->
+        <div id="tab-poofer-mappings" class="tab-content">
+            <section class="card">
+                <h2>🔌 Poofer Channel Mappings</h2>
+                <p class="poofer-mapping-intro">
+                    Maps each poofer name to its physical board address.
+                    Address format: <strong>3 characters</strong> — 2-char hex board ID + 1-char channel
+                    (e.g. <code>011</code> = board <code>01</code>, channel <code>1</code>).
+                    Changes take effect immediately and are saved to <code>poofer_mappings.json</code>.
+                </p>
+
+                <!-- Toolbar -->
+                <div class="pm-toolbar">
+                    <button id="pm-add-btn" class="btn btn-primary">+ Add New Mapping</button>
+                    <button id="pm-reset-btn" class="btn btn-warning">↩ Reset to Defaults</button>
+                    <button id="pm-refresh-btn" class="btn btn-secondary">🔄 Refresh</button>
+                </div>
+
+                <!-- Inline Add Form (hidden by default) -->
+                <div id="pm-add-form" class="pm-add-form" style="display:none;">
+                    <h3>Add New Mapping</h3>
+                    <div class="pm-add-row">
+                        <div class="pm-add-field">
+                            <label for="pm-new-name">Poofer Name</label>
+                            <input type="text" id="pm-new-name" placeholder="e.g. C1, O_EYES" autocomplete="off">
+                        </div>
+                        <div class="pm-add-field">
+                            <label for="pm-new-address">Address</label>
+                            <input type="text" id="pm-new-address" placeholder="e.g. 011" maxlength="3" size="5" autocomplete="off">
+                            <span class="help-text">2-char hex board + 1-char channel</span>
+                        </div>
+                        <div class="pm-add-actions">
+                            <button id="pm-add-confirm-btn" class="btn btn-success">Add</button>
+                            <button id="pm-add-cancel-btn" class="btn btn-secondary">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="pm-add-error" class="pm-error" style="display:none;"></div>
+                </div>
+
+                <!-- Mappings Table -->
+                <div id="pm-table-container">
+                    <div class="loading">Loading poofer mappings…</div>
+                </div>
+            </section>
+        </div>
+        <!-- End Tab: Poofer Mappings -->
+
     </div>
 
     <!-- Pattern Creation Modal -->
@@ -470,5 +785,5 @@
         </div>
     </div>
 </body>
-<script src="app.js"></script>
+<script src="app.js?v=20260410-4"></script>
 </html>

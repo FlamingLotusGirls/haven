@@ -29,8 +29,8 @@ use ws2812_control::{PioWs2812, PioWs2812Program};
 // CONFIG
 const PIXEL_COUNT: usize = 340;
 const PIXEL_BYTE_SIZE: usize = PIXEL_COUNT * 3;
-const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 3;
-const IP_ADDRESS_LAST_NUMBER: u8 = 10;
+const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 13;
+const IP_ADDRESS_LAST_NUMBER: u8 = 20;
 // 169.254.9.91-99
 // 169.254.5.51
 
@@ -149,10 +149,12 @@ async fn main(spawner: Spawner) {
     );
 
     let mut pixels = [RGB8::default(); PIXEL_COUNT];
-    for i in &mut pixels {
-        i.r = 128;
-        i.g = 0;
-        i.b = 0;
+    let rgbw_hack_colors = [255u8, 10, 0, 100];
+    for (i, pixel) in pixels.iter_mut().enumerate() {
+        let hack_index = i * 3;
+        pixel.r = rgbw_hack_colors[hack_index % 4];
+        pixel.g = rgbw_hack_colors[(hack_index + 1) % 4];
+        pixel.b = rgbw_hack_colors[(hack_index + 2) % 4];
     }
     strip0.write(&pixels).await;
     for i in &mut pixels {
@@ -205,27 +207,35 @@ async fn main(spawner: Spawner) {
     .unwrap();
     spawner.spawn(ethernet_task(ethernet_task_runner)).unwrap();
 
-    for i in &mut pixels {
-        i.r = 128;
-        i.g = 0;
-        i.b = 0;
-    }
-    strip0.write(&pixels).await;
+    // for i in &mut pixels {
+    //     i.r = 128;
+    //     i.g = 0;
+    //     i.b = 0;
+    // }
+    // strip0.write(&pixels).await;
 
     // Set up network stack
     let static_ip_net_config = NetConfig::ipv4_static(embassy_net::StaticConfigV4 {
-        // Direct/unmanaged ethernet such as with switch GS308
+        // Direct/unmanaged ethernet such as with switch GS308, or with direct connection to computer
+        // address: Ipv4Cidr::new(
+        //     Ipv4Address::new(
+        //         169,
+        //         254,
+        //         IP_ADDRESS_SECOND_TO_LAST_NUMBER,
+        //         IP_ADDRESS_LAST_NUMBER,
+        //     ),
+        //     16,
+        // ),
+        // Managed ethernet switch GS308T or router
         address: Ipv4Cidr::new(
             Ipv4Address::new(
-                169,
-                254,
+                192,
+                168,
                 IP_ADDRESS_SECOND_TO_LAST_NUMBER,
                 IP_ADDRESS_LAST_NUMBER,
             ),
-            16,
+            24,
         ),
-        // Managed ethernet switch GS308T
-        // address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 11, IP_ADDRESS_LAST_NUMBER), 24),
         dns_servers: heapless::Vec::new(),
         gateway: None,
     });
@@ -240,12 +250,12 @@ async fn main(spawner: Spawner) {
     );
     spawner.spawn(net_task(net_task_runner)).unwrap();
 
-    for i in &mut pixels {
-        i.r = 0;
-        i.g = 128;
-        i.b = 0;
-    }
-    strip0.write(&pixels).await;
+    // for i in &mut pixels {
+    //     i.r = 0;
+    //     i.g = 128;
+    //     i.b = 0;
+    // }
+    // strip0.write(&pixels).await;
 
     async fn wait_for_config(stack: Stack<'static>) -> embassy_net::StaticConfigV4 {
         use embassy_futures::yield_now;
@@ -261,12 +271,12 @@ async fn main(spawner: Spawner) {
     wait_for_config(stack).await;
     s.println(f!("connected!"));
 
-    for i in &mut pixels {
-        i.r = 0;
-        i.g = 64;
-        i.b = 255;
-    }
-    strip0.write(&pixels).await;
+    // for i in &mut pixels {
+    //     i.r = 0;
+    //     i.g = 64;
+    //     i.b = 255;
+    // }
+    // strip0.write(&pixels).await;
 
     artnet::receive_artnet(s, stack, strip0, strip1, strip2, strip3).await;
 

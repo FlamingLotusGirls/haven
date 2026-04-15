@@ -40,10 +40,10 @@ class Pattern(ABC):
         pos_angle = [[0, math.pi/9.0, 2 * math.pi/9.0], [0, math.pi/6.0], [0]]  # Angle offset for each position in each ring
         
         for section_idx in range(0, 6):
-            base_angle = section_idx * math.tau / 6.0
+            base_angle = -section_idx * math.tau / 6.0
             for ring_idx in range(0, 3):
                 for pos in range(0, ring_count[ring_idx]):
-                    full_angle = base_angle + ring_base_angle[ring_idx] + pos_angle[ring_idx][pos]
+                    full_angle = base_angle - ring_base_angle[ring_idx] - pos_angle[ring_idx][pos]
                     radius = ring_radius[ring_idx]
                     
                     x = math.sin(full_angle) * radius

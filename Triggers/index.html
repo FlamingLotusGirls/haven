@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Haven Trigger Server</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="text"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+            font-family: monospace;
+        }
+
+        .range-help {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: background 0.3s;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #5568d3;
+        }
+
+        button.delete {
+            background: #e74c3c;
+        }
+
+        button.delete:hover {
+            background: #c0392b;
+        }
+
+        button.edit {
+            background: #3498db;
+        }
+
+        button.edit:hover {
+            background: #2980b9;
+        }
+
+        .trigger-list {
+            margin-top: 20px;
+        }
+
+        .trigger-item {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: all 0.3s;
+        }
+
+        .trigger-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+
+        .trigger-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .trigger-name {
+            font-size: 1.2em;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .trigger-type {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .trigger-details {
+            color: #666;
+            margin-top: 10px;
+        }
+
+        .device-info {
+            background: #e8eaf6;
+            padding: 8px 12px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .device-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+
+        .device-status.online {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .device-status.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .device-status.unknown {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .trigger-actions {
+            margin-top: 10px;
+        }
+
+        .alert {
+            padding: 12px 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .last-modified {
+            text-align: right;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        #rangeGroup {
+            display: none;
+        }
+
+        /* ── Forwarding Control ─────────────────────────────────── */
+        .forwarding-card {
+            border: 3px solid #e0e0e0;
+            transition: border-color 0.4s;
+        }
+        .forwarding-card.enabled  { border-color: #27ae60; }
+        .forwarding-card.disabled { border-color: #e74c3c; }
+
+        .forwarding-row {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .forwarding-badge {
+            display: inline-block;
+            padding: 10px 24px;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: 700;
+            letter-spacing: 1px;
+            min-width: 160px;
+            text-align: center;
+        }
+        .forwarding-badge.enabled  { background: #d4edda; color: #155724; }
+        .forwarding-badge.disabled { background: #f8d7da; color: #721c24; }
+
+        .forwarding-toggle {
+            padding: 12px 28px;
+            font-size: 1em;
+            font-weight: 700;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .forwarding-toggle.to-disable { background: #e74c3c; color: white; }
+        .forwarding-toggle.to-disable:hover { background: #c0392b; }
+        .forwarding-toggle.to-enable  { background: #27ae60; color: white; }
+        .forwarding-toggle.to-enable:hover  { background: #1e8449; }
+
+        .forwarding-note {
+            font-size: 0.88em;
+            color: #666;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        /* ── Trigger Log ────────────────────────────────────────── */
+        .log-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .log-toolbar label { font-weight: 600; color: #333; }
+        .log-toolbar select {
+            padding: 6px 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .log-auto-badge {
+            font-size: 0.8em;
+            color: #27ae60;
+            font-weight: 600;
+            animation: blink 1.5s infinite;
+        }
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+        .log-table-wrap {
+            max-height: 380px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+        }
+
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .log-table thead th {
+            background: #667eea;
+            color: white;
+            padding: 8px 12px;
+            text-align: left;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .log-table tbody tr { border-bottom: 1px solid #f0f0f0; }
+        .log-table tbody tr:last-child { border-bottom: none; }
+
+        .log-table td { padding: 7px 12px; vertical-align: middle; }
+
+        .log-row-forwarded { background: #f0fff4; }
+        .log-row-blocked   { background: #fff5f5; }
+
+        .log-badge-forwarded {
+            background: #d4edda; color: #155724;
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.8em; font-weight: 600;
+        }
+        .log-badge-blocked {
+            background: #f8d7da; color: #721c24;
+            padding: 2px 8px; border-radius: 10px;
+            font-size: 0.8em; font-weight: 600;
+        }
+
+        .log-empty { text-align: center; padding: 30px; color: #999; font-style: italic; }
+
+        button.clear-log {
+            background: #95a5a6;
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        button.clear-log:hover { background: #7f8c8d; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔥 Haven Trigger Server</h1>
+
+        <div id="alertContainer"></div>
+
+        <!-- Forwarding Control -->
+        <div class="card forwarding-card" id="forwardingCard">
+            <h2>📡 Trigger Forwarding</h2>
+            <div class="forwarding-row">
+                <span class="forwarding-badge" id="forwardingBadge">…</span>
+                <button class="forwarding-toggle" id="forwardingToggle" onclick="toggleForwarding()">…</button>
+                <span class="forwarding-note">
+                    When <strong>disabled</strong>, trigger events are still logged here but are
+                    <em>not</em> dispatched to services — useful for testing device wiring
+                    without activating the sculpture.
+                </span>
+            </div>
+        </div>
+
+        <!-- Trigger Log -->
+        <div class="card">
+            <div class="log-toolbar">
+                <div>
+                    <h2 style="display:inline; margin-bottom:0;">📋 Recent Trigger Events</h2>
+                    <span class="log-auto-badge" id="logAutoBadge"> ● live</span>
+                </div>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <label for="logMinutes">Show last:</label>
+                    <select id="logMinutes" onchange="refreshLog()">
+                        <option value="2">2 min</option>
+                        <option value="5">5 min</option>
+                        <option value="10" selected>10 min</option>
+                        <option value="30">30 min</option>
+                    </select>
+                    <button onclick="refreshLog()" style="padding:8px 14px; font-size:13px;">🔄 Refresh</button>
+                    <button class="clear-log" onclick="clearLog()">🗑 Clear</button>
+                </div>
+            </div>
+            <div class="log-table-wrap">
+                <table class="log-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Trigger Name</th>
+                            <th>Value</th>
+                            <th>ID</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logTableBody">
+                        <tr><td colspan="5" class="log-empty">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div id="logCount" style="font-size:0.85em; color:#666; margin-top:8px;"></div>
+        </div>
+
+        <!-- Add/Edit Trigger Form -->
+        <div class="card">
+            <h2 id="formTitle">Add New Trigger</h2>
+            <form id="triggerForm">
+                <input type="hidden" id="editingTrigger" value="">
+                
+                <div class="form-group">
+                    <label for="triggerName">Trigger Name *</label>
+                    <input type="text" id="triggerName" required placeholder="e.g., RedTelephone.Button_1">
+                </div>
+
+                <div class="form-group">
+                    <label for="triggerType">Trigger Type *</label>
+                    <select id="triggerType" required>
+                        <option value="">Select a type</option>
+                        <option value="On/Off">On/Off</option>
+                        <option value="OneShot">OneShot</option>
+                        <option value="Discrete">Discrete</option>
+                        <option value="Continuous">Continuous</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="rangeGroup">
+                    <label for="triggerRange">Range</label>
+                    <textarea id="triggerRange" placeholder='Enter range as JSON, e.g., {"min": 0, "max": 100} or {"values": [1, 2, 3, 4, 5]}'></textarea>
+                    <div class="range-help">
+                        For Discrete: use {"values": [1, 2, 3]} or {"min": 0, "max": 10}<br>
+                        For Continuous: use {"min": 0.0, "max": 1.0}
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn">Add Trigger</button>
+                <button type="button" id="cancelBtn" style="display:none; background: #95a5a6;">Cancel</button>
+            </form>
+        </div>
+
+        <!-- Trigger List -->
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin-bottom: 0;">Current Triggers</h2>
+                <button id="refreshBtn" onclick="refreshTriggers()" style="background: #28a745;">🔄 Refresh</button>
+            </div>
+            <div id="triggerList" class="trigger-list">
+                <div class="empty-state">Loading triggers...</div>
+            </div>
+            <div id="lastModified" class="last-modified"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let currentTriggers = [];
+
+        // ── Forwarding control ──────────────────────────────────────────────
+
+        let forwardingEnabled = true; // local mirror, updated on load
+
+        async function loadForwardingState() {
+            try {
+                const r = await fetch('/api/forwarding');
+                const d = await r.json();
+                applyForwardingState(d.enabled);
+            } catch (e) {
+                console.error('Could not load forwarding state:', e);
+            }
+        }
+
+        function applyForwardingState(enabled) {
+            forwardingEnabled = enabled;
+            const card   = document.getElementById('forwardingCard');
+            const badge  = document.getElementById('forwardingBadge');
+            const toggle = document.getElementById('forwardingToggle');
+
+            if (enabled) {
+                card.className   = 'card forwarding-card enabled';
+                badge.className  = 'forwarding-badge enabled';
+                badge.textContent = '✓ Forwarding ON';
+                toggle.className  = 'forwarding-toggle to-disable';
+                toggle.textContent = 'Disable Forwarding';
+            } else {
+                card.className   = 'card forwarding-card disabled';
+                badge.className  = 'forwarding-badge disabled';
+                badge.textContent = '✗ Forwarding OFF';
+                toggle.className  = 'forwarding-toggle to-enable';
+                toggle.textContent = 'Enable Forwarding';
+            }
+        }
+
+        async function toggleForwarding() {
+            const btn = document.getElementById('forwardingToggle');
+            btn.disabled = true;
+            try {
+                const r = await fetch('/api/forwarding', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled: !forwardingEnabled})
+                });
+                const d = await r.json();
+                if (r.ok) {
+                    applyForwardingState(d.enabled);
+                    showAlert(d.message, 'success');
+                } else {
+                    showAlert(d.error || 'Failed to update forwarding', 'error');
+                }
+            } catch (e) {
+                showAlert('Error toggling forwarding: ' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // ── Trigger Log ─────────────────────────────────────────────────────
+
+        let logRefreshTimer = null;
+
+        function formatTime(iso) {
+            // Show HH:MM:SS.mmm  (local time)
+            const d = new Date(iso);
+            const hh = String(d.getHours()).padStart(2,'0');
+            const mm = String(d.getMinutes()).padStart(2,'0');
+            const ss = String(d.getSeconds()).padStart(2,'0');
+            const ms = String(d.getMilliseconds()).padStart(3,'0');
+            return `${hh}:${mm}:${ss}.${ms}`;
+        }
+
+        async function refreshLog() {
+            const minutes = document.getElementById('logMinutes').value;
+            try {
+                const r = await fetch(`/api/trigger-log?minutes=${minutes}&limit=200`);
+                const d = await r.json();
+                renderLog(d.events, d.total);
+            } catch (e) {
+                console.error('Log fetch error:', e);
+            }
+        }
+
+        function renderLog(events, total) {
+            const tbody = document.getElementById('logTableBody');
+            const countEl = document.getElementById('logCount');
+
+            if (!events || events.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="log-empty">No trigger events in this time window.</td></tr>';
+                countEl.textContent = '';
+                return;
+            }
+
+            tbody.innerHTML = events.map(e => {
+                const rowClass  = e.forwarded ? 'log-row-forwarded' : 'log-row-blocked';
+                const badge     = e.forwarded
+                    ? '<span class="log-badge-forwarded">forwarded</span>'
+                    : '<span class="log-badge-blocked">blocked</span>';
+                const value = e.value !== undefined ? escapeHtml(String(e.value)) : '<em style="color:#bbb">—</em>';
+                const id    = e.id    !== undefined ? escapeHtml(String(e.id))    : '<em style="color:#bbb">—</em>';
+                return `<tr class="${rowClass}">
+                    <td style="white-space:nowrap; font-family:monospace;">${formatTime(e.timestamp)}</td>
+                    <td><strong>${escapeHtml(e.name)}</strong></td>
+                    <td>${value}</td>
+                    <td>${id}</td>
+                    <td>${badge}</td>
+                </tr>`;
+            }).join('');
+
+            countEl.textContent = `Showing ${events.length} of ${total} event${total !== 1 ? 's' : ''} in window`;
+        }
+
+        async function clearLog() {
+            if (!confirm('Clear the trigger log?')) return;
+            try {
+                await fetch('/api/trigger-log', {method: 'DELETE'});
+                renderLog([], 0);
+                showAlert('Log cleared', 'success');
+            } catch (e) {
+                showAlert('Error clearing log: ' + e.message, 'error');
+            }
+        }
+
+        function startLogAutoRefresh() {
+            if (logRefreshTimer) clearInterval(logRefreshTimer);
+            logRefreshTimer = setInterval(refreshLog, 2000); // every 2 s
+        }
+
+        // ── Init ────────────────────────────────────────────────────────────
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadForwardingState();
+            refreshLog();
+            startLogAutoRefresh();
+            loadTriggers();
+            setupEventListeners();
+        });
+
+        function setupEventListeners() {
+            document.getElementById('triggerForm').addEventListener('submit', handleSubmit);
+            document.getElementById('triggerType').addEventListener('change', handleTypeChange);
+            document.getElementById('cancelBtn').addEventListener('click', resetForm);
+        }
+
+        function handleTypeChange(e) {
+            const rangeGroup = document.getElementById('rangeGroup');
+            const type = e.target.value;
+            
+            if (type === 'Discrete' || type === 'Continuous') {
+                rangeGroup.style.display = 'block';
+                document.getElementById('triggerRange').required = true;
+            } else {
+                rangeGroup.style.display = 'none';
+                document.getElementById('triggerRange').required = false;
+                document.getElementById('triggerRange').value = '';
+            }
+        }
+
+        async function refreshTriggers() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const originalText = refreshBtn.textContent;
+            const originalBg = refreshBtn.style.background;
+            
+            // Disable button and show loading state
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = '⟳ Refreshing...';
+            refreshBtn.style.background = '#6c757d';
+            refreshBtn.style.cursor = 'not-allowed';
+            
+            await loadTriggers();
+            
+            // Re-enable button after a brief delay
+            setTimeout(() => {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = originalText;
+                refreshBtn.style.background = originalBg;
+                refreshBtn.style.cursor = 'pointer';
+                showAlert('Triggers refreshed successfully', 'success');
+            }, 500);
+        }
+
+        async function loadTriggers() {
+            try {
+                const response = await fetch(`${API_BASE}/triggers`);
+                const data = await response.json();
+                currentTriggers = data.triggers || [];
+                
+                displayTriggers(currentTriggers);
+                
+                if (data.last_modified) {
+                    const date = new Date(data.last_modified);
+                    document.getElementById('lastModified').textContent = 
+                        `Last modified: ${date.toLocaleString()}`;
+                }
+            } catch (error) {
+                showAlert('Failed to load triggers: ' + error.message, 'error');
+            }
+        }
+
+        function displayTriggers(triggers) {
+            const listContainer = document.getElementById('triggerList');
+            
+            if (triggers.length === 0) {
+                listContainer.innerHTML = '<div class="empty-state">No triggers configured yet. Add one above!</div>';
+                return;
+            }
+
+            listContainer.innerHTML = triggers.map(trigger => {
+                let rangeDisplay = '';
+                if (trigger.range) {
+                    rangeDisplay = `<div><strong>Range:</strong> ${JSON.stringify(trigger.range)}</div>`;
+                }
+
+                // Use device_status from API response - server is authoritative
+                const isOffline = trigger.device_status === 'offline';
+                const offlineIndicator = isOffline ? ' <span style="color: #999;">Offline</span>' : '';
+
+                // Device information and status  
+                let deviceDisplay = '';
+                if (trigger.device) {
+                    // Map device_status to display class and text
+                    let statusClass, statusText;
+                    if (trigger.device_status === 'online') {
+                        statusClass = 'online';
+                        statusText = '✓ Online';
+                    } else {
+                        statusClass = 'offline';
+                        statusText = '✗ Offline';
+                    }
+                    
+                    // Calculate last seen time for display only
+                    let lastSeenDisplay = '';
+                    if (trigger.last_seen) {
+                        const lastSeenDate = new Date(trigger.last_seen);
+                        const now = new Date();
+                        const minutesAgo = (now - lastSeenDate) / 1000 / 60;
+                        
+                        if (minutesAgo < 60) {
+                            lastSeenDisplay = `${Math.floor(minutesAgo)} min ago`;
+                        } else if (minutesAgo < 1440) {
+                            const hoursAgo = Math.floor(minutesAgo / 60);
+                            lastSeenDisplay = `${hoursAgo} hour${hoursAgo > 1 ? 's' : ''} ago`;
+                        } else {
+                            const daysAgo = Math.floor(minutesAgo / 1440);
+                            lastSeenDisplay = `${daysAgo} day${daysAgo > 1 ? 's' : ''} ago`;
+                        }
+                    }
+                    
+                    deviceDisplay = `
+                        <div class="device-info">
+                            <strong>Device:</strong> ${escapeHtml(trigger.device)} 
+                            (${escapeHtml(trigger.device_ip || 'unknown')})
+                            <span class="device-status ${statusClass}">${statusText}</span>
+                            ${lastSeenDisplay ? `<br><strong>Last seen:</strong> ${lastSeenDisplay}` : ''}
+                        </div>
+                    `;
+                }
+
+                return `
+                    <div class="trigger-item">
+                        <div class="trigger-header">
+                            <div>
+                                <span class="trigger-name">${escapeHtml(trigger.name)}${offlineIndicator}</span>
+                            </div>
+                            <span class="trigger-type">${escapeHtml(trigger.type)}</span>
+                        </div>
+                        <div class="trigger-details">
+                            ${rangeDisplay}
+                        </div>
+                        ${deviceDisplay}
+                        <div class="trigger-actions">
+                            <button class="edit" onclick="editTrigger('${escapeHtml(trigger.name)}')">Edit</button>
+                            <button class="delete" onclick="deleteTrigger('${escapeHtml(trigger.name)}')">Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function getDeviceStatus(lastSeen) {
+            if (!lastSeen) {
+                return { class: 'unknown', text: 'Never checked in', lastSeen: null };
+            }
+
+            const lastSeenDate = new Date(lastSeen);
+            const now = new Date();
+            const minutesAgo = (now - lastSeenDate) / 1000 / 60;
+
+            // Consider device online if seen within last 5 minutes
+            if (minutesAgo < 5) {
+                return { 
+                    class: 'online', 
+                    text: '✓ Online', 
+                    lastSeen: `${Math.floor(minutesAgo)} min ago`
+                };
+            } else if (minutesAgo < 60) {
+                return { 
+                    class: 'offline', 
+                    text: '✗ Offline', 
+                    lastSeen: `${Math.floor(minutesAgo)} min ago`
+                };
+            } else if (minutesAgo < 1440) { // Less than 24 hours
+                const hoursAgo = Math.floor(minutesAgo / 60);
+                return { 
+                    class: 'offline', 
+                    text: '✗ Offline', 
+                    lastSeen: `${hoursAgo} hour${hoursAgo > 1 ? 's' : ''} ago`
+                };
+            } else {
+                const daysAgo = Math.floor(minutesAgo / 1440);
+                return { 
+                    class: 'offline', 
+                    text: '✗ Offline', 
+                    lastSeen: `${daysAgo} day${daysAgo > 1 ? 's' : ''} ago`
+                };
+            }
+        }
+
+        async function handleSubmit(e) {
+            e.preventDefault();
+            
+            const name = document.getElementById('triggerName').value.trim();
+            const type = document.getElementById('triggerType').value;
+            const rangeValue = document.getElementById('triggerRange').value.trim();
+            const editingName = document.getElementById('editingTrigger').value;
+
+            const trigger = {
+                name: name,
+                type: type
+            };
+
+            // Parse range if provided
+            if (rangeValue) {
+                try {
+                    trigger.range = JSON.parse(rangeValue);
+                } catch (error) {
+                    showAlert('Invalid JSON format for range', 'error');
+                    return;
+                }
+            }
+
+            try {
+                let response;
+                if (editingName) {
+                    // Update existing trigger
+                    response = await fetch(`${API_BASE}/triggers/${encodeURIComponent(editingName)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(trigger)
+                    });
+                } else {
+                    // Add new trigger
+                    response = await fetch(`${API_BASE}/triggers`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(trigger)
+                    });
+                }
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert(data.message || 'Trigger saved successfully!', 'success');
+                    resetForm();
+                    loadTriggers();
+                } else {
+                    showAlert(data.error || 'Failed to save trigger', 'error');
+                }
+            } catch (error) {
+                showAlert('Error saving trigger: ' + error.message, 'error');
+            }
+        }
+
+        async function editTrigger(name) {
+            const trigger = currentTriggers.find(t => t.name === name);
+            if (!trigger) return;
+
+            document.getElementById('formTitle').textContent = 'Edit Trigger';
+            document.getElementById('triggerName').value = trigger.name;
+            document.getElementById('triggerType').value = trigger.type;
+            document.getElementById('editingTrigger').value = trigger.name;
+            document.getElementById('submitBtn').textContent = 'Update Trigger';
+            document.getElementById('cancelBtn').style.display = 'inline-block';
+
+            if (trigger.range) {
+                document.getElementById('triggerRange').value = JSON.stringify(trigger.range, null, 2);
+                document.getElementById('rangeGroup').style.display = 'block';
+            }
+
+            // Scroll to form
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function deleteTrigger(name) {
+            if (!confirm(`Are you sure you want to delete the trigger "${name}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/triggers/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('Trigger deleted successfully', 'success');
+                    loadTriggers();
+                } else {
+                    showAlert(data.error || 'Failed to delete trigger', 'error');
+                }
+            } catch (error) {
+                showAlert('Error deleting trigger: ' + error.message, 'error');
+            }
+        }
+
+        function resetForm() {
+            document.getElementById('triggerForm').reset();
+            document.getElementById('formTitle').textContent = 'Add New Trigger';
+            document.getElementById('editingTrigger').value = '';
+            document.getElementById('submitBtn').textContent = 'Add Trigger';
+            document.getElementById('cancelBtn').style.display = 'none';
+            document.getElementById('rangeGroup').style.display = 'none';
+        }
+
+        function showAlert(message, type) {
+            const alertContainer = document.getElementById('alertContainer');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            alertContainer.appendChild(alert);
+
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

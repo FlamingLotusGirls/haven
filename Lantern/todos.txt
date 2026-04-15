@@ -1,0 +1,3 @@
+Lantern TODOS
+- Integrate with Google Home / Alexa (probably through matter)
+- Print a little 3D box for my ESP32
