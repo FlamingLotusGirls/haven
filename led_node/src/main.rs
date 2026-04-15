@@ -29,8 +29,8 @@ use ws2812_control::{PioWs2812, PioWs2812Program};
 // CONFIG
 const PIXEL_COUNT: usize = 340;
 const PIXEL_BYTE_SIZE: usize = PIXEL_COUNT * 3;
-const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 3;
-const IP_ADDRESS_LAST_NUMBER: u8 = 70;
+const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 13;
+const IP_ADDRESS_LAST_NUMBER: u8 = 20;
 // 169.254.9.91-99
 // 169.254.5.51
 
@@ -216,18 +216,26 @@ async fn main(spawner: Spawner) {
 
     // Set up network stack
     let static_ip_net_config = NetConfig::ipv4_static(embassy_net::StaticConfigV4 {
-        // Direct/unmanaged ethernet such as with switch GS308
+        // Direct/unmanaged ethernet such as with switch GS308, or with direct connection to computer
+        // address: Ipv4Cidr::new(
+        //     Ipv4Address::new(
+        //         169,
+        //         254,
+        //         IP_ADDRESS_SECOND_TO_LAST_NUMBER,
+        //         IP_ADDRESS_LAST_NUMBER,
+        //     ),
+        //     16,
+        // ),
+        // Managed ethernet switch GS308T or router
         address: Ipv4Cidr::new(
             Ipv4Address::new(
-                169,
-                254,
+                192,
+                168,
                 IP_ADDRESS_SECOND_TO_LAST_NUMBER,
                 IP_ADDRESS_LAST_NUMBER,
             ),
-            16,
+            24,
         ),
-        // Managed ethernet switch GS308T
-        // address: Ipv4Cidr::new(Ipv4Address::new(192, 168, 11, IP_ADDRESS_LAST_NUMBER), 24),
         dns_servers: heapless::Vec::new(),
         gateway: None,
     });
