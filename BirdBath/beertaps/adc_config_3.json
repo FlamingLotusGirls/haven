@@ -1,0 +1,26 @@
+{
+  "address": "0x4a",
+  "gain": 1,
+  "channels": [
+    {
+      "name": "tap1",
+      "positive_pin": "P0",
+      "negative_pin": "P1",
+      "calibration": {
+        "min_voltage": -3.3005,
+        "max_voltage": -0.000125
+      }
+    },
+    {
+      "name": "tap2",
+      "positive_pin": "P2",
+      "negative_pin": "P3",
+      "calibration": {
+        "min_voltage": -3.3005,
+        "max_voltage": -0.000125
+      }
+    }
+  ],
+  "output_pipe": "/tmp/beertap_pipe",
+  "read_interval": 0.05
+}

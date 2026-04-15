@@ -1,0 +1,634 @@
+[
+  {
+    "name": "__Cockatoo_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "C1",
+          "C3",
+          "C5",
+          "C6"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Cockatoo Birds Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Cockatoo_bigBird_allpoof",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR1",
+          "C_HAIR2",
+          "C_HAIR3",
+          "C_HAIR4"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Cockatoo Bigbird Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Cockatoo_bigBird_chase",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR1"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C_HAIR2"
+        ],
+        "startTime": 0.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C_HAIR3"
+        ],
+        "startTime": 1.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C_HAIR4"
+        ],
+        "startTime": 1.5,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Cockatoo Bigbird Chase",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Cockatoo_birds_chase",
+    "events": [
+      {
+        "ids": [
+          "C5"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C3"
+        ],
+        "startTime": 0.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C1"
+        ],
+        "startTime": 1.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C2"
+        ],
+        "startTime": 1.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C4"
+        ],
+        "startTime": 2.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "C6"
+        ],
+        "startTime": 2.5,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Cockatoo Birds Chase",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Osprey_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "O1",
+          "O2",
+          "O3"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Osprey Birds Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Osprey_bigbird_allpoof",
+    "events": [
+      {
+        "ids": [
+          "O_WINGS",
+          "O_EYES"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Osprey Bigbird Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Magpie_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "M1",
+          "M2",
+          "M3"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Magpie Birds Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Magpie_bigbird_allpoof",
+    "events": [
+      {
+        "ids": [
+          "M_TAIL"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Magpie Bigbird Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Perch_birds_allpoof",
+    "events": [
+      {
+        "ids": [
+          "P1",
+          "P2",
+          "P3",
+          "P4"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Perch Birds Allpoof",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__Perch_birds_chase",
+    "events": [
+      {
+        "ids": [
+          "P1"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "P2"
+        ],
+        "startTime": 0.5,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "P3"
+        ],
+        "startTime": 1.0,
+        "duration": 0.5
+      },
+      {
+        "ids": [
+          "P4"
+        ],
+        "startTime": 1.5,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": false,
+    "display_name": "Perch Birds Chase",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C1",
+    "events": [
+      {
+        "ids": [
+          "C1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C1",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C2",
+    "events": [
+      {
+        "ids": [
+          "C2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C2",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C3",
+    "events": [
+      {
+        "ids": [
+          "C3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C3",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C4",
+    "events": [
+      {
+        "ids": [
+          "C4"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C4",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C5",
+    "events": [
+      {
+        "ids": [
+          "C5"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C5",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C6",
+    "events": [
+      {
+        "ids": [
+          "C6"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C6",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C_HAIR1",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C Hair1",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C_HAIR2",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C Hair2",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C_HAIR3",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C Hair3",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__C_HAIR4",
+    "events": [
+      {
+        "ids": [
+          "C_HAIR4"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "C Hair4",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__M_TAIL",
+    "events": [
+      {
+        "ids": [
+          "M_TAIL"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "M Tail",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__M1",
+    "events": [
+      {
+        "ids": [
+          "M1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "M1",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__M2",
+    "events": [
+      {
+        "ids": [
+          "M2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "M2",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__M3",
+    "events": [
+      {
+        "ids": [
+          "M3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "M3",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__O_EYES",
+    "events": [
+      {
+        "ids": [
+          "O_EYES"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "O Eyes",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__O_WINGS",
+    "events": [
+      {
+        "ids": [
+          "O_WINGS"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "O Wings",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__O1",
+    "events": [
+      {
+        "ids": [
+          "O1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "O1",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__O2",
+    "events": [
+      {
+        "ids": [
+          "O2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "O2",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__O3",
+    "events": [
+      {
+        "ids": [
+          "O3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "O3",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__P1",
+    "events": [
+      {
+        "ids": [
+          "P1"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "P1",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__P2",
+    "events": [
+      {
+        "ids": [
+          "P2"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "P2",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__P3",
+    "events": [
+      {
+        "ids": [
+          "P3"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "P3",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "__P4",
+    "events": [
+      {
+        "ids": [
+          "P4"
+        ],
+        "startTime": 0,
+        "duration": 0.3
+      }
+    ],
+    "modifiable": false,
+    "display_name": "P4",
+    "enabled": true,
+    "active": false
+  },
+  {
+    "name": "test pattern",
+    "events": [
+      {
+        "ids": [
+          "C2"
+        ],
+        "startTime": 0,
+        "duration": 0.5
+      }
+    ],
+    "modifiable": true
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "device_name": "Telephone",
+  "wifi_ssid": "not",
+  "wifi_pass": "set",
+  "trigger_server": "192.168.5.174",
+  "trigger_port": 5002,
+  "triggers": [
+    {
+      "name": "Emergency",
+      "phone_number": "911"
+    },
+    {
+      "name": "FireStation",
+      "phone_number": "5551234"
+    },
+    {
+      "name": "SpecialEffect1",
+      "phone_number": "123"
+    },
+    {
+      "name": "SpecialEffect2",
+      "phone_number": "456"
+    },
+    {
+      "name": "Reset",
+      "phone_number": "000"
+    }
+  ]
+}

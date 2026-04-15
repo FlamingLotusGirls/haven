@@ -1,0 +1,69 @@
+{
+  "trigger_server": {
+    "url": "192.168.1.100",
+    "port": 5002
+  },
+  "device_name": "ButtonIntercept",
+  "channel_to_trigger": [
+    {
+      "channel": 0,
+      "trigger_name": "Button0",
+      "enabled": true
+    },
+    {
+      "channel": 1,
+      "trigger_name": "Button1",
+      "enabled": true
+    },
+    {
+      "channel": 2,
+      "trigger_name": "Button2",
+      "enabled": true
+    },
+    {
+      "channel": 3,
+      "trigger_name": "Button3",
+      "enabled": true
+    },
+    {
+      "channel": 4,
+      "trigger_name": "Button4",
+      "enabled": true
+    },
+    {
+      "channel": 5,
+      "trigger_name": "Button5",
+      "enabled": true
+    },
+    {
+      "channel": 6,
+      "trigger_name": "Button6",
+      "enabled": true
+    },
+    {
+      "channel": 7,
+      "trigger_name": "Button7",
+      "enabled": true
+    },
+    {
+      "channel": 8,
+      "trigger_name": "Button8",
+      "enabled": false
+    },
+    {
+      "channel": 9,
+      "trigger_name": "Button9",
+      "enabled": false
+    },
+    {
+      "channel": 10,
+      "trigger_name": "Button10",
+      "enabled": false
+    },
+    {
+      "channel": 11,
+      "trigger_name": "Button11",
+      "enabled": false
+    }
+  ]
+}

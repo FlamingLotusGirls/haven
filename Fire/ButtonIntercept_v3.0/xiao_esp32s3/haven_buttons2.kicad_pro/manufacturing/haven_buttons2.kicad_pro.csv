@@ -1,0 +1,18 @@
+"Id";"Designator";"Footprint";"Quantity";"Designation";"Supplier and ref";
+1;"U2";"TSSOP-24_4.4x7.8mm_P0.65mm";1;"PCA9555PW";;;
+2;"Q7,Q6,Q5,Q3,Q8,Q2,Q4,Q1";"SOT-23";8;"BC817";;;
+3;"D1";"LED_0603_1608Metric";1;"LED";;;
+4;"R5,R26,R27,R4,R21,R28,R23,R24,R22,R25";"R_0603_1608Metric";10;"4.7k";;;
+5;"R11,R13,R14,R15,R12,R16,R17";"R_0603_1608Metric";7;"10K";;;
+6;"J2,J1";"PinSocket_1x07_P2.54mm_Vertical";2;"Conn_01x07_Socket";;;
+7;"R34,R31,R35,R38,R33,R1,R32,R37,R36";"R_0603_1608Metric";9;"10k";;;
+8;"J3,J4,J9,J7,J6";"TerminalBlock_MetzConnect_Type059_RT06304HBWC_1x04_P3.50mm_Horizontal";5;"Screw_Terminal_01x04";;;
+9;"C25";"C_0603_1608Metric";1;"100n";;;
+10;"C21";"C_0603_1608Metric";1;"1u";;;
+11;"R18";"R_0603_1608Metric";1;"1.5K";;;
+12;"J8";"TerminalBlock_MetzConnect_Type059_RT06302HBWC_1x02_P3.50mm_Horizontal";1;"Screw_Terminal_01x02";;;
+13;"C22";"C_0805_2012Metric";1;"10u";;;
+14;"D2";"D_SOD-123";1;"MBR0530";;;
+15;"D3";"D_SMA";1;"US1A";;;
+16;"U21";"SOT-223-3_TabPin2";1;"TLV1117-50IDCYR";;;
+17;"SW1";"DIP-6_W8.89mm_SMDSocket_LongPads";1;"SW_DIP_x03";;;

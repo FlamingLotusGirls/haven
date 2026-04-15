@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BirdBath Test Input</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      margin: 0;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #00d4ff;
+      margin-bottom: 4px;
+      font-size: 1.8em;
+      letter-spacing: 2px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #888;
+      font-size: 0.85em;
+      margin-bottom: 24px;
+    }
+
+    #pipe-info {
+      text-align: center;
+      font-size: 0.8em;
+      color: #666;
+      margin-bottom: 20px;
+      font-family: monospace;
+    }
+
+    /* ── Channel grid ── */
+    #channels {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      justify-content: center;
+      margin-bottom: 30px;
+    }
+
+    .channel-card {
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 10px;
+      padding: 20px 24px;
+      min-width: 260px;
+      flex: 1 1 260px;
+      max-width: 380px;
+      position: relative;
+    }
+
+    .channel-card h2 {
+      margin: 0 0 12px 0;
+      font-size: 1.1em;
+      color: #00d4ff;
+      font-family: monospace;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .slider-label {
+      font-size: 0.75em;
+      color: #666;
+      width: 30px;
+      text-align: center;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 8px;
+      border-radius: 4px;
+      background: #0f3460;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #00d4ff;
+      cursor: pointer;
+      border: 2px solid #fff;
+      box-shadow: 0 0 6px rgba(0, 212, 255, 0.6);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #00d4ff;
+      cursor: pointer;
+      border: 2px solid #fff;
+    }
+
+    .value-display {
+      font-size: 1.4em;
+      font-family: monospace;
+      text-align: center;
+      color: #ffffff;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .status {
+      font-size: 0.75em;
+      color: #888;
+      text-align: center;
+      min-height: 1.2em;
+    }
+
+    .status.ok   { color: #4caf50; }
+    .status.err  { color: #f44336; }
+
+    /* continuous send toggle */
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .send-btn {
+      background: #0f3460;
+      color: #00d4ff;
+      border: 1px solid #00d4ff;
+      border-radius: 6px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 0.85em;
+      transition: background 0.15s;
+    }
+    .send-btn:hover { background: #00d4ff; color: #000; }
+
+    .zero-btn {
+      background: transparent;
+      color: #888;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 0.85em;
+      transition: background 0.15s;
+    }
+    .zero-btn:hover { background: #444; color: #fff; }
+
+    /* ── Custom channel section ── */
+    #custom-section {
+      max-width: 500px;
+      margin: 0 auto 30px;
+      background: #16213e;
+      border: 1px solid #0f3460;
+      border-radius: 10px;
+      padding: 20px 24px;
+    }
+
+    #custom-section h2 {
+      margin: 0 0 14px 0;
+      color: #e8a000;
+      font-size: 1.1em;
+    }
+
+    .custom-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .custom-row input[type="text"] {
+      flex: 1;
+      background: #0f3460;
+      border: 1px solid #0f3460;
+      color: #fff;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 0.95em;
+    }
+
+    .custom-row input[type="number"] {
+      width: 90px;
+      background: #0f3460;
+      border: 1px solid #0f3460;
+      color: #fff;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 0.95em;
+    }
+
+    .custom-row button {
+      background: #e8a000;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 0.9em;
+      transition: background 0.15s;
+    }
+    .custom-row button:hover { background: #ffba00; }
+
+    #custom-status {
+      font-size: 0.8em;
+      min-height: 1.2em;
+      color: #888;
+    }
+    #custom-status.ok  { color: #4caf50; }
+    #custom-status.err { color: #f44336; }
+
+    /* ── Global controls ── */
+    #global-controls {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    #continuous-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      font-size: 0.9em;
+      color: #aaa;
+    }
+
+    #continuous-cb { width: 16px; height: 16px; cursor: pointer; }
+
+    #interval-ms {
+      width: 70px;
+      background: #0f3460;
+      border: 1px solid #0f3460;
+      color: #fff;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.9em;
+      margin-left: 6px;
+    }
+
+    footer {
+      text-align: center;
+      color: #444;
+      font-size: 0.75em;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🐦 BirdBath Test Input</h1>
+<p class="subtitle">Inject fake ADC channel values into the controller pipe</p>
+<div id="pipe-info">Loading…</div>
+
+<!-- Global continuous-send toggle -->
+<div id="global-controls">
+  <label id="continuous-label">
+    <input type="checkbox" id="continuous-cb">
+    Continuous send every
+    <input type="number" id="interval-ms" value="200" min="50" max="5000" step="50"> ms
+  </label>
+</div>
+
+<!-- Per-channel cards injected here -->
+<div id="channels"></div>
+
+<!-- Custom channel -->
+<div id="custom-section">
+  <h2>⚡ Custom Channel</h2>
+  <div class="custom-row">
+    <input type="text" id="custom-channel" placeholder="channel name, e.g. tap2" value="">
+    <input type="number" id="custom-value" value="0.0" min="-1" max="1" step="0.01">
+    <button onclick="sendCustom()">Send</button>
+  </div>
+  <div id="custom-status"></div>
+</div>
+
+<footer>test_input_server.py &mdash; BirdBath Test Harness</footer>
+
+<script>
+  // -----------------------------------------------------------------------
+  // State
+  // -----------------------------------------------------------------------
+  let channels = [];            // channel name strings from /channels
+  let pipePath = '';            // pipe path from /channels
+  let continuousTimer = null;   // setInterval handle
+
+  // -----------------------------------------------------------------------
+  // Boot
+  // -----------------------------------------------------------------------
+  async function init() {
+    try {
+      const res = await fetch('/channels');
+      const data = await res.json();
+      channels = data.channels || [];
+      pipePath = data.pipe || '';
+      document.getElementById('pipe-info').textContent =
+        `Pipe: ${pipePath}  |  Channels: ${channels.join(', ')}`;
+
+      buildChannelCards();
+      setupContinuous();
+    } catch (e) {
+      document.getElementById('pipe-info').textContent =
+        `Error loading config: ${e.message}`;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Build per-channel slider cards
+  // -----------------------------------------------------------------------
+  function buildChannelCards() {
+    const container = document.getElementById('channels');
+    container.innerHTML = '';
+
+    channels.forEach(ch => {
+      const card = document.createElement('div');
+      card.className = 'channel-card';
+      card.id = `card-${ch}`;
+
+      card.innerHTML = `
+        <h2>${ch}</h2>
+        <div class="value-display" id="val-${ch}">0.000</div>
+        <div class="slider-row">
+          <span class="slider-label">−1</span>
+          <input type="range" id="slider-${ch}"
+                 min="-1" max="1" step="0.001" value="0"
+                 oninput="onSliderInput('${ch}')">
+          <span class="slider-label">+1</span>
+        </div>
+        <div class="controls">
+          <button class="send-btn" onclick="sendChannel('${ch}')">Send</button>
+          <button class="zero-btn" onclick="zeroChannel('${ch}')">Zero</button>
+        </div>
+        <div class="status" id="status-${ch}"></div>
+      `;
+
+      container.appendChild(card);
+    });
+  }
+
+  // -----------------------------------------------------------------------
+  // Slider interaction
+  // -----------------------------------------------------------------------
+  function onSliderInput(ch) {
+    const val = parseFloat(document.getElementById(`slider-${ch}`).value);
+    document.getElementById(`val-${ch}`).textContent = formatVal(val);
+    // In continuous mode the timer handles sending; otherwise don't auto-send
+    // (user must click Send button). This avoids flooding the pipe.
+  }
+
+  function zeroChannel(ch) {
+    document.getElementById(`slider-${ch}`).value = 0;
+    document.getElementById(`val-${ch}`).textContent = '0.000';
+    sendChannel(ch);
+  }
+
+  // -----------------------------------------------------------------------
+  // Send helpers
+  // -----------------------------------------------------------------------
+  async function sendChannel(ch) {
+    const val = parseFloat(document.getElementById(`slider-${ch}`).value);
+    const statusEl = document.getElementById(`status-${ch}`);
+    try {
+      const res = await fetch('/set_channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: ch, value: val }),
+      });
+      const data = await res.json();
+      showStatus(statusEl, data.ok, data.message || data.error);
+    } catch (e) {
+      showStatus(statusEl, false, `Network error: ${e.message}`);
+    }
+  }
+
+  async function sendAllChannels() {
+    channels.forEach(ch => sendChannel(ch));
+  }
+
+  async function sendCustom() {
+    const ch = document.getElementById('custom-channel').value.trim();
+    const val = parseFloat(document.getElementById('custom-value').value);
+    const statusEl = document.getElementById('custom-status');
+
+    if (!ch) {
+      showStatus(statusEl, false, 'Enter a channel name first');
+      return;
+    }
+
+    try {
+      const res = await fetch('/set_channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: ch, value: val }),
+      });
+      const data = await res.json();
+      showStatus(statusEl, data.ok, data.message || data.error);
+    } catch (e) {
+      showStatus(statusEl, false, `Network error: ${e.message}`);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Continuous mode
+  // -----------------------------------------------------------------------
+  function setupContinuous() {
+    const cb = document.getElementById('continuous-cb');
+    cb.addEventListener('change', () => {
+      if (cb.checked) {
+        startContinuous();
+      } else {
+        stopContinuous();
+      }
+    });
+
+    document.getElementById('interval-ms').addEventListener('change', () => {
+      if (cb.checked) {
+        stopContinuous();
+        startContinuous();
+      }
+    });
+  }
+
+  function startContinuous() {
+    const ms = parseInt(document.getElementById('interval-ms').value, 10) || 200;
+    continuousTimer = setInterval(sendAllChannels, ms);
+  }
+
+  function stopContinuous() {
+    if (continuousTimer !== null) {
+      clearInterval(continuousTimer);
+      continuousTimer = null;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Utilities
+  // -----------------------------------------------------------------------
+  function formatVal(v) {
+    return (v >= 0 ? '+' : '') + v.toFixed(3);
+  }
+
+  function showStatus(el, ok, msg) {
+    el.className = 'status ' + (ok ? 'ok' : 'err');
+    el.textContent = msg;
+    // Fade message after 4 s
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => {
+      el.className = 'status';
+      el.textContent = '';
+    }, 4000);
+  }
+
+  // -----------------------------------------------------------------------
+  // Kick off
+  // -----------------------------------------------------------------------
+  init();
+</script>
+</body>
+</html>

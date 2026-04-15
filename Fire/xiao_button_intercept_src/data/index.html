@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pattern Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        h1, h2 {
+            color: #333;
+            border-bottom: 2px solid #ff6b35;
+            padding-bottom: 10px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+        
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        th {
+            background-color: #ff6b35;
+            color: white;
+        }
+        
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        
+        button {
+            background-color: #ff6b35;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background-color: #e55a2b;
+        }
+        
+        button.danger {
+            background-color: #dc3545;
+        }
+        
+        button.danger:hover {
+            background-color: #c82333;
+        }
+        
+        input, select, textarea {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 5px;
+        }
+        
+        .form-group {
+            margin: 15px 0;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .inline {
+            display: inline-block;
+            margin-right: 15px;
+        }
+        
+        .sequence-step {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        
+        .pattern-sequence {
+            background: #e9ecef;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        
+        .status.success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        
+        .status.error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>🔥 Flame Effect Pattern Manager</h1>
+    
+    <div class="container">
+        <div id="status"></div>
+        
+        <!-- Channel Mapping Section -->
+        <div class="section">
+            <h2>Channel Mapping</h2>
+            <p>Map physical channel indices to solenoid names</p>
+            
+            <div class="form-group">
+                <label>Add Channel Mapping:</label>
+                <div class="inline">
+                    <select id="channelIndex">
+                        <option value="">Select Channel</option>
+                        <option value="0">Channel 0</option>
+                        <option value="1">Channel 1</option>
+                        <option value="2">Channel 2</option>
+                        <option value="3">Channel 3</option>
+                        <option value="4">Channel 4</option>
+                        <option value="5">Channel 5</option>
+                        <option value="6">Channel 6</option>
+                        <option value="7">Channel 7</option>
+                    </select>
+                </div>
+                <div class="inline">
+                    <input type="text" id="solenoidName" placeholder="Solenoid Name">
+                </div>
+                <button onclick="addChannelMapping()">Add Mapping</button>
+            </div>
+            
+            <table id="channelTable">
+                <thead>
+                    <tr>
+                        <th>Channel Index</th>
+                        <th>Solenoid Name</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="channelTableBody">
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Sequences Section -->
+        <div class="section">
+            <h2>Sequences</h2>
+            <p>Define timing patterns for flame effects</p>
+            
+            <div class="form-group">
+                <label>Sequence Name:</label>
+                <input type="text" id="sequenceName" placeholder="e.g., poof">
+                <button onclick="createNewSequence()">Create New Sequence</button>
+            </div>
+            
+            <div id="sequenceEditor" style="display: none;">
+                <h3>Edit Sequence: <span id="currentSequenceName"></span></h3>
+                <div id="sequenceSteps"></div>
+                <button onclick="addSequenceStep()">Add Step</button>
+                <button onclick="saveSequence()">Save Sequence</button>
+                <button onclick="cancelSequenceEdit()">Cancel</button>
+            </div>
+            
+            <table id="sequenceTable">
+                <thead>
+                    <tr>
+                        <th>Sequence Name</th>
+                        <th>Steps</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="sequenceTableBody">
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Patterns Section -->
+        <div class="section">
+            <h2>Patterns</h2>
+            <p>Combine sequences into complex patterns</p>
+            
+            <div class="form-group">
+                <label>Pattern Name:</label>
+                <input type="text" id="patternName" placeholder="e.g., BirdChase">
+                <button onclick="createNewPattern()">Create New Pattern</button>
+            </div>
+            
+            <div id="patternEditor" style="display: none;">
+                <h3>Edit Pattern: <span id="currentPatternName"></span></h3>
+                <div id="patternSequences"></div>
+                <button onclick="addPatternSequence()">Add Sequence</button>
+                <button onclick="savePattern()">Save Pattern</button>
+                <button onclick="cancelPatternEdit()">Cancel</button>
+            </div>
+            
+            <table id="patternTable">
+                <thead>
+                    <tr>
+                        <th>Pattern Name</th>
+                        <th>Sequences</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="patternTableBody">
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pattern Mappings Section -->
+        <div class="section">
+            <h2>Button Pattern Mappings</h2>
+            <p>Assign patterns to button inputs</p>
+            
+            <div class="form-group">
+                <label>Add Button Mapping:</label>
+                <div class="inline">
+                    <input type="number" id="buttonIndex" placeholder="Button Index" min="0">
+                </div>
+                <div class="inline">
+                    <select id="patternSelect">
+                        <option value="">Select Pattern</option>
+                    </select>
+                </div>
+                <button onclick="addPatternMapping()">Add Mapping</button>
+            </div>
+            
+            <table id="mappingTable">
+                <thead>
+                    <tr>
+                        <th>Button Index</th>
+                        <th>Pattern Name</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="mappingTableBody">
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="form-group">
+            <button onclick="saveAllData()">💾 Save All Changes</button>
+            <button onclick="loadAllData()">🔄 Reload Data</button>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
