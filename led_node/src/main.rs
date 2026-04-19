@@ -3,6 +3,7 @@
 
 mod artnet;
 mod pixel_control;
+mod storage;
 mod ws2812_control;
 
 use core::format_args as f;
@@ -15,7 +16,7 @@ use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     peripherals::{BOOTSEL, PIO0, PIO1, SPI0, UART0},
     pio::{self, Pio},
-    spi::{Async, Config as SpiConfig, Spi},
+    spi::{Config as SpiConfig, Spi},
     uart,
 };
 use embassy_time::{Delay, Timer};
@@ -35,6 +36,9 @@ const IP_ADDRESS_LAST_NUMBER: u8 = 20;
 // 169.254.3.10, 11, 20, 21, 30, 31, 40, 50, 60, 70 // Haven BM 2025
 // 169.254.9.91-99 // Sea of Dreams unSCruz 2025
 // 169.254.5.51 // Early testing
+
+// FLG "OEM Code" for artnet commands
+const OEM_CODE: u16 = 0x666c; // Literally this is ASCI for "fl". If you don't believe me, look it up
 
 // Needed for tiny-artnet
 #[global_allocator]
@@ -149,6 +153,9 @@ async fn main(spawner: Spawner) {
         p.PIN_9,
         &program,
     );
+
+    // Read stored pixel values from flash storage
+    let mut db = storage::init_storage(p.FLASH, p.DMA_CH2).await;
 
     let mut pixels = [RGB8::default(); PIXEL_COUNT];
     let rgbw_hack_colors = [255u8, 10, 0, 100];
