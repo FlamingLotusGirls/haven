@@ -16,7 +16,7 @@ use embassy_rp::{
     gpio::{Input, Level, Output, Pull},
     peripherals::{BOOTSEL, PIO0, PIO1, SPI0, UART0},
     pio::{self, Pio},
-    spi::{Config as SpiConfig, Spi},
+    spi::{Async as SpiAsync, Config as SpiConfig, Spi},
     uart,
 };
 use embassy_time::{Delay, Timer};
@@ -87,7 +87,7 @@ async fn ethernet_task(
     runner: Runner<
         'static,
         embassy_net_wiznet::chip::W5500,
-        ExclusiveDevice<Spi<'static, SPI0, Async>, Output<'static>, Delay>,
+        ExclusiveDevice<Spi<'static, SPI0, SpiAsync>, Output<'static>, Delay>,
         Input<'static>,
         Output<'static>,
     >,
