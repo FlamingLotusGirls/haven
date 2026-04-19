@@ -69,7 +69,7 @@ pub async fn init_storage(
     });
 
     // 3. Initialize Database with a mutable reference to the adapter
-    let mut db = Database::new(adapter, ekv::Config::default());
+    let db = Database::new(adapter, ekv::Config::default());
 
     // 4. Mount/Format (parameterless)
     // The adapter handles the offset translation, ekv sees page 0 at STORAGE_OFFSET
