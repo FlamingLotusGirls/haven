@@ -31,8 +31,10 @@ const PIXEL_COUNT: usize = 340;
 const PIXEL_BYTE_SIZE: usize = PIXEL_COUNT * 3;
 const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 13;
 const IP_ADDRESS_LAST_NUMBER: u8 = 20;
-// 169.254.9.91-99
-// 169.254.5.51
+// 192.168.13.20-40 // Haven unSCruz 2026
+// 169.254.3.10, 11, 20, 21, 30, 31, 40, 50, 60, 70 // Haven BM 2025
+// 169.254.9.91-99 // Sea of Dreams unSCruz 2025
+// 169.254.5.51 // Something else
 
 // Needed for tiny-artnet
 #[global_allocator]
