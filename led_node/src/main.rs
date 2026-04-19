@@ -287,7 +287,7 @@ async fn main(spawner: Spawner) {
     // }
     // strip0.write(&pixels).await;
 
-    artnet::receive_artnet(s, stack, strip0, strip1, strip2, strip3).await;
+    artnet::receive_artnet(s, stack, strip0, strip1, strip2, strip3, db).await;
 
     // let delay = Duration::from_secs(1);
     // loop {
