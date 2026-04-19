@@ -155,35 +155,108 @@ async fn main(spawner: Spawner) {
     );
 
     // Read stored pixel values from flash storage
-    let mut db = storage::init_storage(p.FLASH, p.DMA_CH2).await;
+    let db = storage::init_storage(p.FLASH, p.DMA_CH2).await;
 
-    let mut pixels = [RGB8::default(); PIXEL_COUNT];
+    // Create default pixel bytes (all strips with colored patterns)
+    let mut default_pixel_bytes = [0u8; PIXEL_BYTE_SIZE * 4];
+    let mut byte_idx = 0;
+
+    // Strip 0: RGBW hack pattern
     let rgbw_hack_colors = [255u8, 10, 0, 100];
-    for (i, pixel) in pixels.iter_mut().enumerate() {
+    for i in 0..PIXEL_COUNT {
         let hack_index = i * 3;
-        pixel.r = rgbw_hack_colors[hack_index % 4];
-        pixel.g = rgbw_hack_colors[(hack_index + 1) % 4];
-        pixel.b = rgbw_hack_colors[(hack_index + 2) % 4];
+        default_pixel_bytes[byte_idx] = rgbw_hack_colors[hack_index % 4];
+        default_pixel_bytes[byte_idx + 1] = rgbw_hack_colors[(hack_index + 1) % 4];
+        default_pixel_bytes[byte_idx + 2] = rgbw_hack_colors[(hack_index + 2) % 4];
+        byte_idx += 3;
     }
-    strip0.write(&pixels).await;
-    for i in &mut pixels {
-        i.r = 128;
-        i.g = 128;
-        i.b = 0;
+
+    // Strip 1: Yellow
+    for _ in 0..PIXEL_COUNT {
+        default_pixel_bytes[byte_idx] = 128;
+        default_pixel_bytes[byte_idx + 1] = 128;
+        default_pixel_bytes[byte_idx + 2] = 0;
+        byte_idx += 3;
     }
-    strip1.write(&pixels).await;
-    for i in &mut pixels {
-        i.r = 0;
-        i.g = 128;
-        i.b = 0;
+
+    // Strip 2: Green
+    for _ in 0..PIXEL_COUNT {
+        default_pixel_bytes[byte_idx] = 0;
+        default_pixel_bytes[byte_idx + 1] = 128;
+        default_pixel_bytes[byte_idx + 2] = 0;
+        byte_idx += 3;
     }
-    strip2.write(&pixels).await;
-    for i in &mut pixels {
-        i.r = 0;
-        i.g = 0;
-        i.b = 128;
+
+    // Strip 3: Blue
+    for _ in 0..PIXEL_COUNT {
+        default_pixel_bytes[byte_idx] = 0;
+        default_pixel_bytes[byte_idx + 1] = 0;
+        default_pixel_bytes[byte_idx + 2] = 128;
+        byte_idx += 3;
     }
-    strip3.write(&pixels).await;
+
+    // Load pixels from database with fallback to defaults
+    let mut pixel_buffer = [0u8; 4920]; // 1360 pixels max * 3 bytes
+    let mut all_pixels: heapless::Vec<RGB8, 1360> = heapless::Vec::new();
+    let mut need_save_defaults = false;
+
+    {
+        let tx = db.read_transaction().await;
+        match tx.read(b"default_pixels", &mut pixel_buffer).await {
+            Ok(len) if len == default_pixel_bytes.len() => {
+                // Successfully read pixels from database
+                for chunk in pixel_buffer[..len].chunks_exact(3) {
+                    let _ = all_pixels.push(RGB8::new(chunk[0], chunk[1], chunk[2]));
+                }
+            }
+            _ => {
+                // Database doesn't have saved pixels, use defaults
+                for chunk in default_pixel_bytes.chunks_exact(3) {
+                    let _ = all_pixels.push(RGB8::new(chunk[0], chunk[1], chunk[2]));
+                }
+                need_save_defaults = true;
+            }
+        }
+    }
+
+    // Save defaults if needed after releasing the read transaction
+    if need_save_defaults {
+        let mut write_tx = db.write_transaction().await;
+        let _ = write_tx
+            .write(b"default_pixels", &default_pixel_bytes)
+            .await;
+        let _ = write_tx.commit().await;
+    }
+
+    // Write loaded pixels to all strips
+    let mut strip_pixels = [RGB8::default(); PIXEL_COUNT];
+    for (i, pixel) in strip_pixels.iter_mut().enumerate() {
+        if i < all_pixels.len() {
+            *pixel = all_pixels[i];
+        }
+    }
+    strip0.write(&strip_pixels).await;
+
+    for (i, pixel) in strip_pixels.iter_mut().enumerate() {
+        if PIXEL_COUNT + i < all_pixels.len() {
+            *pixel = all_pixels[PIXEL_COUNT + i];
+        }
+    }
+    strip1.write(&strip_pixels).await;
+
+    for (i, pixel) in strip_pixels.iter_mut().enumerate() {
+        if PIXEL_COUNT * 2 + i < all_pixels.len() {
+            *pixel = all_pixels[PIXEL_COUNT * 2 + i];
+        }
+    }
+    strip2.write(&strip_pixels).await;
+
+    for (i, pixel) in strip_pixels.iter_mut().enumerate() {
+        if PIXEL_COUNT * 3 + i < all_pixels.len() {
+            *pixel = all_pixels[PIXEL_COUNT * 3 + i];
+        }
+    }
+    strip3.write(&strip_pixels).await;
 
     // Connct to w5500 peripheral
     let mut spi_cfg = SpiConfig::default();
