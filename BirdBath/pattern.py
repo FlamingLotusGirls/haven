@@ -34,25 +34,36 @@ class Pattern(ABC):
         nozzle_idx = 0
         
         # Physical configuration of the nozzle layout
-        ring_count = [3, 2, 1]  # Number of nozzles in each ring
-        ring_radius = [3.0, 2.0, 1.0]  # Radius of each ring
+        ring_radius = [3.0, 2.0, 1.0]  # Radius of each ring (outer, middle, inner)
         ring_base_angle = [math.pi/18.0, math.pi/12.0, math.pi/6.0]  # Base angle offset for each ring
         pos_angle = [[0, math.pi/9.0, 2 * math.pi/9.0], [0, math.pi/6.0], [0]]  # Angle offset for each position in each ring
         
+        # New nozzle ordering within each section (ring_idx, pos_within_ring):
+        # Outer row (left to right): nozzles 2, 4, 6 → slots 1, 3, 5 → (ring 0, pos 0/1/2)
+        # Middle row (left to right): nozzles 1, 5  → slots 0, 4 → (ring 1, pos 0/1)
+        # Inner row: nozzle 3                        → slot 2     → (ring 2, pos 0)
+        # So within each section the controller channel order maps to physical positions as:
+        #   slot 0 → middle-left (ring 1, pos 0)
+        #   slot 1 → outer-left  (ring 0, pos 0)
+        #   slot 2 → inner       (ring 2, pos 0)
+        #   slot 3 → outer-mid   (ring 0, pos 1)
+        #   slot 4 → middle-right(ring 1, pos 1)
+        #   slot 5 → outer-right (ring 0, pos 2)
+        section_layout = [(1, 0), (0, 0), (2, 0), (0, 1), (1, 1), (0, 2)]
+        
         for section_idx in range(0, 6):
             base_angle = -section_idx * math.tau / 6.0
-            for ring_idx in range(0, 3):
-                for pos in range(0, ring_count[ring_idx]):
-                    full_angle = base_angle - ring_base_angle[ring_idx] - pos_angle[ring_idx][pos]
-                    radius = ring_radius[ring_idx]
-                    
-                    x = math.sin(full_angle) * radius
-                    y = math.cos(full_angle) * radius
-                    
-                    nozzle = Nozzle(idx=nozzle_idx, ring_idx=ring_idx, section_idx=section_idx,
-                                  position=pos, x=x, y=y, values_array=values_array)
-                    nozzles.append(nozzle)
-                    nozzle_idx += 1
+            for (ring_idx, pos) in section_layout:
+                full_angle = base_angle - ring_base_angle[ring_idx] - pos_angle[ring_idx][pos]
+                radius = ring_radius[ring_idx]
+                
+                x = math.sin(full_angle) * radius
+                y = math.cos(full_angle) * radius
+                
+                nozzle = Nozzle(idx=nozzle_idx, ring_idx=ring_idx, section_idx=section_idx,
+                              position=pos, x=x, y=y, values_array=values_array)
+                nozzles.append(nozzle)
+                nozzle_idx += 1
         
         return nozzles
     
@@ -63,11 +74,17 @@ class Pattern(ABC):
 
     def get_nozzles_in_ring(self, ring_idx):
       if ring_idx == 0:
-        result = [nozzle for i in range(0, len(self.nozzles), 6) for nozzle in self.nozzles[i:i+3]]
+        # outer ring: slots 1, 3, 5 within each section
+        result = [nozzle for i in range(0, len(self.nozzles), 6)
+                  for nozzle in [self.nozzles[i+1], self.nozzles[i+3], self.nozzles[i+5]]]
       elif ring_idx == 1:
-        result = [nozzle for i in range(0, len(self.nozzles), 6) for nozzle in self.nozzles[i+3:i+5]]
+        # middle ring: slots 0, 4 within each section
+        result = [nozzle for i in range(0, len(self.nozzles), 6)
+                  for nozzle in [self.nozzles[i+0], self.nozzles[i+4]]]
       elif ring_idx == 2:
-        result = [nozzle for i in range(0, len(self.nozzles), 6) for nozzle in self.nozzles[i+5:i+6]]
+        # inner ring: slot 2 within each section
+        result = [nozzle for i in range(0, len(self.nozzles), 6)
+                  for nozzle in [self.nozzles[i+2]]]
       else:
         result = []
 
@@ -75,11 +92,14 @@ class Pattern(ABC):
 
     def get_nozzles_at_position(self, ring_idx, position):
       if ring_idx == 0:
-         section_pos = position 
+        # outer ring: pos 0 → slot 1, pos 1 → slot 3, pos 2 → slot 5
+        section_pos = [1, 3, 5][position]
       elif ring_idx == 1:
-         section_pos = position + 3
+        # middle ring: pos 0 → slot 0, pos 1 → slot 4
+        section_pos = [0, 4][position]
       else:
-         section_pos = 5
+        # inner ring: only pos 0 → slot 2
+        section_pos = 2
       return self.nozzles[section_pos::6]
     
     @abstractmethod

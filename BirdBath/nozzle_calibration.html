@@ -473,7 +473,6 @@
         const scale = 60;
         
         // Nozzle configuration (matching the Python code)
-        const ringCount = [3, 2, 1];
         const ringRadius = [3.0, 2.0, 1.0];
         const ringBaseAngle = [Math.PI/18.0, Math.PI/12.0, Math.PI/6.0];
         const posAngle = [
@@ -481,6 +480,18 @@
             [0, Math.PI/6.0],
             [0]
         ];
+        
+        // New section layout: [ringIdx, pos] pairs per slot within each section.
+        // Outer row (L→R): nozzles 2,4,6 → slots 1,3,5 → (ring 0, pos 0/1/2)
+        // Middle row (L→R): nozzles 1,5  → slots 0,4   → (ring 1, pos 0/1)
+        // Inner row: nozzle 3             → slot 2      → (ring 2, pos 0)
+        //   slot 0 → middle-left (ring 1, pos 0)
+        //   slot 1 → outer-left  (ring 0, pos 0)
+        //   slot 2 → inner       (ring 2, pos 0)
+        //   slot 3 → outer-mid   (ring 0, pos 1)
+        //   slot 4 → middle-right(ring 1, pos 1)
+        //   slot 5 → outer-right (ring 0, pos 2)
+        const sectionLayout = [[1,0],[0,0],[2,0],[0,1],[1,1],[0,2]];
         
         // Colors for different rings
         const ringColors = ['#ff6b6b', '#4ecdc4', '#45b7d1'];
@@ -513,28 +524,26 @@
             for (let sectionIdx = 0; sectionIdx < 6; sectionIdx++) {
                 const baseAngle = -sectionIdx * Math.PI / 3.0;
                 
-                for (let ringIdx = 0; ringIdx < 3; ringIdx++) {
-                    for (let pos = 0; pos < ringCount[ringIdx]; pos++) {
-                        const fullAngle = baseAngle - ringBaseAngle[ringIdx] - posAngle[ringIdx][pos];
-                        const radius = ringRadius[ringIdx];
-                        
-                        const x = Math.sin(fullAngle) * radius;
-                        const y = Math.cos(fullAngle) * radius;
-                        
-                        nozzles.push({
-                            idx: nozzleIdx,
-                            ringIdx: ringIdx,
-                            sectionIdx: sectionIdx,
-                            position: pos,
-                            x: x,
-                            y: y,
-                            angle: Math.atan2(x, y),
-                            calibration: { low: 0, high: 255 },
-                            lastSetPosition: null  // Track last manually set position
-                        });
-                        
-                        nozzleIdx++;
-                    }
+                for (const [ringIdx, pos] of sectionLayout) {
+                    const fullAngle = baseAngle - ringBaseAngle[ringIdx] - posAngle[ringIdx][pos];
+                    const radius = ringRadius[ringIdx];
+                    
+                    const x = Math.sin(fullAngle) * radius;
+                    const y = Math.cos(fullAngle) * radius;
+                    
+                    nozzles.push({
+                        idx: nozzleIdx,
+                        ringIdx: ringIdx,
+                        sectionIdx: sectionIdx,
+                        position: pos,
+                        x: x,
+                        y: y,
+                        angle: Math.atan2(x, y),
+                        calibration: { low: 0, high: 255 },
+                        lastSetPosition: null  // Track last manually set position
+                    });
+                    
+                    nozzleIdx++;
                 }
             }
         }
