@@ -36,6 +36,26 @@ const IP_ADDRESS_LAST_NUMBER: u8 = 20;
 // 169.254.9.91-99 // Sea of Dreams unSCruz 2025
 // 169.254.5.51 // Early testing
 
+// Set controller for default colors
+const CONTROLLER: Option<&str> = Some("cockatoo_1");
+// If you want to control it via env variable at compile time:
+// const CONTROLLER: Option<&str> = option_env!("CONTROLLER");
+
+// (You still have to set the IP_ADDRESS_LAST_NUMBER above, CONTROLLER only affects the default colors.)
+
+/*
+"cockatoo_1"   192.168.13.20
+"cockatoo_2"   192.168.13.21
+"cockatoo_3"   192.168.13.22
+"magpie_1"     192.168.13.23
+"magpie_2"     192.168.13.24
+"osprey_1"     192.168.13.25
+"osprey_2"     192.168.13.26
+"egg_tub"      192.168.13.27
+"zen_garden"   192.168.13.28
+"bird_bath"    192.168.13.29
+*/
+
 // Needed for tiny-artnet
 #[global_allocator]
 static HEAP: embedded_alloc::LlffHeap = embedded_alloc::LlffHeap::empty();
@@ -99,6 +119,43 @@ async fn net_task(
     runner.run().await
 }
 
+/// Fill pixel array with RGBW values in a repeating pattern (hack to fit RGBW into RGB, they are all going back to an array of bytes in the end)
+fn fill_pixels_rgbw(pixels: &mut [RGB8], rgbw: [u8; 4]) {
+    for (i, pixel) in pixels.iter_mut().enumerate() {
+        let hack_index = i * 3;
+        pixel.r = pixel_control::GAMMA[rgbw[hack_index % 4] as usize];
+        pixel.g = pixel_control::GAMMA[rgbw[(hack_index + 1) % 4] as usize];
+        pixel.b = pixel_control::GAMMA[rgbw[(hack_index + 2) % 4] as usize];
+    }
+}
+
+/// Fill pixel array with solid color
+fn fill_pixels(pixels: &mut [RGB8], rgb: [u8; 3]) {
+    for pixel in pixels.iter_mut() {
+        pixel.r = pixel_control::GAMMA[rgb[0] as usize];
+        pixel.g = pixel_control::GAMMA[rgb[1] as usize];
+        pixel.b = pixel_control::GAMMA[rgb[2] as usize];
+    }
+}
+
+fn set_pixels_byte(pixels: &mut [RGB8], byte_offset: usize, value: u8) {
+    match byte_offset % 3 {
+        0 => {
+            pixels[byte_offset / 3].r = pixel_control::GAMMA[value as usize];
+        }
+        1 => {
+            pixels[byte_offset / 3].g = pixel_control::GAMMA[value as usize];
+        }
+        2 => {
+            pixels[byte_offset / 3].b = pixel_control::GAMMA[value as usize];
+        }
+        _ => {
+            pixels[byte_offset / 3].b = pixel_control::GAMMA[value as usize];
+        }
+    }
+}
+
+#[allow(dead_code)]
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
@@ -151,31 +208,185 @@ async fn main(spawner: Spawner) {
     );
 
     let mut pixels = [RGB8::default(); PIXEL_COUNT];
-    let rgbw_hack_colors = [255u8, 10, 0, 100];
-    for (i, pixel) in pixels.iter_mut().enumerate() {
-        let hack_index = i * 3;
-        pixel.r = rgbw_hack_colors[hack_index % 4];
-        pixel.g = rgbw_hack_colors[(hack_index + 1) % 4];
-        pixel.b = rgbw_hack_colors[(hack_index + 2) % 4];
+
+    fill_pixels_rgbw(&mut pixels, [255, 10, 0, 100]); // egg tub
+
+    // Warning, these will all be gamma-corrected
+    let _red = [255, 74, 38];
+    let yellow = [255, 201, 38];
+    let orange = [255, 100, 38];
+    let green = [255, 208, 38];
+    let cyan = [38, 255, 255];
+    let blue = [38, 45, 255];
+    let purple = [121, 38, 255];
+
+    // rgb
+    let cockatoo_window_1 = green;
+    let cockatoo_window_2 = yellow;
+    let cockatoo_window_3 = blue;
+    let cockatoo_chandelier = cyan;
+    let cockatoo_eyes = purple;
+    let cockatoo_body = cyan;
+
+    let magpie_window_1 = yellow;
+    let magpie_window_2 = blue;
+    let magpie_eyes = blue;
+
+    let osprey_window_1 = orange;
+    let osprey_window_2 = blue;
+
+    let zen_garden_underlights = [19, 23, 127];
+    let bird_bath_leds = purple;
+
+    // rgbw
+    let egg_tub_rgbw = [255, 10, 0, 100];
+    let spotlights_rgbw = [255, 238, 153, 255];
+    let cockatoo_cheeks_rgbw = [orange[0], orange[1], orange[2], 255];
+
+    match CONTROLLER.unwrap_or("") {
+        "cockatoo_1" => {
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip0.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip1.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip2.write(&pixels).await;
+
+            fill_pixels(&mut pixels, cockatoo_window_1);
+            strip3.write(&pixels).await;
+        }
+        "cockatoo_2" => {
+            fill_pixels(&mut pixels, cockatoo_window_2);
+            strip0.write(&pixels).await;
+
+            fill_pixels(&mut pixels, cockatoo_window_3);
+            strip1.write(&pixels).await;
+
+            fill_pixels(&mut pixels, cockatoo_chandelier);
+            strip2.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip3.write(&pixels).await;
+        }
+        "cockatoo_3" => {
+            // Cheeks (rgbw) are daisy chained to eyes (rgb) so we must do strange things
+            let cheeks_rgbw_pixel_count = 8;
+            let mut pixels_byte_index = 0;
+            for _ in 0..cheeks_rgbw_pixel_count {
+                for led in 0..4 {
+                    set_pixels_byte(&mut pixels, pixels_byte_index, cockatoo_cheeks_rgbw[led]);
+                    pixels_byte_index += 1;
+                }
+            }
+            let eyes_pixel_count = 32;
+            for _ in 0..eyes_pixel_count {
+                for led in 0..3 {
+                    set_pixels_byte(&mut pixels, pixels_byte_index, cockatoo_eyes[led]);
+                    pixels_byte_index += 1;
+                }
+            }
+            strip0.write(&pixels).await;
+
+            fill_pixels(&mut pixels, cockatoo_body);
+            strip1.write(&pixels).await;
+
+            fill_pixels(&mut pixels, purple);
+            strip2.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip3.write(&pixels).await;
+        }
+        "magpie_1" => {
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip0.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip1.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip2.write(&pixels).await;
+
+            fill_pixels(&mut pixels, magpie_window_1);
+            strip3.write(&pixels).await;
+        }
+        "magpie_2" => {
+            fill_pixels(&mut pixels, magpie_window_2);
+            strip0.write(&pixels).await;
+
+            fill_pixels(&mut pixels, magpie_eyes);
+            strip1.write(&pixels).await;
+
+            fill_pixels(&mut pixels, green);
+            strip2.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip3.write(&pixels).await;
+        }
+        "osprey_1" => {
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip0.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip1.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip2.write(&pixels).await;
+
+            fill_pixels(&mut pixels, osprey_window_1);
+            strip3.write(&pixels).await;
+        }
+        "osprey_2" => {
+            fill_pixels(&mut pixels, osprey_window_2);
+            strip0.write(&pixels).await;
+
+            fill_pixels(&mut pixels, orange);
+            strip1.write(&pixels).await;
+
+            fill_pixels(&mut pixels, yellow);
+            strip2.write(&pixels).await;
+
+            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            strip3.write(&pixels).await;
+        }
+        "egg_tub" => {
+            fill_pixels_rgbw(&mut pixels, egg_tub_rgbw);
+            strip0.write(&pixels).await;
+            strip1.write(&pixels).await;
+            strip2.write(&pixels).await;
+            strip3.write(&pixels).await;
+        }
+        "zen_garden" => {
+            fill_pixels(&mut pixels, zen_garden_underlights);
+            strip0.write(&pixels).await;
+            strip1.write(&pixels).await;
+            strip2.write(&pixels).await;
+            strip3.write(&pixels).await;
+        }
+        "bird_bath" => {
+            fill_pixels(&mut pixels, bird_bath_leds);
+            strip0.write(&pixels).await;
+            strip1.write(&pixels).await;
+            strip2.write(&pixels).await;
+            strip3.write(&pixels).await;
+        }
+        _ => {
+            fill_pixels(&mut pixels, orange);
+            strip0.write(&pixels).await;
+
+            fill_pixels(&mut pixels, blue);
+            strip1.write(&pixels).await;
+
+            fill_pixels(&mut pixels, green);
+            strip2.write(&pixels).await;
+
+            fill_pixels(&mut pixels, purple);
+            strip3.write(&pixels).await;
+        }
     }
-    strip0.write(&pixels).await;
-    for i in &mut pixels {
-        i.r = 128;
-        i.g = 128;
-        i.b = 0;
-    }
-    strip1.write(&pixels).await;
-    for i in &mut pixels {
-        i.r = 0;
-        i.g = 128;
-        i.b = 0;
-    }
+
     strip2.write(&pixels).await;
-    for i in &mut pixels {
-        i.r = 0;
-        i.g = 0;
-        i.b = 128;
-    }
     strip3.write(&pixels).await;
 
     // Connct to w5500 peripheral
