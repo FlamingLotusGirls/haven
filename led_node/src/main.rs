@@ -29,19 +29,15 @@ use ws2812_control::{PioWs2812, PioWs2812Program};
 // CONFIG
 const PIXEL_COUNT: usize = 340;
 const PIXEL_BYTE_SIZE: usize = PIXEL_COUNT * 3;
-const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 13;
-const IP_ADDRESS_LAST_NUMBER: u8 = 20;
 // 192.168.13.20-40 // Haven unSCruz 2026
 // 169.254.3.10, 11, 20, 21, 30, 31, 40, 50, 60, 70 // Haven BM 2025
 // 169.254.9.91-99 // Sea of Dreams unSCruz 2025
 // 169.254.5.51 // Early testing
 
-// Set controller for default colors
+// Set controller for default colors, make sure to also set IP address.
 const CONTROLLER: Option<&str> = Some("cockatoo_1");
-// If you want to control it via env variable at compile time:
-// const CONTROLLER: Option<&str> = option_env!("CONTROLLER");
-
-// (You still have to set the IP_ADDRESS_LAST_NUMBER above, CONTROLLER only affects the default colors.)
+const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 13;
+const IP_ADDRESS_LAST_NUMBER: u8 = 20;
 
 /*
 "cockatoo_1"   192.168.13.20
@@ -55,6 +51,9 @@ const CONTROLLER: Option<&str> = Some("cockatoo_1");
 "zen_garden"   192.168.13.28
 "bird_bath"    192.168.13.29
 */
+
+// If you want to control CONTROLLER string via env variable at compile time:
+// const CONTROLLER: Option<&str> = option_env!("CONTROLLER");
 
 // Needed for tiny-artnet
 #[global_allocator]
@@ -126,6 +125,14 @@ fn fill_pixels_rgbw(pixels: &mut [RGB8], rgbw: [u8; 4]) {
         pixel.r = pixel_control::GAMMA[rgbw[hack_index % 4] as usize];
         pixel.g = pixel_control::GAMMA[rgbw[(hack_index + 1) % 4] as usize];
         pixel.b = pixel_control::GAMMA[rgbw[(hack_index + 2) % 4] as usize];
+    }
+}
+fn fill_pixels_rgbw_no_gamma(pixels: &mut [RGB8], rgbw: [u8; 4]) {
+    for (i, pixel) in pixels.iter_mut().enumerate() {
+        let hack_index = i * 3;
+        pixel.r = rgbw[hack_index % 4];
+        pixel.g = rgbw[(hack_index + 1) % 4];
+        pixel.b = rgbw[(hack_index + 2) % 4];
     }
 }
 
@@ -208,8 +215,6 @@ async fn main(spawner: Spawner) {
     );
 
     let mut pixels = [RGB8::default(); PIXEL_COUNT];
-
-    fill_pixels_rgbw(&mut pixels, [255, 10, 0, 100]); // egg tub
 
     // Warning, these will all be gamma-corrected
     let _red = [255, 74, 38];
@@ -351,7 +356,7 @@ async fn main(spawner: Spawner) {
             strip3.write(&pixels).await;
         }
         "egg_tub" => {
-            fill_pixels_rgbw(&mut pixels, egg_tub_rgbw);
+            fill_pixels_rgbw_no_gamma(&mut pixels, egg_tub_rgbw);
             strip0.write(&pixels).await;
             strip1.write(&pixels).await;
             strip2.write(&pixels).await;
