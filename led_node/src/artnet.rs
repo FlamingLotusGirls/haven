@@ -1,9 +1,13 @@
 use core::format_args as f;
+use ekv::Database;
 use embassy_net::IpAddress;
 use embassy_rp::{peripherals::UART0, pio};
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use smart_leds::RGB8;
 
-use crate::{ws2812_control::PioWs2812, UartWriter, PIXEL_BYTE_SIZE, PIXEL_COUNT};
+use crate::{
+    storage, ws2812_control::PioWs2812, UartWriter, OEM_CODE, PIXEL_BYTE_SIZE, PIXEL_COUNT,
+};
 
 pub async fn receive_artnet<P: pio::Instance>(
     s: &mut UartWriter<'_, UART0>,
@@ -12,6 +16,14 @@ pub async fn receive_artnet<P: pio::Instance>(
     mut strip1: PioWs2812<'_, P, 1, PIXEL_COUNT, PIXEL_BYTE_SIZE>,
     mut strip2: PioWs2812<'_, P, 2, PIXEL_COUNT, PIXEL_BYTE_SIZE>,
     mut strip3: PioWs2812<'_, P, 3, PIXEL_COUNT, PIXEL_BYTE_SIZE>,
+    db: &'static mut Database<
+        &'static mut storage::EkvFlashAdapter<
+            'static,
+            embassy_rp::peripherals::FLASH,
+            { storage::FLASH_SIZE },
+        >,
+        NoopRawMutex,
+    >,
 ) {
     use embassy_net::udp::{PacketMetadata, UdpSocket};
 
@@ -200,8 +212,66 @@ pub async fn receive_artnet<P: pio::Instance>(
                     }
                 }
             }
-            Ok(tiny_artnet::Art::Command(_)) => {
+            Ok(tiny_artnet::Art::Command(cmd)) => {
                 s.println(f!("received artnet: command"));
+
+                // Check OEM code - drop command if it doesn't match
+                // Convert the (char, char) tuple into a u16 for comparison
+                let received_oem_code = ((cmd.esta_manufacturer_code.0 as u16) << 8)
+                    | (cmd.esta_manufacturer_code.1 as u16);
+
+                if received_oem_code != OEM_CODE {
+                    s.println(f!(
+                        "Command OEM code mismatch: got {:04x}, expected {:04x}",
+                        received_oem_code,
+                        OEM_CODE
+                    ));
+                } else {
+                    // Parse command string from data
+                    if let Ok(cmd_str) = core::str::from_utf8(&cmd.data) {
+                        s.println(f!("Command string: {}", cmd_str));
+
+                        if cmd_str.starts_with("save_defaults") {
+                            // Flatten all 4 strips into sequential bytes
+                            let mut pixel_bytes = [0u8; PIXEL_BYTE_SIZE * 4];
+                            let mut byte_index = 0;
+
+                            for strip_idx in 0..4 {
+                                for pixel_idx in 0..PIXEL_COUNT {
+                                    pixel_bytes[byte_index] = pixels[strip_idx][pixel_idx].r;
+                                    pixel_bytes[byte_index + 1] = pixels[strip_idx][pixel_idx].g;
+                                    pixel_bytes[byte_index + 2] = pixels[strip_idx][pixel_idx].b;
+                                    byte_index += 3;
+                                }
+                            }
+
+                            // Write to database with key "default_pixels"
+                            s.println(f!(
+                                "Saving {} bytes of pixel data to database",
+                                pixel_bytes.len()
+                            ));
+
+                            // Use ekv write transaction to persist pixel data
+                            let mut tx = db.write_transaction().await;
+                            
+                            match tx.write(b"default_pixels", &pixel_bytes).await {
+                                Ok(_) => {
+                                    match tx.commit().await {
+                                        Ok(_) => {
+                                            s.println(f!("Successfully saved default pixels to database"));
+                                        }
+                                        Err(e) => {
+                                            s.println(f!("Error committing pixel data: {:?}", e));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    s.println(f!("Error writing pixel data: {:?}", e));
+                                }
+                            }
+                        }
+                    }
+                }
             }
             Ok(tiny_artnet::Art::Sync) => {
                 s.println(f!("received artnet: sync"));

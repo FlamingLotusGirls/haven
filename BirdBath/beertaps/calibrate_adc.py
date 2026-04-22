@@ -15,6 +15,8 @@ import busio
 import adafruit_ads1x15.ads1115 as ADS
 from adafruit_ads1x15.analog_in import AnalogIn
 
+from i2c_lock import I2CLock, I2CDeviceInUseError
+
 
 class ADCCalibrator:
     def __init__(self, config_file):
@@ -36,14 +38,25 @@ class ADCCalibrator:
     def setup_adc(self):
         """Initialize I2C and ADC with configured address"""
         try:
+            # Get and normalize address
+            address = self.config['address']
+            if isinstance(address, str):
+                address = int(address, 16)
+            self.address = address
+            
+            # Acquire I2C lock for this address
+            try:
+                self.i2c_lock = I2CLock(address)
+                self.i2c_lock.acquire()
+                print(f"Acquired I2C lock for address {hex(address)}")
+            except I2CDeviceInUseError as e:
+                print(str(e))
+                sys.exit(1)
+            
             # Create I2C bus
             self.i2c = busio.I2C(board.SCL, board.SDA)
             
             # Create ADS object with configured address
-            address = self.config['address']
-            if isinstance(address, str):
-                address = int(address, 16)
-            
             self.ads = ADS.ADS1115(self.i2c, address=address)
             self.ads.gain = self.config['gain']
             
@@ -63,6 +76,8 @@ class ADCCalibrator:
             
             print(f"ADC initialized at address {hex(address)}")
             
+        except I2CDeviceInUseError:
+            raise  # Re-raise to avoid masking with generic error
         except Exception as e:
             print(f"Error initializing ADC: {e}")
             sys.exit(1)

@@ -262,6 +262,68 @@ Or install manually:
 pip3 install adafruit-circuitpython-ads1x15 adafruit-blinka
 ```
 
+## I2C Device Locking
+
+### ⚠️ Important: Preventing Concurrent Access Issues
+
+The ADS1115 ADC chips communicate over I2C, and **multiple processes cannot safely access the same I2C device simultaneously**. If two programs try to read from the same ADC at the same time, you'll get corrupted/erroneous readings.
+
+### How Locking Works
+
+All main tools (`adc_reader.py`, `calibrate.py`, `calibrate_adc.py`) use a file-based locking mechanism:
+
+- **Lock files** are created in `/var/lock/` (e.g., `/var/lock/i2c-ads1115-0x48.lock`)
+- When a program starts using an ADC, it acquires an **exclusive lock** for that I2C address
+- If another program tries to access the same ADC, it will see a clear error message:
+
+```
+************************************************************
+*  ERROR: I2C DEVICE IN USE                                *
+************************************************************
+!
+!  ADS1115 ADC device at address 0x48 in use by another process.
+!  Currently held by: PID 1234 (adc_reader.py)
+!
+!  Stop that process first, e.g.:
+!    sudo systemctl stop adc-reader-*.service
+!
+************************************************************
+```
+
+### Common Scenario: Calibrating While Services Are Running
+
+If you want to calibrate a tap while the reader services are running:
+
+```bash
+# Stop all ADC reader services
+sudo systemctl stop adc-reader-1.service adc-reader-2.service adc-reader-3.service
+
+# Run calibration
+./calibrate.py
+
+# Restart services when done
+sudo systemctl start adc-reader-1.service adc-reader-2.service adc-reader-3.service
+```
+
+Or stop just the specific service for the ADC you want to calibrate:
+
+```bash
+# Stop only the service for ADC at 0x48 (config 1)
+sudo systemctl stop adc-reader-1.service
+
+# Calibrate taps on that ADC
+./calibrate.py --channel tap3
+
+# Restart when done
+sudo systemctl start adc-reader-1.service
+```
+
+### Test Files (ads1115/ directory)
+
+The test scripts in the `ads1115/` directory do **NOT** implement locking for simplicity. If you run them while services are active, you may get incorrect readings. Stop the services first if you need to run diagnostics.
+
+---
+
 ## Troubleshooting
 
 1. **Permission errors on I2C**: Add user to i2c group:

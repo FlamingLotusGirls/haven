@@ -4,5 +4,6 @@
     "adc_config_2.json",
     "adc_config_3.json"
   ],
-  "calibration_margin_percent": 5.0
+  "calibration_margin_percent": 5.0,
+  "endstop_sample_count": 20
 }
