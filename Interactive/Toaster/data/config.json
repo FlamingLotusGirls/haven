@@ -1,0 +1,8 @@
+{
+  "wifi_ssid_primary": "not",
+  "wifi_pass_primary": "set",
+  "wifi_ssid_secondary": "not",
+  "wifi_pass_secondary": "set",
+  "trigger_server": "192.168.13.12",
+  "trigger_port": 5002
+}`

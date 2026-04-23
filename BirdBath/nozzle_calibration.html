@@ -642,12 +642,12 @@
                 ctx.lineWidth = 2;
                 ctx.stroke();
                 
-                // Draw nozzle index
+                // Draw nozzle index (1-based)
                 ctx.fillStyle = selectedNozzle === nozzle.idx ? '#000' : '#fff';
                 ctx.font = 'bold 10px Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(nozzle.idx.toString(), screenX, screenY);
+                ctx.fillText((nozzle.idx + 1).toString(), screenX, screenY);
             });
             
             // Draw section lines
@@ -715,8 +715,8 @@
             selectedNozzle = nozzleId;
             sliderRestricted = false;
             
-            // Update UI
-            document.getElementById('panelTitle').textContent = `Nozzle ${nozzleId}`;
+            // Update UI (display 1-based nozzle number)
+            document.getElementById('panelTitle').textContent = `Nozzle ${nozzleId + 1}`;
             document.getElementById('controlPanel').classList.remove('hidden');
             
             // Reset slider restriction button

@@ -251,12 +251,12 @@
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 
-                // Draw nozzle index
+                // Draw nozzle index (1-based)
                 ctx.fillStyle = '#fff';
                 ctx.font = '10px Arial';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(nozzle.idx.toString(), screenX, screenY);
+                ctx.fillText((nozzle.idx + 1).toString(), screenX, screenY);
             });
             
             // Draw section lines
