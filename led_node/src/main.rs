@@ -275,7 +275,7 @@ async fn main(spawner: Spawner) {
             fill_pixels(&mut pixels, cockatoo_chandelier);
             strip2.write(&pixels).await;
 
-            fill_pixels(&mut pixels, purple);
+            fill_pixels(&mut pixels, cockatoo_button_panel);
             strip3.write(&pixels).await;
         }
         "cockatoo_3" => {
@@ -300,7 +300,7 @@ async fn main(spawner: Spawner) {
             fill_pixels(&mut pixels, cockatoo_body);
             strip1.write(&pixels).await;
 
-            fill_pixels(&mut pixels, cockatoo_button_panel);
+            fill_pixels(&mut pixels, purple);
             strip2.write(&pixels).await;
 
             fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
