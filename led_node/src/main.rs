@@ -232,13 +232,16 @@ async fn main(spawner: Spawner) {
     let cockatoo_chandelier = cyan;
     let cockatoo_eyes = purple;
     let cockatoo_body = cyan;
+    let cockatoo_button_panel = purple;
 
     let magpie_window_1 = yellow;
     let magpie_window_2 = blue;
     let magpie_eyes = blue;
+    let magpie_button_panel = cyan;
 
     let osprey_window_1 = orange;
     let osprey_window_2 = blue;
+    let osprey_button_panel = orange;
 
     let zen_garden_underlights = [19, 23, 127];
     let bird_bath_leds = purple;
@@ -272,7 +275,7 @@ async fn main(spawner: Spawner) {
             fill_pixels(&mut pixels, cockatoo_chandelier);
             strip2.write(&pixels).await;
 
-            fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
+            fill_pixels(&mut pixels, cockatoo_button_panel);
             strip3.write(&pixels).await;
         }
         "cockatoo_3" => {
@@ -323,7 +326,7 @@ async fn main(spawner: Spawner) {
             fill_pixels(&mut pixels, magpie_eyes);
             strip1.write(&pixels).await;
 
-            fill_pixels(&mut pixels, green);
+            fill_pixels(&mut pixels, magpie_button_panel);
             strip2.write(&pixels).await;
 
             fill_pixels_rgbw(&mut pixels, spotlights_rgbw);
@@ -346,7 +349,7 @@ async fn main(spawner: Spawner) {
             fill_pixels(&mut pixels, osprey_window_2);
             strip0.write(&pixels).await;
 
-            fill_pixels(&mut pixels, orange);
+            fill_pixels(&mut pixels, osprey_button_panel);
             strip1.write(&pixels).await;
 
             fill_pixels(&mut pixels, yellow);
