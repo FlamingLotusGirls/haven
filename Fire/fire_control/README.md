@@ -200,6 +200,23 @@ Base URL: `http://<host>:5001`
 | `GET`    | `/flame/patterns/<name>` | Get pattern status. Add `?full` for full pattern data. |
 | `POST`   | `/flame/patterns/<name>` | `active=[true\|false]` start/stop. `enabled=[true\|false]` enable/disable. |
 | `DELETE` | `/flame/patterns/<name>` | Delete pattern (persists to file). |
+| `POST`   | `/flame/patterns/loops/stop` | Stop all autonomously-looping patterns without a global pause. Useful on scene transitions. |
+
+### Poofer Mapping Management
+
+| Method   | Path | Description |
+|----------|------|-------------|
+| `GET`    | `/flame/poofer-mappings` | Return all current poofer→board-address mappings. |
+| `POST`   | `/flame/poofer-mappings` | Add or overwrite a mapping. Form params: `name`, `address`. |
+| `POST`   | `/flame/poofer-mappings/reset-defaults` | Reset all mappings to the built-in defaults. |
+| `PUT`    | `/flame/poofer-mappings/<name>` | Update the board address for a named poofer. Form param: `address`. |
+| `DELETE` | `/flame/poofer-mappings/<name>` | Remove a poofer mapping. |
+
+### Utilities
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/refresh-scene` | Force an immediate re-fetch of the active scene from the scene service. Returns `{"active_scene": "...", "refreshed": true\|false}`. |
 
 ---
 
@@ -242,25 +259,29 @@ Each mapping specifies:
 | Field | Description |
 |-------|-------------|
 | `trigger_name` | Full trigger name, e.g. `"ButtonDevice.Button"` |
-| `trigger_value` | *(optional)* Exact value to match, e.g. `"On"`. Omit to match any value. |
-| `trigger_value_min` / `trigger_value_max` | *(optional)* Range bounds for continuous (float) triggers. |
+| `scene` | **Required.** The scene this mapping belongs to. The mapping only fires when this scene is active. |
+| `trigger_value` | *(optional)* Exact value to match, e.g. `"On"` or `1`. Omit to match any value. |
+| `trigger_value_min` / `trigger_value_max` | *(optional)* Range bounds for continuous (float) triggers. Mutually exclusive with `trigger_value`. |
 | `flame_sequence` | Name of the flame sequence to run. |
-| `allow_override` | If `true`, restarts the sequence if it's already running. |
-| `scenes` | *(optional)* List of scene names. If non-empty, mapping only fires when the active scene is in this list. |
+| `allow_override` | If `true`, restarts the sequence if it's already running. Default `false`. |
 
 ### Trigger Integration API
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/trigger-integration/status` | Registration status, mapping count, active scene. |
-| `GET`  | `/trigger-integration/triggers` | List all triggers known to the Trigger Server. |
-| `GET`  | `/trigger-integration/scene` | List available scenes and the currently active scene. |
-| `GET`  | `/trigger-integration/scenes/active` | Currently active scene only. |
-| `GET`  | `/trigger-integration/mappings` | All trigger→flame mappings. |
-| `POST` | `/trigger-integration/mappings` | Create a new mapping (see fields above). |
-| `GET`  | `/trigger-integration/mappings/<id>` | Get specific mapping. |
-| `PUT`  | `/trigger-integration/mappings/<id>` | Update mapping. |
+| `GET`   | `/trigger-integration/status` | Registration status, mapping count, active scene, `scene_unconfigured` flag. |
+| `GET`   | `/trigger-integration/triggers` | List all triggers known to the Trigger Gateway. |
+| `GET`   | `/trigger-integration/scenes` | Available scenes, active scene, and configured scenes. |
+| `GET`   | `/trigger-integration/scenes/active` | Currently active scene only. |
+| `POST`  | `/trigger-integration/scenes` | Register a scene (create empty config). Form param: `scene_name`. |
+| `DELETE`| `/trigger-integration/scenes/<name>` | Delete a scene and all its mappings. |
+| `GET`   | `/trigger-integration/mappings` | All trigger→flame mappings (flat list with `scene` field). |
+| `POST`  | `/trigger-integration/mappings` | Create a mapping. **`scene` required.** See fields above. |
+| `POST`  | `/trigger-integration/mappings/copy-scene` | Copy all mappings from one scene to another. Form params: `from_scene`, `to_scene`. |
+| `GET`   | `/trigger-integration/mappings/<id>` | Get specific mapping. |
+| `PUT`   | `/trigger-integration/mappings/<id>` | Update mapping. Optional `scene` param moves mapping to a different scene. |
 | `DELETE`| `/trigger-integration/mappings/<id>` | Delete mapping. |
+| `POST`  | `/api/refresh-scene` | Force immediate re-fetch of active scene from scene service. |
 
 ---
 
