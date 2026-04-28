@@ -298,7 +298,16 @@ def poofer_id_valid(id):
     return id in poofermapping.mappings
 
 def patternName_valid(patternName):
-    return patternName in pattern_manager.getPatternNames()
+    # Patterns explicitly stored in pattern_manager (std_sequences.json etc.)
+    if patternName in pattern_manager.getPatternNames():
+        return True
+    # Synthetic single-poofer fire patterns: __<poofer_id>
+    # These are generated on-the-fly by pattern_manager.getPattern() for any
+    # poofer that exists in the current poofer_mappings.json, so we accept them
+    # here without requiring a hardcoded entry in std_sequences.json.
+    if patternName.startswith('__'):
+        return patternName[2:] in poofermapping.mappings
+    return False
 
 def param_valid(value, validValues):
     return value != None and (value.lower() in validValues)

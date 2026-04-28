@@ -12,6 +12,7 @@ class FlameController {
         this.initTabs();
         this.loadSystemStatus();
         this.loadPatterns();
+        this.loadPooferLayout();
         this.loadSceneStatus();
         // Poll scene status every 5 s so the header chip and warning banner
         // update automatically whenever the scene service changes the scene.
@@ -75,24 +76,23 @@ class FlameController {
         document.getElementById('refreshScene').addEventListener('click', () => this.refreshScene());
         document.getElementById('refreshPatterns').addEventListener('click', () => this.loadPatterns());
 
-        // Poofer toggle buttons
-        document.querySelectorAll('.toggle-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const pooferId = e.target.getAttribute('data-poofer');
-                this.togglePoofer(pooferId, e.target);
+        // Poofer fire/toggle buttons — delegated on the layout container so they
+        // work even after loadPooferLayout() rebuilds the DOM from the server.
+        // Fire buttons invoke the special '__PooferName' pattern for individual firing.
+        const pooferLayout = document.getElementById('poofer-visual-layout');
+        if (pooferLayout) {
+            pooferLayout.addEventListener('click', (e) => {
+                const fireBtn   = e.target.closest('.fire-btn');
+                const toggleBtn = e.target.closest('.toggle-btn');
+                if (fireBtn) {
+                    const pooferId = '__' + fireBtn.getAttribute('data-poofer');
+                    this.firePoofer(pooferId, fireBtn);
+                } else if (toggleBtn) {
+                    const pooferId = toggleBtn.getAttribute('data-poofer');
+                    this.togglePoofer(pooferId, toggleBtn);
+                }
             });
-        });
-
-        // Poofer fire buttons
-        document.querySelectorAll('.fire-btn').forEach(btn => {
-            // Minor hack - the API to fire the poofer actually invokes a special
-            // sequence just for that poofer. Said sequence has '__' in front of the poofer 
-            // name
-            btn.addEventListener('click', (e) => {
-                const pooferId = '__' + e.target.getAttribute('data-poofer');
-                this.firePoofer(pooferId, e.target);
-            });
-        });
+        }
 
         // Sequence buttons
         document.querySelectorAll('.sequence-btn').forEach(btn => {
@@ -678,7 +678,32 @@ class FlameController {
         }
     }
 
-    showPatternModal(pattern = null) {
+    async showPatternModal(pattern = null) {
+        // Fetch the live poofer list from the server every time the modal opens.
+        // If this fails we refuse to open the modal rather than silently showing
+        // stale / hardcoded data.
+        let pooferIds;
+        try {
+            const resp = await fetch(`${this.baseUrl}/flame/poofer-mappings`);
+            if (!resp.ok) {
+                throw new Error(`Server returned HTTP ${resp.status}`);
+            }
+            const mappings = await resp.json();
+            pooferIds = Object.keys(mappings).sort();
+            if (pooferIds.length === 0) {
+                throw new Error('Poofer mappings list is empty');
+            }
+        } catch (err) {
+            this.showMessage(
+                `Cannot open pattern editor: failed to load poofer mappings — ${err.message}`,
+                'error'
+            );
+            return;
+        }
+
+        // Store for use by addEventRow() and addEventRowIfValid()
+        this.currentPooferIds = pooferIds;
+
         const modal = document.getElementById('patternModal');
         const title = document.getElementById('modalTitle');
         const nameInput = document.getElementById('patternName');
@@ -734,22 +759,18 @@ class FlameController {
             }
         }
         
-        // If all existing events have poofers selected, add a new row
+        // If all existing events have poofers selected, add a new row.
+        // this.currentPooferIds was populated by showPatternModal() from the server.
         this.addEventRow();
     }
 
     addEventRow(eventData = null) {
         const eventsContainer = document.getElementById('eventsContainer');
         const eventIndex = eventsContainer.children.length;
-        
-        // Valid poofer IDs from poofermapping.py
-        const validPooferIds = [
-            'C1', 'C2', 'C3', 'C4', 'C5', 'C6',
-            'C_HAIR1', 'C_HAIR2', 'C_HAIR3', 'C_HAIR4',
-            'O_EYES', 'O_WINGS', 'O1', 'O2', 'O3',
-            'M_TAIL', 'M1', 'M2', 'M3',
-            'P1', 'P2', 'P3', 'P4'
-        ];
+
+        // Use the live poofer IDs fetched from the server by showPatternModal().
+        // this.currentPooferIds must be populated before this method is called.
+        const validPooferIds = this.currentPooferIds;
 
         const eventRow = document.createElement('div');
         eventRow.className = 'event-row';
@@ -2093,6 +2114,101 @@ class FlameController {
         }
     }
 
+
+    // =========================================================================
+    // Poofer Visual Layout
+    // =========================================================================
+
+    /**
+     * Fetch /flame/poofer-mappings and build the Individual Poofers section
+     * dynamically. Poofers are bucketed by their first letter:
+     *   C → Cockatoo, O → Osprey, M → Magpie, P → Perch, anything else → Other.
+     *
+     * Display label: if the name contains an underscore (e.g. C_HAIR1) the part
+     * after the first underscore is used (HAIR1); otherwise the full name is shown.
+     *
+     * Fire buttons invoke the '__PooferName' system pattern; toggle buttons call
+     * the enable/disable API. Both are handled via event delegation set up in
+     * bindEvents() so this method can safely replace innerHTML without re-binding.
+     */
+    async loadPooferLayout() {
+        const container = document.getElementById('poofer-visual-layout');
+        if (!container) return;
+
+        let mappings;
+        try {
+            const resp = await fetch(`${this.baseUrl}/flame/poofer-mappings`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            mappings = await resp.json();
+        } catch (err) {
+            container.innerHTML =
+                `<div class="error">Failed to load poofer layout: ${this.escapeHtml(err.message)}</div>`;
+            return;
+        }
+
+        // Section definitions — order controls display order.
+        const SECTIONS = [
+            { prefix: 'C', label: '🦜 Cockatoo', cssClass: 'cockatoo-group' },
+            { prefix: 'O', label: '🦅 Osprey',   cssClass: 'osprey-group'   },
+            { prefix: 'M', label: '🐦‍⬛ Magpie',  cssClass: 'magpie-group'   },
+            { prefix: 'P', label: '🪶 Perch',    cssClass: 'perch-group'    },
+        ];
+
+        // Group poofer names by their first letter (case-insensitive).
+        const groups = {};
+        SECTIONS.forEach(s => { groups[s.prefix] = []; });
+        groups['_other'] = [];
+
+        Object.keys(mappings).sort().forEach(name => {
+            const key = name[0].toUpperCase();
+            if (Object.prototype.hasOwnProperty.call(groups, key)) {
+                groups[key].push(name);
+            } else {
+                groups['_other'].push(name);
+            }
+        });
+
+        // Label to display inside each poofer card:
+        // strip the leading 'PREFIX_' portion if an underscore is present.
+        const pooferLabel = name => {
+            const idx = name.indexOf('_');
+            return idx !== -1 ? name.slice(idx + 1) : name;
+        };
+
+        // Build one poofer-item card (matching the CSS structure used by styles.css).
+        const buildItem = name => `
+            <div class="poofer-item" data-poofer="${name}">
+                <div class="fire-icon">🔥</div>
+                <span class="poofer-label">${this.escapeHtml(pooferLabel(name))}</span>
+                <div class="poofer-controls">
+                    <button class="fire-btn btn-fire" data-poofer="${name}">🔥 Fire</button>
+                    <button class="toggle-btn" data-poofer="${name}">Disable</button>
+                    <span class="status-dot"></span>
+                </div>
+            </div>`;
+
+        let html = '<div class="sculpture-layout">';
+
+        SECTIONS.forEach(({ prefix, label, cssClass }) => {
+            const poofers = groups[prefix];
+            if (poofers.length === 0) return;
+            html += `<div class="poofer-group ${cssClass}">`;
+            html += `<h3>${label}</h3>`;
+            html += `<div class="poofer-grid">`;
+            poofers.forEach(name => { html += buildItem(name); });
+            html += `</div></div>`;
+        });
+
+        if (groups['_other'].length > 0) {
+            html += `<div class="poofer-group other-group"><h3>🔧 Other</h3>`;
+            html += `<div class="poofer-grid">`;
+            groups['_other'].forEach(name => { html += buildItem(name); });
+            html += `</div></div>`;
+        }
+
+        html += '</div>';
+        container.innerHTML = html;
+    }
 
     escapeHtml(text) {
         const div = document.createElement('div');

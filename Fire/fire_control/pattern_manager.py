@@ -107,6 +107,19 @@ def getPattern(patternName):
         if pattern["name"] == patternName:
             returnPattern = pattern
     patternLock.release()
+
+    # Synthesise a virtual single-poofer fire pattern for any __<poofer_id>
+    # name whose poofer_id is present in the current mappings.
+    # This means poofers added to poofer_mappings.json automatically get a
+    # working fire pattern without needing a matching entry in std_sequences.json.
+    if returnPattern is None and patternName.startswith('__'):
+        poofer_id = patternName[2:]
+        if poofer_id in poofermapping.mappings:
+            returnPattern = {
+                "name": patternName,
+                "modifiable": False,
+                "events": [{"ids": [poofer_id], "startTime": 0, "duration": 0.5}]
+            }
     return returnPattern
 
 def getAllPatterns():
