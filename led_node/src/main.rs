@@ -34,23 +34,25 @@ const PIXEL_BYTE_SIZE: usize = PIXEL_COUNT * 3;
 // 169.254.9.91-99 // Sea of Dreams unSCruz 2025
 // 169.254.5.51 // Early testing
 
-// Set controller for default colors, make sure to also set IP address.
-const CONTROLLER: Option<&str> = Some("cockatoo_1");
-const IP_ADDRESS_SECOND_TO_LAST_NUMBER: u8 = 13;
-const IP_ADDRESS_LAST_NUMBER: u8 = 20;
+// Set controller for default colors, IP address is now determined by match statement
+const CONTROLLER: Option<&str> = Some("bird_bath");
 
-/*
-"cockatoo_1"   192.168.13.20
-"cockatoo_2"   192.168.13.21
-"cockatoo_3"   192.168.13.22
-"magpie_1"     192.168.13.23
-"magpie_2"     192.168.13.24
-"osprey_1"     192.168.13.25
-"osprey_2"     192.168.13.26
-"egg_tub"      192.168.13.27
-"zen_garden"   192.168.13.28
-"bird_bath"    192.168.13.29
-*/
+/// Returns the last two octets of the IP address based on CONTROLLER
+fn get_ip_address_last_two_octets() -> (u8, u8) {
+    match CONTROLLER.unwrap_or("") {
+        "cockatoo_1" => (13, 20),
+        "cockatoo_2" => (13, 21),
+        "cockatoo_3" => (13, 22),
+        "magpie_1" => (13, 23),
+        "magpie_2" => (13, 24),
+        "osprey_1" => (13, 25),
+        "osprey_2" => (13, 26),
+        "egg_tub" => (13, 27),
+        "zen_garden" => (13, 28),
+        "bird_bath" => (13, 29),
+        _ => (13, 20), // Default to cockatoo_1
+    }
+}
 
 // If you want to control CONTROLLER string via env variable at compile time:
 // const CONTROLLER: Option<&str> = option_env!("CONTROLLER");
@@ -394,9 +396,6 @@ async fn main(spawner: Spawner) {
         }
     }
 
-    strip2.write(&pixels).await;
-    strip3.write(&pixels).await;
-
     // Connct to w5500 peripheral
     let mut spi_cfg = SpiConfig::default();
     spi_cfg.frequency = 50_000_000;
@@ -407,14 +406,8 @@ async fn main(spawner: Spawner) {
     let w5500_reset = Output::new(p.PIN_20, Level::High);
 
     // Set up ethernet task
-    let mac_addr = [
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        IP_ADDRESS_SECOND_TO_LAST_NUMBER,
-        IP_ADDRESS_LAST_NUMBER,
-    ];
+    let (ip_second_to_last, ip_last) = get_ip_address_last_two_octets();
+    let mac_addr = [0x00, 0x00, 0x00, 0x00, ip_second_to_last, ip_last];
     static STATE: StaticCell<embassy_net_wiznet::State<8, 8>> = StaticCell::new();
     let state = STATE.init(embassy_net_wiznet::State::<8, 8>::new());
     let (w5500_device, ethernet_task_runner) = embassy_net_wiznet::new(
@@ -442,21 +435,13 @@ async fn main(spawner: Spawner) {
         //     Ipv4Address::new(
         //         169,
         //         254,
-        //         IP_ADDRESS_SECOND_TO_LAST_NUMBER,
-        //         IP_ADDRESS_LAST_NUMBER,
+        //         ip_second_to_last,
+        //         ip_last,
         //     ),
         //     16,
         // ),
         // Managed ethernet switch GS308T or router
-        address: Ipv4Cidr::new(
-            Ipv4Address::new(
-                192,
-                168,
-                IP_ADDRESS_SECOND_TO_LAST_NUMBER,
-                IP_ADDRESS_LAST_NUMBER,
-            ),
-            24,
-        ),
+        address: Ipv4Cidr::new(Ipv4Address::new(192, 168, ip_second_to_last, ip_last), 24),
         dns_servers: heapless::Vec::new(),
         gateway: None,
     });
