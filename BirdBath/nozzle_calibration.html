@@ -15,6 +15,64 @@
             flex-direction: column;
             align-items: center;
         }
+
+        .mode-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #1e2a3a;
+            border-bottom: 2px solid #2980b9;
+            padding: 8px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 1000;
+            font-size: 14px;
+        }
+
+        .mode-banner .mode-label {
+            color: #5ba8d8;
+            font-weight: bold;
+        }
+
+        .mode-banner .mode-indicator {
+            background: #2980b9;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 13px;
+            margin-left: 8px;
+        }
+
+        .mode-banner .switch-btn {
+            background: #555;
+            color: #ccc;
+            border: 1px solid #777;
+            padding: 5px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .mode-banner .switch-btn:hover {
+            background: #777;
+            color: white;
+        }
+
+        .mode-banner .switch-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .mode-banner .status-msg {
+            font-size: 12px;
+            color: #aaa;
+            margin-left: 12px;
+            min-width: 160px;
+        }
         
         .header {
             background: #2a2a2a;
@@ -340,12 +398,26 @@
     </style>
 </head>
 <body>
-    <div class="header">
+    <div class="mode-banner">
+        <div>
+            <span class="mode-label">Mode:</span>
+            <span class="mode-indicator">CALIBRATE</span>
+        </div>
+        <div style="display:flex;align-items:center;">
+            <span class="status-msg" id="switchStatus"></span>
+            <button class="switch-btn" id="switchModeBtn"
+                    onclick="switchMode('run')">
+                Switch to Run
+            </button>
+        </div>
+    </div>
+
+    <div class="header" style="margin-top: 52px;">
         <h1>Nozzle Calibration Interface</h1>
         <div class="controls">
             <div class="control-group">
-                <label for="serverUrl">Calibration Server:</label>
-                <input type="text" id="serverUrl" value="http://10.0.0.9:8081">
+                <label>Server:</label>
+                <span id="serverUrl" style="color:#aaa;font-size:13px;"></span>
             </div>
             <div class="control-group">
                 <span id="serverStatus" class="server-status server-disconnected">Disconnected</span>
@@ -456,7 +528,9 @@
     </div>
 
     <script>
-        let serverUrl = 'http://localhost:8081';
+        // Derive the server base URL from wherever this page was loaded from,
+        // so it works regardless of hostname or port.
+        let serverUrl = window.location.origin;
         let selectedNozzle = null;
         let nozzles = [];
         let currentValue = 0;
@@ -505,13 +579,12 @@
         
         // Initialize the interface
         document.addEventListener('DOMContentLoaded', function() {
-            updateServerUrl();
+            // Show derived server URL in UI
+            document.getElementById('serverUrl').textContent = serverUrl;
             generateNozzles();
             drawVisualization();
             loadAllCalibrations();
-            
-            // Update server URL when changed
-            document.getElementById('serverUrl').addEventListener('change', updateServerUrl);
+            checkServerConnection();
             
             // Add click handler to canvas
             canvas.addEventListener('click', handleCanvasClick);
@@ -744,23 +817,24 @@
             drawVisualization();
         }
         
-        function updateServerUrl() {
-            serverUrl = document.getElementById('serverUrl').value;
-            checkServerConnection();
-        }
-        
         async function checkServerConnection() {
             const statusElement = document.getElementById('serverStatus');
             try {
-                const response = await fetch(`${serverUrl}/nozzle/0/calibration`);
+                const response = await fetch('/mode');
                 if (response.ok) {
-                    statusElement.textContent = 'Connected';
-                    statusElement.className = 'server-status server-connected';
+                    const data = await response.json();
+                    if (data.mode === 'calibrate') {
+                        statusElement.textContent = 'Calibrate Mode';
+                        statusElement.className = 'server-status server-connected';
+                    } else {
+                        statusElement.textContent = 'Wrong Mode: ' + data.mode;
+                        statusElement.className = 'server-status server-disconnected';
+                    }
                 } else {
-                    throw new Error('Server responded with error');
+                    throw new Error('Server error: ' + response.status);
                 }
             } catch (error) {
-                statusElement.textContent = 'Disconnected';
+                statusElement.textContent = 'Unreachable';
                 statusElement.className = 'server-status server-disconnected';
             }
         }
@@ -998,6 +1072,31 @@
             } else if (currentValue > nozzle.calibration.high) {
                 slider.value = nozzle.calibration.high;
                 updateSliderValue(nozzle.calibration.high);
+            }
+        }
+
+        async function switchMode(targetMode) {
+            const btn = document.getElementById('switchModeBtn');
+            const statusMsg = document.getElementById('switchStatus');
+            btn.disabled = true;
+            statusMsg.textContent = 'Switching\u2026';
+            try {
+                const response = await fetch('/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: targetMode })
+                });
+                if (response.ok) {
+                    statusMsg.textContent = 'Reloading\u2026';
+                    setTimeout(() => window.location.reload(), 1000);
+                } else {
+                    const err = await response.json();
+                    statusMsg.textContent = 'Error: ' + (err.message || response.status);
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                statusMsg.textContent = 'Error: ' + e.message;
+                btn.disabled = false;
             }
         }
     </script>

@@ -13,9 +13,53 @@ import json
 import struct
 import pickle
 import numpy as np
-from typing import List, Dict, Any
+import threading
+import socket
+import re
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse
+from typing import List, Dict, Any, Optional, Tuple
 from pattern_runner import PatternRunner
 from pattern_driver import PatternDriver
+
+
+# ---------------------------------------------------------------------------
+# Mode persistence
+# ---------------------------------------------------------------------------
+
+STATE_FILE = 'birdbath_state.json'
+DEFAULT_MODE = 'run'
+HTTP_PORT = 8080
+VALID_MODES = {'run', 'calibrate'}
+
+# ArtNet packet type codes (must match controller firmware)
+ARTNET_FRAME = 0
+ARTNET_NOZZLE = 1
+
+
+def load_persisted_mode() -> str:
+    """Load the last saved mode from birdbath_state.json, defaulting to 'run'."""
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, 'r') as f:
+                data = json.load(f)
+            mode = data.get('mode', DEFAULT_MODE)
+            if mode in VALID_MODES:
+                return mode
+        except Exception as e:
+            print(f"Warning: could not read {STATE_FILE}: {e}")
+    return DEFAULT_MODE
+
+
+def save_persisted_mode(mode: str):
+    """Atomically persist the current mode to birdbath_state.json."""
+    try:
+        tmp = STATE_FILE + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump({'mode': mode}, f)
+        os.replace(tmp, STATE_FILE)
+    except Exception as e:
+        print(f"Warning: could not save mode to {STATE_FILE}: {e}")
 
 
 def pattern_driver_process(conn):
@@ -235,38 +279,96 @@ class PipeReader:
             self.pipe_fd = None
 
 
-def write_nozzle_data(final_result: np.ndarray, data_file: str = 'nozzle_data.json'):
+# ---------------------------------------------------------------------------
+# AppState - shared mutable state, thread-safe
+# ---------------------------------------------------------------------------
+
+class AppState:
     """
-    Write nozzle data to JSON file for web server consumption.
-    
-    Args:
-        final_result (np.ndarray): 36-element array of nozzle values
-        data_file (str): Path to JSON file to write
+    Holds all shared state that must be accessed by the frame loop thread,
+    the HTTP server thread, and the mode-transition worker thread.
+    All mutable fields are protected by self.lock.
     """
-    try:
-        # Convert numpy array to Python list for JSON serialization
-        nozzle_values = final_result.tolist()
-        
-        # Write to temporary file first, then rename for atomic operation
-        temp_file = data_file + '.tmp'
-        with open(temp_file, 'w') as f:
-            json.dump(nozzle_values, f)
-        
-        # Atomic rename to avoid partial reads
-        os.rename(temp_file, data_file)
-        
-    except Exception as e:
-        # Clean up temp file if it exists
-        temp_file = data_file + '.tmp'
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except:
-                pass
-        raise e
+
+    def __init__(self, initial_mode: str):
+        self.lock = threading.Lock()
+        self._mode: str = initial_mode
+        # Latest frame data written by the frame loop, read by GET /nozzles
+        self._latest_frame: np.ndarray = np.zeros(36, dtype=np.float64)
+        # Subprocess handles for run mode
+        self._driver_process = None
+        self._driver_conn = None
+        self._pattern_processes: list = []
+        self._pattern_pipes: list = []
+        # Event that tells the frame loop to exit
+        self._stop_run_event = threading.Event()
+        # Mode transition request
+        self._transition_target: Optional[str] = None
+        self._transition_event = threading.Event()
+
+    @property
+    def mode(self) -> str:
+        with self.lock:
+            return self._mode
+
+    def _set_mode_unsafe(self, mode: str):
+        """Set mode; caller must already hold self.lock."""
+        self._mode = mode
+
+    def update_latest_frame(self, frame: np.ndarray):
+        with self.lock:
+            np.copyto(self._latest_frame, frame)
+
+    def get_latest_frame(self) -> np.ndarray:
+        with self.lock:
+            return self._latest_frame.copy()
+
+    def store_run_handles(self, driver_process, driver_conn,
+                          pattern_processes, pattern_pipes):
+        with self.lock:
+            self._driver_process = driver_process
+            self._driver_conn = driver_conn
+            self._pattern_processes = pattern_processes
+            self._pattern_pipes = pattern_pipes
+
+    def clear_run_handles(self):
+        with self.lock:
+            self._driver_process = None
+            self._driver_conn = None
+            self._pattern_processes = []
+            self._pattern_pipes = []
+
+    def get_run_handles(self):
+        with self.lock:
+            return (self._driver_process, self._driver_conn,
+                    list(self._pattern_processes), list(self._pattern_pipes))
+
+    def request_run_stop(self):
+        self._stop_run_event.set()
+
+    def clear_run_stop(self):
+        self._stop_run_event.clear()
+
+    def is_run_stop_requested(self) -> bool:
+        return self._stop_run_event.is_set()
+
+    def request_transition(self, target_mode: str):
+        """Ask the transition worker to switch to target_mode."""
+        with self.lock:
+            self._transition_target = target_mode
+        self._transition_event.set()
+
+    def wait_for_transition_request(self, timeout: float = 1.0) -> Optional[str]:
+        """Block until a transition is requested or timeout expires."""
+        self._transition_event.wait(timeout)
+        self._transition_event.clear()
+        with self.lock:
+            target = self._transition_target
+            self._transition_target = None
+        return target
 
 
-def load_configuration(config_file: str) -> tuple[List[Dict[str, str]], float]:
+def load_configuration(config_file: str) -> Tuple[List[Dict[str, str]], float]:
     """
     Load pattern configuration from a YAML file.
     
@@ -342,6 +444,365 @@ def load_configuration(config_file: str) -> tuple[List[Dict[str, str]], float]:
         raise yaml.YAMLError(f"Invalid YAML in configuration file: {str(e)}")
 
 
+# ---------------------------------------------------------------------------
+# Driver config helpers (calibration)
+# ---------------------------------------------------------------------------
+
+def load_driver_config(config_file: str = 'driver_config.yaml') -> dict:
+    """Load driver_config.yaml, creating a default file if it doesn't exist."""
+    if not os.path.exists(config_file):
+        default = {
+            'controllers': [{'ip': '10.0.0.4'}, {'ip': '10.0.0.5'}, {'ip': '10.0.0.6'}],
+            'ranges': [[0, 255]] * 36,
+        }
+        _save_driver_config(default, config_file)
+        return default
+    with open(config_file, 'r') as f:
+        return yaml.safe_load(f)
+
+
+def _save_driver_config(config: dict, config_file: str = 'driver_config.yaml'):
+    """Atomically write driver_config.yaml."""
+    tmp = config_file + '.tmp'
+    with open(tmp, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False, indent=2)
+    os.replace(tmp, config_file)
+
+
+# ---------------------------------------------------------------------------
+# Run mode lifecycle helpers
+# ---------------------------------------------------------------------------
+
+def start_run_mode(app_state: AppState, config_file: str, daemon: bool = False):
+    """
+    Load pattern config, start PatternDriver + PatternRunner subprocesses, store
+    handles in app_state.  Returns (patterns, frame_interval).
+    """
+    patterns, frame_interval = load_configuration(config_file)
+    descriptions = [f"{p['pattern']}({p['input_channel']})" for p in patterns]
+    print(f"Starting run mode: {', '.join(descriptions)}, interval {frame_interval*1000:.1f}ms")
+
+    driver_parent_conn, driver_child_conn = multiprocessing.Pipe()
+    driver_process = multiprocessing.Process(
+        target=pattern_driver_process, args=(driver_child_conn,), name="PatternDriver"
+    )
+    if daemon:
+        driver_process.daemon = True
+    driver_process.start()
+    driver_child_conn.close()
+    print(f"Started PatternDriver (PID {driver_process.pid})")
+
+    processes, pipes = [], []
+    for i, pcfg in enumerate(patterns):
+        parent_conn, child_conn = multiprocessing.Pipe()
+        proc = multiprocessing.Process(
+            target=pattern_process,
+            args=(pcfg['pattern'], i, child_conn),
+            name=f"Pattern-{i}-{pcfg['pattern']}",
+        )
+        if daemon:
+            proc.daemon = True
+        proc.start()
+        child_conn.close()
+        processes.append((proc, pcfg['pattern'], pcfg['input_channel'], i))
+        pipes.append(parent_conn)
+        print(f"Started Pattern-{i} ({pcfg['pattern']}, PID {proc.pid})")
+
+    app_state.store_run_handles(driver_process, driver_parent_conn, processes, pipes)
+    return patterns, frame_interval
+
+
+def stop_run_mode(app_state: AppState):
+    """Signal the frame loop to exit and shut down all run-mode subprocesses."""
+    app_state.request_run_stop()
+    driver_proc, driver_conn, processes, pipes = app_state.get_run_handles()
+
+    for target_conn in ([driver_conn] if driver_conn else []) + pipes:
+        try:
+            target_conn.send('shutdown')
+        except Exception:
+            pass
+    for target_conn in ([driver_conn] if driver_conn else []) + pipes:
+        try:
+            target_conn.close()
+        except Exception:
+            pass
+
+    all_procs = ([driver_proc] if driver_proc else []) + [p for p, *_ in processes]
+    for proc in all_procs:
+        if proc and proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=5)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+
+    app_state.clear_run_handles()
+    app_state.clear_run_stop()
+    print("Run mode subprocesses stopped.")
+
+
+# ---------------------------------------------------------------------------
+# Calibration helpers (ArtNet + UDP status)
+# ---------------------------------------------------------------------------
+
+def query_controller_status(controller_ip: str, timeout: float = 0.25) -> Optional[list]:
+    """Send a UDP STATUS request; return list of 12 raw values or None on timeout."""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        try:
+            sock.sendto(b"STATUS", (controller_ip, 7777))
+            data, _ = sock.recvfrom(1024)
+            values = list(data)
+            if len(values) < 12:
+                values.extend([0] * (12 - len(values)))
+            return values[:12]
+        finally:
+            sock.close()
+    except socket.timeout:
+        return None
+    except Exception as e:
+        print(f"Error querying controller {controller_ip}: {e}")
+        return None
+
+
+def send_nozzle_position_artnet(nozzle_id: int, raw_value: float, controllers: list) -> bool:
+    """Send a single-nozzle ArtNet position command to the correct controller."""
+    controller_idx = nozzle_id // 12
+    channel_in_controller = nozzle_id % 12
+    if controller_idx >= len(controllers):
+        print(f"Controller index {controller_idx} out of range for nozzle {nozzle_id}")
+        return False
+    controller_ip = controllers[controller_idx]['ip']
+
+    header = b"Art-Net\x00"
+    opcode = struct.pack("<H", 0x5000)
+    proto = struct.pack(">H", 14)
+    universe = struct.pack("<H", controller_idx)
+    payload = bytearray([ARTNET_NOZZLE, channel_in_controller, 0, max(0, min(255, int(raw_value)))])
+    data_length = struct.pack(">H", len(payload))
+    packet = header + opcode + proto + b"\x00\x00" + universe + data_length + bytes(payload)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.sendto(packet, (controller_ip, 6454))
+        return True
+    except Exception as e:
+        print(f"Error sending ArtNet for nozzle {nozzle_id}: {e}")
+        return False
+    finally:
+        sock.close()
+
+
+# ---------------------------------------------------------------------------
+# HTTP request handler
+# ---------------------------------------------------------------------------
+
+class BirdbathHTTPHandler(BaseHTTPRequestHandler):
+    """
+    Mode-aware HTTP handler.  app_state and driver_config_file are injected
+    as class attributes by make_handler_class().
+    """
+    app_state: AppState = None
+    driver_config_file: str = 'driver_config.yaml'
+    _controllers_cache: Optional[list] = None
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        mode = self.app_state.mode
+
+        if path in ('/', '/index.html'):
+            self._serve_page(mode)
+        elif path == '/nozzles':
+            self._serve_run_nozzles() if mode == 'run' else self._serve_calibrate_nozzles()
+        elif path == '/mode':
+            self._send_json(200, {'mode': mode})
+        else:
+            m = re.match(r'^/nozzle/(\d+)/calibration$', path)
+            if m:
+                self._get_nozzle_calibration(int(m.group(1)))
+            else:
+                self._send_404()
+
+    def do_PUT(self):
+        path = urlparse(self.path).path
+        m = re.match(r'^/nozzle/(\d+)/calibration/(high|low)$', path)
+        if m:
+            self._set_nozzle_calibration(int(m.group(1)), m.group(2))
+            return
+        m = re.match(r'^/nozzle/(\d+)/position$', path)
+        if m:
+            self._set_nozzle_position(int(m.group(1)))
+            return
+        self._send_404()
+
+    def do_POST(self):
+        if urlparse(self.path).path == '/mode':
+            self._handle_mode_switch()
+        else:
+            self._send_404()
+
+    def _serve_page(self, mode: str):
+        filename = 'nozzle_visualization.html' if mode == 'run' else 'nozzle_calibration.html'
+        if os.path.exists(filename):
+            with open(filename, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(content.encode('utf-8'))
+        else:
+            self._send_json(404, {'error': f'Page not found: {filename}'})
+
+    def _serve_run_nozzles(self):
+        self._send_json(200, self.app_state.get_latest_frame().tolist())
+
+    def _serve_calibrate_nozzles(self):
+        controllers = self._get_controllers()
+        all_values, controller_responses = [], {}
+        for idx, ctrl in enumerate(controllers):
+            ip = ctrl['ip']
+            values = query_controller_status(ip)
+            if values is not None:
+                controller_responses[str(idx)] = {'ip': ip, 'status': 'success', 'values': values}
+                all_values.extend(values)
+            else:
+                controller_responses[str(idx)] = {'ip': ip, 'status': 'timeout', 'values': [0]*12}
+                all_values.extend([0]*12)
+        all_values = (all_values + [0]*36)[:36]
+        self._send_json(200, {'nozzle_count': 36, 'values': all_values,
+                              'controllers': controller_responses, 'timestamp': time.time()})
+
+    def _handle_mode_switch(self):
+        body = self._read_json_body()
+        if body is None:
+            return
+        target = body.get('mode')
+        if target not in VALID_MODES:
+            self._send_json(400, {'error': f'mode must be one of {sorted(VALID_MODES)}'})
+            return
+        self.app_state.request_transition(target)
+        self._send_json(200, {'status': 'ok', 'requested_mode': target})
+
+    def _get_nozzle_calibration(self, nozzle_id: int):
+        if not self._require_calibrate_mode():
+            return
+        if not self._validate_nozzle_id(nozzle_id):
+            return
+        config = load_driver_config(self.driver_config_file)
+        rng = config.get('ranges', [[0,255]]*36)[nozzle_id]
+        self._send_json(200, {'nozzle_id': nozzle_id, 'calibration': {'low': rng[0], 'high': rng[1]}})
+
+    def _set_nozzle_calibration(self, nozzle_id: int, endpoint: str):
+        if not self._require_calibrate_mode():
+            return
+        if not self._validate_nozzle_id(nozzle_id):
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        try:
+            value = int(body.get('value', 0 if endpoint == 'low' else 255))
+        except (ValueError, TypeError):
+            self._send_json(400, {'error': 'value must be an integer'}); return
+        if not (0 <= value <= 255):
+            self._send_json(400, {'error': 'value must be between 0 and 255'}); return
+        config = load_driver_config(self.driver_config_file)
+        if 'ranges' not in config:
+            config['ranges'] = [[0, 255]] * 36
+        while len(config['ranges']) <= nozzle_id:
+            config['ranges'].append([0, 255])
+        rng = config['ranges'][nozzle_id] if isinstance(config['ranges'][nozzle_id], list) else [0, 255]
+        config['ranges'][nozzle_id] = [rng[0], value] if endpoint == 'high' else [value, rng[1]]
+        _save_driver_config(config, self.driver_config_file)
+        self._send_json(200, {'nozzle_id': nozzle_id, 'range': config['ranges'][nozzle_id]})
+
+    def _set_nozzle_position(self, nozzle_id: int):
+        if not self._require_calibrate_mode():
+            return
+        if not self._validate_nozzle_id(nozzle_id):
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        try:
+            raw_value = int(body.get('value', 0))
+        except (ValueError, TypeError):
+            self._send_json(400, {'error': 'value must be an integer'}); return
+        if not (0 <= raw_value <= 255):
+            self._send_json(400, {'error': 'value must be between 0 and 255'}); return
+        ok = send_nozzle_position_artnet(nozzle_id, float(raw_value), self._get_controllers())
+        if ok:
+            self._send_json(200, {'nozzle_id': nozzle_id, 'raw_value': raw_value})
+        else:
+            self._send_json(500, {'error': f'Failed to send ArtNet to nozzle {nozzle_id}'})
+
+    def _require_calibrate_mode(self) -> bool:
+        if self.app_state.mode != 'calibrate':
+            self._send_json(409, {'error': 'Only available in calibrate mode'})
+            return False
+        return True
+
+    def _validate_nozzle_id(self, nozzle_id: int) -> bool:
+        if not (0 <= nozzle_id < 36):
+            self._send_json(400, {'error': f'Nozzle ID {nozzle_id} must be 0-35'})
+            return False
+        return True
+
+    def _get_controllers(self) -> list:
+        if BirdbathHTTPHandler._controllers_cache is None:
+            try:
+                BirdbathHTTPHandler._controllers_cache = load_driver_config(
+                    self.driver_config_file).get('controllers',
+                    [{'ip': '10.0.0.4'}, {'ip': '10.0.0.5'}, {'ip': '10.0.0.6'}])
+            except Exception:
+                BirdbathHTTPHandler._controllers_cache = [
+                    {'ip': '10.0.0.4'}, {'ip': '10.0.0.5'}, {'ip': '10.0.0.6'}]
+        return BirdbathHTTPHandler._controllers_cache
+
+    def _read_json_body(self) -> Optional[dict]:
+        length = int(self.headers.get('Content-Length', 0))
+        if length == 0:
+            self._send_json(400, {'error': 'Request body required'}); return None
+        try:
+            return json.loads(self.rfile.read(length).decode('utf-8'))
+        except (json.JSONDecodeError, ValueError) as e:
+            self._send_json(400, {'error': f'Invalid JSON: {e}'}); return None
+
+    def _send_json(self, code: int, data):
+        payload = json.dumps(data, indent=2).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def _send_404(self):
+        self._send_json(404, {'error': 'Not Found'})
+
+    def log_message(self, fmt, *args):
+        print(f"[HTTP {time.strftime('%H:%M:%S')}] {fmt % args}")
+
+
+def make_handler_class(app_state: AppState, driver_config_file: str):
+    """Return a BirdbathHTTPHandler subclass with class-level state injected."""
+    class Handler(BirdbathHTTPHandler):
+        pass
+    Handler.app_state = app_state
+    Handler.driver_config_file = driver_config_file
+    return Handler
+
+
+def start_http_server(app_state: AppState, port: int, driver_config_file: str) -> HTTPServer:
+    """Start the HTTP server on a daemon thread; return the server object."""
+    server = HTTPServer(('0.0.0.0', port), make_handler_class(app_state, driver_config_file))
+    threading.Thread(target=server.serve_forever, daemon=True, name="HTTPServer").start()
+    print(f"HTTP server started on http://0.0.0.0:{port}/")
+    return server
+
+
 def main():
     """
     Main function that creates processes to run patterns from a configuration file.
@@ -350,15 +811,42 @@ def main():
     parser.add_argument('--config', '-c', 
                        default='patterns.yaml',
                        help='Configuration file containing pattern names (default: patterns.yaml)')
+    parser.add_argument('--driver-config',
+                        default='driver_config.yaml',
+                        help='Driver/calibration config file (default: driver_config.yaml)')
+    parser.add_argument('--mode', choices=list(VALID_MODES), default=None,
+                        help='Override startup mode (run|calibrate); persists as new default')
+    parser.add_argument('--port', type=int, default=HTTP_PORT,
+                        help=f'HTTP server port (default: {HTTP_PORT})')
     parser.add_argument('--daemon', '-d', 
                        action='store_true',
                        help='Run pattern processes as daemons')
     
     args = parser.parse_args()
-    
-    print(f"BirdBathController starting with configuration: {args.config}")
+
+    # Mode persistence and HTTP server (always running)
+    if args.mode is not None:
+        save_persisted_mode(args.mode)
+    current_mode = args.mode or load_persisted_mode()
+    app_state = AppState(current_mode)
+    http_server = start_http_server(app_state, args.port, args.driver_config)
+
+    print(f"BirdBathController starting. Mode: '{current_mode}'. Web UI: http://localhost:{args.port}/")
     
     try:
+        # If starting in calibrate mode, skip subprocess setup entirely
+        if current_mode == 'calibrate':
+            print("Calibrate mode active. Use the web UI to switch to run mode.")
+            while True:
+                next_mode = app_state.wait_for_transition_request(timeout=1.0)
+                if next_mode == 'run':
+                    with app_state.lock:
+                        app_state._set_mode_unsafe('run')
+                    save_persisted_mode('run')
+                    break
+            main()  # NB - this weirdness is temporary. Will put all code in an if block for the mode.
+            return
+
         # Load pattern configuration
         patterns, frame_interval = load_configuration(args.config)
         
@@ -442,6 +930,11 @@ def main():
         pipe_reader = PipeReader('/tmp/beertap_pipe')
         pipe_opened = pipe_reader.open_pipe()
         
+        # Store handles so stop_run_mode() can shut them down on a mode switch
+        app_state.store_run_handles(driver_process, driver_parent_conn, processes, pipes)
+
+        pending_mode = None
+
         try:
             # Main frame generation loop with configurable timing
             print(f"\nStarting frame generation loop ({frame_interval*1000:.1f}ms intervals). Press Ctrl+C to stop.")
@@ -494,16 +987,19 @@ def main():
                 except Exception as e:
                     print(f"Error sending frame data to pattern driver: {str(e)}")
                 
-                # Write nozzle data to JSON file for web server
-                try:
-                    write_nozzle_data(final_result)
-                except Exception as e:
-                    print(f"Error writing nozzle data to file: {str(e)}")
+                # Store frame data in shared state for HTTP /nozzles endpoint
+                app_state.update_latest_frame(final_result)
                 
                 frame_number += 1
                 if frame_number % 100 == 0:  # Print status every 100 frames
                     print(f"Main process - Frame {frame_number}: Summed {len(valid_results)} results, range [{final_result.min():.3f}, {final_result.max():.3f}]")
                 
+                # Check for a mode-switch request from the web UI
+                pending_mode = app_state.wait_for_transition_request(timeout=0)
+                if pending_mode and pending_mode != 'run':
+                    print(f"Mode switch requested: run -> {pending_mode}")
+                    break
+
                 # Maintain configured timing
                 frame_duration = time.time() - frame_start
                 sleep_time = max(0, frame_interval - frame_duration)
@@ -547,7 +1043,7 @@ def main():
                 driver_process.terminate()
             
             # Terminate all pattern processes
-            for process, pattern_name, process_id in processes:
+            for process, pattern_name, input_channel, process_id in processes:
                 if process.is_alive():
                     print(f"Terminating process {process_id} ({pattern_name})...")
                     process.terminate()
@@ -561,7 +1057,7 @@ def main():
                     driver_process.join()
             
             # Wait for pattern processes to terminate
-            for process, pattern_name, process_id in processes:
+            for process, pattern_name, input_channel, process_id in processes:
                 if process.is_alive():
                     process.join(timeout=5)
                     
@@ -571,7 +1067,30 @@ def main():
                         process.join()
             
             print("All processes terminated")
-            
+            return  # Ctrl+C path exits here; fall-through only on mode switch
+
+        # --- Mode-switch path: frame loop exited via break, not Ctrl+C ---
+        if pending_mode:
+            pipe_reader.close_pipe()
+            stop_run_mode(app_state)  # shuts down driver + pattern subprocesses
+
+            with app_state.lock:
+                app_state._set_mode_unsafe(pending_mode)
+            save_persisted_mode(pending_mode)
+
+            if pending_mode == 'calibrate':
+                print("Calibrate mode active. Use the web UI to switch back to run mode.")
+                while True:
+                    next_mode = app_state.wait_for_transition_request(timeout=1.0)
+                    if next_mode == 'run':
+                        with app_state.lock:
+                            app_state._set_mode_unsafe('run')
+                        save_persisted_mode('run')
+                        break
+                # Restart the run loop (re-enters main() with updated persisted mode)
+                main()
+                return
+
     except FileNotFoundError as e:
         print(f"Configuration file error: {str(e)}")
         sys.exit(1)

@@ -15,6 +15,64 @@
             flex-direction: column;
             align-items: center;
         }
+
+        .mode-banner {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #1e3a1e;
+            border-bottom: 2px solid #28a745;
+            padding: 8px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 1000;
+            font-size: 14px;
+        }
+
+        .mode-banner .mode-label {
+            color: #5dba85;
+            font-weight: bold;
+        }
+
+        .mode-banner .mode-indicator {
+            background: #28a745;
+            color: white;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 13px;
+            margin-left: 8px;
+        }
+
+        .mode-banner .switch-btn {
+            background: #555;
+            color: #ccc;
+            border: 1px solid #777;
+            padding: 5px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        .mode-banner .switch-btn:hover {
+            background: #777;
+            color: white;
+        }
+
+        .mode-banner .switch-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .mode-banner .status-msg {
+            font-size: 12px;
+            color: #aaa;
+            margin-left: 12px;
+            min-width: 160px;
+        }
         
         h1 {
             margin-bottom: 20px;
@@ -51,7 +109,21 @@
     </style>
 </head>
 <body>
-    <h1>Nozzle Layout Visualization</h1>
+    <div class="mode-banner">
+        <div>
+            <span class="mode-label">Mode:</span>
+            <span class="mode-indicator">RUN</span>
+        </div>
+        <div style="display:flex;align-items:center;">
+            <span class="status-msg" id="switchStatus"></span>
+            <button class="switch-btn" id="switchModeBtn"
+                    onclick="switchMode('calibrate')">
+                Switch to Calibrate
+            </button>
+        </div>
+    </div>
+
+    <h1 style="margin-top: 52px;">Nozzle Layout Visualization</h1>
     <canvas id="canvas" width="800" height="800"></canvas>
     
     <div class="info">
@@ -324,6 +396,31 @@
         
         console.log('Generated', nozzles.length, 'nozzles');
         console.log('Live visualization started - fetching data every 100ms');
+
+        async function switchMode(targetMode) {
+            const btn = document.getElementById('switchModeBtn');
+            const statusMsg = document.getElementById('switchStatus');
+            btn.disabled = true;
+            statusMsg.textContent = 'Switching…';
+            try {
+                const response = await fetch('/mode', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: targetMode })
+                });
+                if (response.ok) {
+                    statusMsg.textContent = 'Reloading…';
+                    setTimeout(() => window.location.reload(), 1000);
+                } else {
+                    const err = await response.json();
+                    statusMsg.textContent = 'Error: ' + (err.message || response.status);
+                    btn.disabled = false;
+                }
+            } catch (e) {
+                statusMsg.textContent = 'Error: ' + e.message;
+                btn.disabled = false;
+            }
+        }
     </script>
 </body>
 </html>
