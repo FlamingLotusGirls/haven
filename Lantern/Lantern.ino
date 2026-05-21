@@ -3,17 +3,20 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <Matter.h>
-#include <MatterEndPoints/MatterOnOffLight.h>
+#include <MatterEndPoints/MatterDimmableLight.h>
 #include "lantern_webserver.h"
+
+#define LED_4WATT
 
 // Preferences object for NVS
 Preferences preferences;
 
 // Matter Light device
-MatterOnOffLight matterLight;
+MatterDimmableLight matterDimmableLight;
 
 // Light power state
-bool lightPower = true;  // Light is on by default
+bool onOff = true;  // Light is on by default
+uint8_t brightness = 255;  // Light is full bright by default
 
 // WiFi Configuration - UPDATE THESE WITH YOUR CREDENTIALS
 String ssid;
@@ -23,7 +26,11 @@ String password;
 #define LED_PIN     D0         // GPIO pin connected to the WS2812 LED data line
 #define NUM_LEDS    1          // Number of LEDs (single LED)
 #define LED_TYPE    WS2812B    // LED type
+#ifdef LED_4WATT
+#define COLOR_ORDER RGB        // Color order for Adafruit 4W neopixel
+#else
 #define COLOR_ORDER GRB        // Color order for WS2812B
+#endif
 
 // Runtime configurable variables (HSV: Hue 0-255, Saturation 0-255, Value 0-255)
 uint8_t colorA_hue = 160;      // Blue hue (default)
@@ -55,26 +62,42 @@ void onMatterEvent(matterEvent_t eventType, const chip::DeviceLayer::ChipDeviceE
 }
 
 // Matter callback - called when on/off state changes
-bool onMatterLightChange(bool state) {
-  lightPower = state;
-  Serial.printf("Matter: Light turned %s\n", state ? "ON" : "OFF");
+bool onMatterDimmableLightChange(bool newOnOff, uint8_t newBrightness) {
+  Serial.printf("Matter: Light turned %s\n", newOnOff ? "ON" : "OFF");
   
+  preferences.begin("lantern", false);  // false = read-write mode
+
   // Save power state to NVS
-  preferences.begin("lantern", false);
-  preferences.putBool("lightPower", lightPower);
-  preferences.end();
-  
-  // If turning off, set LED to black immediately
-  if (!lightPower) {
-    leds[0] = CRGB::Black;
-    FastLED.show();
+  if (newOnOff != onOff) {
+    preferences.putBool("lightPower", newOnOff);
+    onOff = newOnOff;
+    
+    // If turning off, set LED to black immediately
+    if (!newOnOff) {
+      leds[0] = CRGB::Black;
+      FastLED.show();
+    }
   }
+  if (newBrightness != brightness){
+    preferences.putUChar("brightness", newBrightness);
+  #ifdef LED_4WATT
+    FastLED.setBrightness(newBrightness/2);
+  #else
+    FastLED.setBrightness(newBrightness);
+  #endif
+    brightness = newBrightness;
+  }
+
+  preferences.end();
+
   return true;
 }
 
 void setup() {
   Serial.begin(115200);
+
   Serial.println("\nWS2812 Color Transition with Web Server Starting...");
+
   
   // Load settings from NVS
   preferences.begin("lantern", false);  // false = read-write mode
@@ -97,7 +120,8 @@ void setup() {
   password = preferences.getString("password", "set");
   
   // Load light power state (use default if not set)
-  lightPower = preferences.getBool("lightPower", true);
+  onOff = preferences.getBool("lightPower", true);
+  brightness = preferences.getUChar("brightness", 255);
   
   preferences.end();
   
@@ -107,9 +131,13 @@ void setup() {
   Serial.printf("  Transition Time: %lu ms\n", transitionTime);
   
   // Initialize FastLED
-  FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS);
-  FastLED.setBrightness(255);
-  
+  FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS).setRgbw(RgbwDefault());
+  #ifdef LED_4WATT
+  FastLED.setBrightness(brightness/2);  // halving the brightness b/c eyes...
+  #else
+  FastLED.setBrightness(brightness);
+  #endif
+
   // Start with COLOR_A (HSV)
   leds[0] = CHSV(colorA_hue, colorA_sat, colorA_val);
   FastLED.show();
@@ -171,11 +199,11 @@ void setup() {
   
   // Initialize Matter
   Matter.onEvent(onMatterEvent);
-  matterLight.begin();
+  matterDimmableLight.begin();
   Matter.begin();
 
-  matterLight.setOnOff(lightPower);
-  matterLight.onChange(onMatterLightChange);
+  matterDimmableLight.setOnOff(onOff);
+  matterDimmableLight.onChange(onMatterDimmableLightChange);
   
   Serial.println("\n============================================");
   Serial.println("Matter: Initialized as On/Off Light");
@@ -200,11 +228,11 @@ void setup() {
   // Serial.println(Matter.getQRCodeURL());
   Serial.println();
   
-  Serial.printf("Device State: %s\n", lightPower ? "ON" : "OFF");
+  Serial.printf("Device State: %s\n", onOff ? "ON" : "OFF");
   Serial.println("============================================\n");
   
   // If light is off, keep LED off
-  if (!lightPower) {
+  if (!onOff) {
     leds[0] = CRGB::Black;
     FastLED.show();
   }
@@ -223,7 +251,7 @@ void loop() {
   unsigned long currentMillis = millis();
   
   // Only update LED if light is powered on
-  if (!lightPower) {
+  if (!onOff) {
     // Light is off - ensure LED stays off
     leds[0] = CRGB::Black;
     FastLED.show();

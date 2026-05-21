@@ -202,30 +202,30 @@ class PipeReader:
     def __init__(self, pipe_path='/tmp/adc_pipe_main'):
         self.pipe_path = pipe_path
         self.buffer = b''
-        
+
         # Open pipe for reading
         self.pipe_fd = os.open(pipe_path, os.O_RDONLY)
-    
+
     def read_messages(self):
         """Read and yield messages from the pipe"""
         # Read available data
         chunk = os.read(self.pipe_fd, 4096)
         if not chunk:
             return
-        
+
         self.buffer += chunk
-        
+
         # Process complete messages from buffer
         while len(self.buffer) >= 4:
             # Read length header
             length = struct.unpack('>I', self.buffer[:4])[0]
-            
+
             # Check if we have the complete message
             if len(self.buffer) >= 4 + length:
                 # Extract and unpickle the message
                 pickled_data = self.buffer[4:4+length]
                 self.buffer = self.buffer[4+length:]
-                
+
                 data = pickle.loads(pickled_data)
                 yield data
             else:
@@ -243,7 +243,7 @@ for message in reader.read_messages():
 
 The system expects ADS1115 ADCs connected via I2C:
 - Controller 1: Address 0x48
-- Controller 2: Address 0x49  
+- Controller 2: Address 0x49
 - Controller 3: Address 0x4a
 
 Each controller reads two differential channels:

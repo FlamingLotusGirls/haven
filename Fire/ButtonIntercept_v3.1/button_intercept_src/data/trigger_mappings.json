@@ -1,6 +1,6 @@
 {
   "trigger_server": {
-    "url": "192.168.1.100",
+    "url": "192.168.13.12",
     "port": 5002
   },
   "device_name": "ButtonIntercept",

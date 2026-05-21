@@ -8,12 +8,12 @@ erroneous readings due to interleaved I2C transactions.
 
 Usage:
     from i2c_lock import I2CLock, I2CDeviceInUseError
-    
+
     # As a context manager (recommended):
     with I2CLock(0x48) as lock:
         # Access I2C device at address 0x48
         ...
-    
+
     # Or manually:
     lock = I2CLock(0x48)
     lock.acquire()  # Raises I2CDeviceInUseError if already locked
@@ -37,17 +37,17 @@ class I2CDeviceInUseError(Exception):
 class I2CLock:
     """
     File-based lock for I2C device access.
-    
+
     Uses flock() for automatic cleanup on process exit/crash.
     Lock files are stored in /var/lock/ with format: i2c-ads1115-0xXX.lock
     """
-    
+
     LOCK_DIR = "/var/lock"
-    
+
     def __init__(self, address, blocking=False):
         """
         Initialize lock for an I2C address.
-        
+
         Args:
             address: I2C address as int (0x48) or string ("0x48")
             blocking: If True, wait for lock. If False, fail immediately if locked.
@@ -57,15 +57,15 @@ class I2CLock:
             self.address = int(address, 16)
         else:
             self.address = address
-        
+
         self.blocking = blocking
         self.lock_file = os.path.join(
-            self.LOCK_DIR, 
+            self.LOCK_DIR,
             f"i2c-ads1115-{hex(self.address)}.lock"
         )
         self.fd = None
         self._locked = False
-    
+
     def _get_lock_holder_info(self):
         """
         Try to read info about the process holding the lock.
@@ -89,7 +89,7 @@ class I2CLock:
         except (IOError, OSError):
             pass
         return "unknown process"
-    
+
     def _write_lock_info(self):
         """Write info about this process to the lock file."""
         try:
@@ -100,29 +100,29 @@ class I2CLock:
                     cmd = f.read().strip()
             except IOError:
                 cmd = "unknown"
-            
+
             # Write to lock file (we already have the lock, so this is safe)
             os.lseek(self.fd, 0, os.SEEK_SET)
             os.ftruncate(self.fd, 0)
             os.write(self.fd, f"{pid}:{cmd}\n".encode())
         except (IOError, OSError):
             pass  # Non-critical, locking still works
-    
+
     def acquire(self):
         """
         Acquire the lock.
-        
+
         Raises:
             I2CDeviceInUseError: If device is locked and blocking=False
             OSError: If lock file cannot be created (permissions, etc.)
         """
         if self._locked:
             return  # Already locked by us
-        
+
         try:
             # Create lock file (or open existing)
             self.fd = os.open(
-                self.lock_file, 
+                self.lock_file,
                 os.O_RDWR | os.O_CREAT,
                 0o644
             )
@@ -133,21 +133,21 @@ class I2CLock:
                     f"Check permissions on {self.LOCK_DIR} or run with sudo."
                 ) from e
             raise
-        
+
         try:
             # Try to acquire exclusive lock
             flags = fcntl.LOCK_EX
             if not self.blocking:
                 flags |= fcntl.LOCK_NB
-            
+
             fcntl.flock(self.fd, flags)
-            
+
         except OSError as e:
             if e.errno in (errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK):
                 # Lock is held by another process
                 os.close(self.fd)
                 self.fd = None
-                
+
                 holder = self._get_lock_holder_info()
                 raise I2CDeviceInUseError(
                     f"\n"
@@ -164,10 +164,10 @@ class I2CLock:
                     f"************************************************************\n"
                 ) from None
             raise
-        
+
         self._locked = True
         self._write_lock_info()
-    
+
     def release(self):
         """Release the lock."""
         if self.fd is not None:
@@ -181,17 +181,17 @@ class I2CLock:
                 pass
             self.fd = None
         self._locked = False
-    
+
     def __enter__(self):
         """Context manager entry."""
         self.acquire()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.release()
         return False  # Don't suppress exceptions
-    
+
     def __del__(self):
         """Destructor - ensure lock is released."""
         self.release()
@@ -200,24 +200,24 @@ class I2CLock:
 class MultiI2CLock:
     """
     Lock multiple I2C addresses at once.
-    
+
     Usage:
         with MultiI2CLock([0x48, 0x49, 0x4a]) as locks:
             # All three devices are now locked
             ...
     """
-    
+
     def __init__(self, addresses, blocking=False):
         """
         Initialize locks for multiple I2C addresses.
-        
+
         Args:
             addresses: List of I2C addresses
             blocking: If True, wait for locks. If False, fail immediately.
         """
         self.locks = [I2CLock(addr, blocking) for addr in addresses]
         self._acquired = []
-    
+
     def acquire(self):
         """Acquire all locks. If any fails, release those already acquired."""
         try:
@@ -230,17 +230,17 @@ class MultiI2CLock:
                 lock.release()
             self._acquired = []
             raise
-    
+
     def release(self):
         """Release all locks."""
         for lock in self._acquired:
             lock.release()
         self._acquired = []
-    
+
     def __enter__(self):
         self.acquire()
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
         return False
@@ -250,10 +250,10 @@ class MultiI2CLock:
 def check_i2c_available(address):
     """
     Check if an I2C address is available (not locked).
-    
+
     Args:
         address: I2C address to check
-        
+
     Returns:
         True if available, False if in use
     """
@@ -269,14 +269,14 @@ def check_i2c_available(address):
 if __name__ == "__main__":
     # Quick test
     import sys
-    
+
     if len(sys.argv) > 1:
         addr = int(sys.argv[1], 16) if sys.argv[1].startswith('0x') else int(sys.argv[1])
     else:
         addr = 0x48
-    
+
     print(f"Testing I2C lock for address {hex(addr)}...")
-    
+
     try:
         with I2CLock(addr) as lock:
             print(f"✓ Successfully acquired lock for {hex(addr)}")
@@ -288,5 +288,5 @@ if __name__ == "__main__":
         sys.exit(1)
     except KeyboardInterrupt:
         print("\n  Lock released early")
-    
+
     print("✓ Lock released")

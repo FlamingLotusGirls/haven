@@ -15,11 +15,16 @@
 #include <ArduinoJson.h>
 #include <AsyncTCP.h>
 #include <AsyncHTTPRequest_Generic.h>   // https://github.com/khoih-prog/AsyncHTTPRequest_Generic
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <string>   // std::string used in Program::m_name (available in ESP32 GCC toolchain)
+#include "DeviceTriggers.h"
 #else
 #include <stdio.h>
 #include <cstdint>
 #include <chrono>
 #include <cstring>
+#include <string>   // std::string used in Program::m_name
 #include <unistd.h>
 #endif // ARDUINO
 
@@ -87,6 +92,14 @@ const uint16_t gpioInputMask[] = {0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020
 const int NUM_INPUT_CHANNELS = 12;
 const int NUM_OUTPUT_CHANNELS = 8;
 static constexpr int INVALID_OUTPUT_CHANNEL = -1;
+
+#ifdef ARDUINO
+// Trigger system globals
+TriggerDevice* triggerDevice = nullptr;
+std::shared_ptr<ButtonTrigger> channelTriggers[NUM_INPUT_CHANNELS];
+bool triggerEnabled[NUM_INPUT_CHANNELS];
+String triggerNames[NUM_INPUT_CHANNELS];
+#endif
 
 // Forward declarations
 void initMillis();
@@ -202,12 +215,14 @@ class Program {
     }
 
     const char* GetName() {
-      return m_name;
+      return m_name.c_str();
     }
 
   private:
     ChannelSequence** m_sequences;
-    const char* m_name;
+    // std::string owns a copy of the name, preventing the dangling-pointer bug
+    // that occurs when Program is constructed from a local String's c_str().
+    std::string m_name;
     int m_totalPlayTime;
 };
 
@@ -270,7 +285,7 @@ ChannelSequence chaseFourthOnFour(3, 1500, poof);
 ChannelSequence chaseFifthOnFive(4, 2000, poof);
 ChannelSequence chaseSixthOnSix(5, 2500, poof);
 ChannelSequence chaseSeventhOnSeven(6, 3000, poof);
-ChannelSequence chaseEigthOnEight(7, 3500, poof);
+ChannelSequence chaseEighthOnEight(7, 3500, poof);
 
 ChannelSequence poof1(0, 0, poof);
 ChannelSequence poof2(1, 0, poof);
@@ -325,7 +340,10 @@ struct NamedSequence {
 struct NamedProgram {
   String name;
   Program* program;
-  NamedProgram() : program(nullptr) {}
+  // Owned ChannelSequence objects so loadPatternsFromFile() can free them on reload.
+  ChannelSequence** channelSeqs;   // the null-terminated pointer array passed to Program
+  int channelSeqCount;             // number of live (non-null) entries in channelSeqs
+  NamedProgram() : program(nullptr), channelSeqs(nullptr), channelSeqCount(0) {}
 };
 
 const int MAX_DYNAMIC_SEQUENCES = 16;
@@ -385,6 +403,17 @@ public:
 
   void setProgram(Program* program) {
     if (bFollowerOnly) {
+      return;
+    }
+    // nullptr means "reset to Follower immediately".  Never defer this through the
+    // m_nextProgram queuing path — the caller (loadPatternsFromFile) will delete the
+    // old Program object right after this call, so m_program must not be left pointing
+    // at it in any state, including PLAYBACK.
+    if (program == nullptr) {
+      m_program     = nullptr;
+      m_nextProgram = nullptr;
+      m_mode  = ChannelControllerMode::Follower;
+      m_state = WAIT_FOR_UNPRESS;  // require button release before any new press is accepted
       return;
     }
     if (program != m_program) {
@@ -509,6 +538,12 @@ int ChannelController::s_inputChannel = 0;
 
 ChannelController controllers[NUM_INPUT_CHANNELS];
 
+#ifdef ARDUINO
+// Mutex to protect controllers[] from concurrent access between the main loop
+// (Core 1) and the ESPAsyncWebServer task (which calls setProgram via loadPatternsFromFile).
+SemaphoreHandle_t g_controllersMutex = NULL;
+#endif
+
 // Global channel aliases - initialized with default names, loaded from file
 #ifdef ARDUINO
 String channelAlias[8] = {
@@ -555,9 +590,11 @@ uint16_t readGPIOInput() {
 
 int8_t readDIPSwitch(uint16_t gpioRawData) {
 #ifdef PCA_9555
-  return ((gpioRawData & 0x1000 >> 10) +
-           (gpioRawData & 0x2000 >> 12) + 
-           (gpioRawData & 0x4000 >> 14));
+  // NB: parentheses are critical here — & has lower precedence than >>, so without
+  // them the shifts apply to the constants, not to the masked result.
+  return (((gpioRawData & 0x1000) >> 10) +
+          ((gpioRawData & 0x2000) >> 12) + 
+          ((gpioRawData & 0x4000) >> 14));
 #else 
   return 0; // XXX Not sure what outputs I'd use for the dip switch with an ESP DEV Board
 #endif 
@@ -760,8 +797,16 @@ void readInputButtonStates(uint16_t gpioRawData, int curTimeMs) {
       Serial.print("ButtonChange on channel ");
       Serial.print(i);
       Serial.println(oldButtonState ? ",now UNPRESSED" : ",now PRESSED");
+      
+      // TRIGGER INTEGRATION: Send trigger event if enabled
+      #ifdef ARDUINO
+      if (triggerEnabled[i] && channelTriggers[i] != nullptr) {
+        channelTriggers[i]->CheckForEventAndSend(inputButtonStates[i]);
+        Serial.print("Trigger sent for channel ");
+        Serial.println(i);
+      }
+      #endif
     }
-    // XXX if button state change, send udp packet to ... somewhere
   }
 }
 
@@ -827,6 +872,12 @@ void buttonLoop() {
   }
   readInputButtonStates(gpioRawData, curTimeMs);
 
+  // Take the mutex before accessing controllers[]. The web server task may call
+  // setProgram() concurrently; portMAX_DELAY is safe here because the web handler
+  // holds the mutex only for the brief setProgram() calls.
+#ifdef ARDUINO
+  if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
+#endif
   for (int i=0; i<NUM_INPUT_CHANNELS; i++) {
     controllers[i].update(inputButtonStates[i], curTimeMs);
     PlayState* playState = controllers[i].getPlayState();
@@ -840,6 +891,9 @@ void buttonLoop() {
       playState++;
     }
   }
+#ifdef ARDUINO
+  if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
+#endif
 
   for (int k=0; k<NUM_OUTPUT_CHANNELS; k++) {
     if (consolidatedOutput[k] != consolidatedOutputDebugCopy[k]) {
@@ -918,6 +972,39 @@ void loadChannelsFromFile() {
 
 // Dynamic sequence and pattern loading from JSON files
 void loadPatternsFromFile() {
+  // Free any data allocated by a previous call so we don't leak on hot-reload.
+  // Reset controllers to follower mode first so they don't hold dangling Program pointers.
+  if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
+  for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+    controllers[i].setProgram(nullptr);
+  }
+  if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
+
+  // Free dynamic sequences (Section[] arrays)
+  for (int i = 0; i < dynamicSequenceCount; i++) {
+    delete[] dynamicSequences[i].sections;
+    dynamicSequences[i].sections = nullptr;
+    dynamicSequences[i].name = "";
+  }
+  dynamicSequenceCount = 0;
+
+  // Free dynamic programs: each ChannelSequence*, the pointer array, and the Program
+  for (int i = 0; i < dynamicProgramCount; i++) {
+    if (dynamicPrograms[i].channelSeqs != nullptr) {
+      for (int j = 0; j < dynamicPrograms[i].channelSeqCount; j++) {
+        delete dynamicPrograms[i].channelSeqs[j];
+        dynamicPrograms[i].channelSeqs[j] = nullptr;
+      }
+      delete[] dynamicPrograms[i].channelSeqs;
+      dynamicPrograms[i].channelSeqs = nullptr;
+      dynamicPrograms[i].channelSeqCount = 0;
+    }
+    delete dynamicPrograms[i].program;
+    dynamicPrograms[i].program = nullptr;
+    dynamicPrograms[i].name = "";
+  }
+  dynamicProgramCount = 0;
+
   if (!LittleFS.exists("/patterns.json")) {
     Serial.println("patterns.json not found, using hardcoded patterns");
     return;
@@ -955,10 +1042,12 @@ void loadPatternsFromFile() {
       String sequenceName = sequencePair.key().c_str();
       JsonArray sequenceData = sequencePair.value().as<JsonArray>();
       
-      // Count sections to allocate memory
-      int sectionCount = sequenceData.size();  
-      Section* dynamicSection = new Section[sectionCount];
-      
+      // Count sections to allocate memory.
+      // Allocate sectionCount + 1 so we can always write the {false, -1} sentinel that
+      // Program's constructor and GetButtonStates() require to know where the array ends.
+      int sectionCount = sequenceData.size();
+      Section* dynamicSection = new Section[sectionCount + 1];
+
       int index = 0;
       for (JsonArray::iterator it = sequenceData.begin(); it != sequenceData.end(); ++it) {
         JsonArray sectionData = *it;
@@ -968,7 +1057,9 @@ void loadPatternsFromFile() {
           index++;
         }
       }
-      
+      // Write the required sentinel so Program's traversal loops terminate safely.
+      dynamicSection[index] = {false, -1};
+
       // Store in the dynamic sequences array
       dynamicSequences[dynamicSequenceCount].name = sequenceName;
       dynamicSequences[dynamicSequenceCount].sections = dynamicSection;
@@ -992,9 +1083,11 @@ void loadPatternsFromFile() {
       Serial.print("Loading pattern: ");
       Serial.println(patternName);
       
-      // Create channel sequences for this pattern
+      // Create channel sequences for this pattern.
+      // Named channelSeqArray (not dynamicSequences) to avoid shadowing the global
+      // NamedSequence dynamicSequences[] array declared above.
       int sequenceCount = patternData.size();
-      ChannelSequence** dynamicSequences = new ChannelSequence*[sequenceCount + 1];
+      ChannelSequence** channelSeqArray = new ChannelSequence*[sequenceCount + 1];
       
       int index = 0;
       for (JsonArray::iterator it = patternData.begin(); it != patternData.end(); ++it) {
@@ -1030,7 +1123,7 @@ void loadPatternsFromFile() {
             
             if (sequenceSection != nullptr) {
               ChannelSequence* channelSeq = new ChannelSequence(channelIndex, delayMs, sequenceSection);
-              dynamicSequences[index] = channelSeq;
+              channelSeqArray[index] = channelSeq;
               index++;
               
               Serial.print("  Channel: ");
@@ -1054,21 +1147,27 @@ void loadPatternsFromFile() {
         }
       }
       
-      dynamicSequences[index] = nullptr; // Null terminate
-      
-      // Create program from dynamic sequences
+      channelSeqArray[index] = nullptr; // Null-terminate
+
+      // Create program from the channel sequences
       if (index > 0 && dynamicProgramCount < MAX_DYNAMIC_PROGRAMS) {
-        Program* dynamicProgram = new Program(dynamicSequences, patternName.c_str());
-        
-        // Store it in the dynamic programs array
+        Program* dynamicProgram = new Program(channelSeqArray, patternName.c_str());
+
+        // Store program and ownership of channelSeqArray so it can be freed on reload
         dynamicPrograms[dynamicProgramCount].name = patternName;
         dynamicPrograms[dynamicProgramCount].program = dynamicProgram;
+        dynamicPrograms[dynamicProgramCount].channelSeqs = channelSeqArray;
+        dynamicPrograms[dynamicProgramCount].channelSeqCount = index;
         dynamicProgramCount++;
-        
+
         Serial.print("Created dynamic program: ");
         Serial.println(patternName);
-      } else if (dynamicProgramCount >= MAX_DYNAMIC_PROGRAMS) {
-        Serial.println("Warning: Maximum dynamic programs reached");
+      } else {
+        // No valid channels or programs array full — free the pointer array now
+        delete[] channelSeqArray;
+        if (dynamicProgramCount >= MAX_DYNAMIC_PROGRAMS) {
+          Serial.println("Warning: Maximum dynamic programs reached");
+        }
       }
     }
   }
@@ -1096,9 +1195,12 @@ void loadPatternsFromFile() {
         selectedProgram = findDynamicProgram(patternName);
       }
       
-      // Set the program for this button
+      // Set the program for this button — take mutex since buttonLoop() may be
+      // reading controllers[] on Core 1 at the same time.
       if (buttonIndex < NUM_INPUT_CHANNELS && selectedProgram != nullptr) {
+        if (g_controllersMutex != NULL) xSemaphoreTake(g_controllersMutex, portMAX_DELAY);
         controllers[buttonIndex].setProgram(selectedProgram);
+        if (g_controllersMutex != NULL) xSemaphoreGive(g_controllersMutex);
         Serial.print("Mapped button ");
         Serial.print(buttonIndex);
         Serial.print(" to pattern ");
@@ -1114,6 +1216,102 @@ void loadPatternsFromFile() {
   
   Serial.println("Patterns loaded from file successfully");
 }
+
+// Load trigger mappings from trigger_mappings.json
+void loadTriggerMappingsFromFile() {
+  // Clean up any previous TriggerDevice.
+  // Clear channelTriggers[] shared_ptrs first: each ButtonTrigger holds a reference
+  // to its TriggerDevice, so we must release those refs before deleting the device.
+  for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+    channelTriggers[i].reset();  // releases shared_ptr, may delete ButtonTrigger
+  }
+  if (triggerDevice != nullptr) {
+    delete triggerDevice;        // kills HTTP task + queue, then destroys m_triggers
+    triggerDevice = nullptr;
+  }
+
+  // Initialize trigger enabled array
+  for (int i = 0; i < NUM_INPUT_CHANNELS; i++) {
+    triggerEnabled[i] = false;
+    triggerNames[i] = "";
+  }
+  
+  if (!LittleFS.exists("/trigger_mappings.json")) {
+    Serial.println("trigger_mappings.json not found, triggers disabled");
+    return;
+  }
+  
+  File file = LittleFS.open("/trigger_mappings.json", "r");
+  if (!file) {
+    Serial.println("Failed to open trigger_mappings.json");
+    return;
+  }
+  
+  // Read file into string
+  String jsonString = file.readString();
+  file.close();
+  
+  // Parse JSON
+  DynamicJsonDocument doc(4096);
+  DeserializationError error = deserializeJson(doc, jsonString);
+  
+  if (error) {
+    Serial.print("trigger_mappings.json parsing failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+  
+  // Get trigger server configuration
+  String triggerServerURL = doc["trigger_server"]["url"].as<String>();
+  int triggerServerPort = doc["trigger_server"]["port"].as<int>();
+  String deviceName = doc["device_name"].as<String>();
+  
+  Serial.println("=== Trigger Configuration ===");
+  Serial.print("Server: ");
+  Serial.print(triggerServerURL);
+  Serial.print(":");
+  Serial.println(triggerServerPort);
+  Serial.print("Device: ");
+  Serial.println(deviceName);
+  
+  // Create TriggerDevice
+  triggerDevice = new TriggerDevice(deviceName, triggerServerURL, triggerServerPort);
+  
+  // Process channel mappings
+  if (doc.containsKey("channel_to_trigger")) {
+    JsonArray channelMappings = doc["channel_to_trigger"];
+    for (JsonVariant channelMapping : channelMappings) {
+      int channel = channelMapping["channel"].as<int>();
+      String triggerName = channelMapping["trigger_name"].as<String>();
+      bool enabled = channelMapping["enabled"].as<bool>();
+      
+      if (channel >= 0 && channel < NUM_INPUT_CHANNELS) {
+        triggerEnabled[channel] = enabled;
+        triggerNames[channel] = triggerName;
+        
+        if (enabled) {
+          // Create ButtonTrigger for this channel.
+          // debounceTimeMs=0: hardware debounce in readInputButtonStates() already ensures
+          // CheckForEventAndSend is only called on stable state changes, so no additional
+          // software debounce is needed here.
+          channelTriggers[channel] = triggerDevice->AddButtonTrigger(triggerName, false, 0);
+          Serial.print("Channel ");
+          Serial.print(channel);
+          Serial.print(" -> Trigger: ");
+          Serial.println(triggerName);
+        }
+      }
+    }
+  }
+  
+  // Register device with trigger server
+  if (triggerDevice != nullptr) {
+    triggerDevice->RegisterDevice();
+    Serial.println("Trigger device registered");
+  }
+  
+  Serial.println("=== Trigger Configuration Complete ===");
+}
 #endif
 
 void buttonSetup() {
@@ -1121,12 +1319,17 @@ void buttonSetup() {
   initMillis();
   initIO();
 #ifdef ARDUINO
+  g_controllersMutex = xSemaphoreCreateMutex();
+  if (g_controllersMutex == NULL) {
+    Serial.println("ERROR: Failed to create controllers mutex!");
+  }
   Serial.println("Trying to set up i2c");
   initI2C();
   // Try to load configuration from files first, fallback to hardcoded
   if (LittleFS.begin()) {
     loadChannelsFromFile();  // Load channel aliases
     loadPatternsFromFile();  // Load pattern mappings
+    loadTriggerMappingsFromFile(); // Load trigger mappings
   } else {
     // initChannelControllers(); // Use hardcoded patterns
   }

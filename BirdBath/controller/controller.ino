@@ -245,6 +245,7 @@ void controlValve(int valveNum, int servoValue)
 
 void setValveState(int valveNum, float state, bool print = 0)
 {
+  Serial.println("Set valve state called");
   if (state > 1.0)
   {
     Serial.print(" valve set too high ");
@@ -255,6 +256,7 @@ void setValveState(int valveNum, float state, bool print = 0)
     Serial.print(state);
     state = -1.0;
   }
+  Serial.println("Setting valve state!!");
   valveStates[valveNum] = state;
   int servoValue = valueToMsec(valveNum, state);
   controlValve(valveNum, servoValue);
@@ -269,7 +271,7 @@ void setValveState(int valveNum, float state, bool print = 0)
 
 unsigned long millisLastDisplayValves = 0; // Add this global variable at the top of your code
 
-#define DISPLAY_VALVE_DELAY 1000
+#define DISPLAY_VALVE_DELAY 6000
 
 // XXX - I would like to send a UDP status packet in response to a query
 
@@ -515,6 +517,7 @@ void sendValveStatus()
 // Do not call this directly, it will be called when you call `receiveArtnet`.
 void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, uint8_t *data)
 {
+  Serial.println("DMX FRAME RECEIVED");
   millisLastArtnet = millis();
 #ifdef USE_ARTMODE
   artModeActive = false;
@@ -528,16 +531,24 @@ void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, 
   // Adding a header (one byte per packet) that describes the packet type. The type can be one of
   // ARTNET_FRAME - Data is an array of two-byte packets, one element in the array per nozzle
   // ARTNET_NOZZLE - Data is a single two-byte packet with a header for the index of the nozzle
+
+  Serial.printf("RECEIVED ARTNET PACKET! NumBytes %d\n", numBytesReceived);
+  Serial.printf("  Universe is %d\n", universe);
+  for (int i=0; i < numBytesReceived; i++) {
+    Serial.printf(" Packet data byte %d, contents 0x%x\n", i, data[i]);
+  }
   uint8_t frameType = data[0];
   if (frameType == ARTNET_NOZZLE) {
     uint8_t nozzleIndex = data[1];
     if (nozzleIndex < NUM_VALVES && numBytesReceived >= 4) {
+      Serial.printf(" Single Nozzle, idx %d, data is %d\n", nozzleIndex, data[3]);
 #ifdef USE_SOLENOIDS
       setSolenoidState(nozzleIndex, data[2]);
 #endif 
       setValveState(nozzleIndex, float(data[3]) / 255.0);
     }
   } else { // frameType == ARTNET_FRAME
+    Serial.println(" Artnet frame - all valves");
     int numNozzlesReceived = min((numBytesReceived - 1) / 2, NUM_VALVES);
     for (int nozzleIndex = 0; nozzleIndex < numNozzlesReceived; nozzleIndex++) {
       int valveDataStartIndex = nozzleIndex * 2 + 1;
@@ -546,6 +557,7 @@ void onDmxFrame(uint16_t universe, uint16_t numBytesReceived, uint8_t sequence, 
       setSolenoidState(nozzleIndex, solenoidByte > 0);
 #endif // USE_SOLENOIDS
       uint8_t servoByte = data[valveDataStartIndex + 1];
+      Serial.printf("Nozzle %d, value %d servoByte\n", nozzleIndex, servoByte);
       float servoByteFloat = (float)servoByte;
       setValveState(nozzleIndex, servoByteFloat / 255.0);
     }

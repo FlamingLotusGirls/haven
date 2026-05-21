@@ -22,11 +22,13 @@ WebServer server(80);
 
 // REST API handler: Serve the main HTML page
 void handleRoot() {
+  Serial.println("Handle Root called!");
   server.send(200, "text/html", htmlPage);
 }
 
 // REST API handler: Set Color A
 void handleSetColorA() {
+  Serial.println("HandleSetColorA");
   if (server.hasArg("h") && server.hasArg("s") && server.hasArg("v")) {
     colorA_hue = constrain(server.arg("h").toInt(), 0, 255);
     colorA_sat = constrain(server.arg("s").toInt(), 0, 255);

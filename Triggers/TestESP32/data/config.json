@@ -1,8 +1,8 @@
 {
-  "wifi_ssid_primary": "flg",
-  "wifi_pass_primary": "this is not the password",
-  "wifi_ssid_secondary": "not",
-  "wifi_pass_secondary": "set",
-  "trigger_server": "192.168.5.174",
+  "wifi_ssid_primary": "sisyphus",
+  "wifi_pass_primary": "!medea4u",
+  "wifi_ssid_secondary": "not-set",
+  "wifi_pass_secondary": "not-set",
+  "trigger_server": "192.168.5.19",
   "trigger_port": 5002
-}
+}`

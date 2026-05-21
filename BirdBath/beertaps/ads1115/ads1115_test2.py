@@ -16,7 +16,7 @@ for ch in range(4):
     config_val = 0x8000 | (mux << 8) | 0x0200  # Start conversion, channel, gain
     bus.write_i2c_block_data(ads_addr, 1, [(config_val >> 8) & 0xFF, config_val & 0xFF])
     time.sleep(0.01)
-    
+
     # Read result
     result = bus.read_i2c_block_data(ads_addr, 0, 2)
     raw = (result[0] << 8) | result[1]

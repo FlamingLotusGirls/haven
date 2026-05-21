@@ -99,7 +99,7 @@ void wifiLoopCheck() {
         wifiConnected = false;
       }
   } else {
-    // Wifi connection established. Set up mDNS, setup webserver
+    // Wifi connection established (or re-established).
     if (!wifiConnected) {
       wifiConnected = true;
       Serial.println();
@@ -108,21 +108,38 @@ void wifiLoopCheck() {
       Serial.print("RSSI: ");
       Serial.println(WiFi.RSSI());
 
-      File file = LittleFS.open("/netname.txt", "r");
-      if (!file){
-        Serial.println("Failed to open netname file");
-      } else {
-        String netName = file.readStringUntil('\n');
-        Serial.print("mdns name is ");
-        Serial.print(netName);
-        Serial.print(".local");
-        if (!MDNS.begin(netName.c_str())) { // Set the hostname
-          Serial.println("Error starting mDNS");
+      // MDNS and the web server must only be started once — calling server.begin() or
+      // MDNS.begin() on an already-running instance crashes or leaks resources.
+      static bool s_serverStarted = false;
+      if (!s_serverStarted) {
+        File file = LittleFS.open("/netname.txt", "r");
+        if (!file) {
+          Serial.println("Failed to open netname file");
         } else {
-          Serial.println("mDNS responder started");
+          String netName = file.readStringUntil('\n');
+          file.close();
+          Serial.print("mdns name is ");
+          Serial.print(netName);
+          Serial.println(".local");
+          if (!MDNS.begin(netName.c_str())) {
+            Serial.println("Error starting mDNS");
+          } else {
+            Serial.println("mDNS responder started");
+          }
         }
+        setupWebServer();
+        s_serverStarted = true;
+      } else {
+        Serial.println("WiFi reconnected — web server already running, skipping re-init");
       }
-      setupWebServer();
+
+      // Always re-register the trigger device on (re)connect so the server gets
+      // the current IP address.
+      extern TriggerDevice* triggerDevice;
+      if (triggerDevice != nullptr) {
+        triggerDevice->RegisterDevice();
+        Serial.println("Trigger device re-registered after WiFi reconnect");
+      }
     }
   }
 }

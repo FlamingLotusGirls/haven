@@ -1,479 +1,193 @@
 /*
  * TouchToneTelephone1.ino
- * 
- * Reads button presses from a touch-tone telephone keypad and sends triggers
- * when specific phone numbers are dialed.
- * 
+ *
+ * Top-level sketch: setup() and loop() only.
+ * All logic lives in the module files alongside this sketch.
+ *
  * Hardware:
- *   - XIAO ESP32S3 (Dual Core, 8MB Flash, 8MB PSRAM)
+ *   - XIAO ESP32S3 (Dual Core, 8 MB Flash, 8 MB PSRAM)
  *   - MCP23008-E/P IO Expander (I2C address 0x20)
- *   - L298N H-Bridge for 20Hz AC generation
+ *   - L298N H-Bridge for 20 Hz AC ring generation
  *   - MAX98357A I2S Audio Amplifier
- * 
- * MCP23008 Pin Mapping:
- *   GP0-GP3: Rows 1-4
- *   GP4-GP6: Columns 1-3
- *   GP7: Hook switch
- * 
- * Keypad Layout:
- *   Row 1: 1 2 3
- *   Row 2: 4 5 6
- *   Row 3: 7 8 9
- *   Row 4: * 0 #
- * 
- * Required Arduino Libraries:
- *   - Adafruit MCP23017 (supports both MCP23008 and MCP23017)
+ *
+ * Module layout:
+ *   shared_state.h/cpp  – mutex-protected state shared between HTTP task and loop
+ *   config.h/cpp        – loads config.json / triggers.json, WiFi connection
+ *   io_expander.h/cpp   – MCP23008 I2C driver, hook-switch, key scanning
+ *   audio.h/cpp         – I2S / DTMF tone generation
+ *   ringer.h/cpp        – H-bridge ring cadence driver
+ *   http_server.h/cpp   – WebServer + FreeRTOS task on Core 0
+ *   triggers.h/cpp      – phone-number → trigger mappings
+ *   state_machine.h/cpp – telephone state machine (in progress)
  */
 
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <ArduinoJson.h>
-#include <LittleFS.h>
-#include <Wire.h>
-#include <driver/i2s.h>
 #include <SD.h>
 #include <SPI.h>
+
+#include "shared_state.h"
+#include "config.h"
+#include "io_expander.h"
+#include "audio.h"
+#include "ringer.h"
+#include "http_server.h"
+#include "triggers.h"
+#include "state_machine.h"
 #include "DeviceTriggers.h"
 
-// Configuration structure
-struct TelephoneConfig {
-  char wifi_ssid[64];
-  char wifi_pass[64];
-  char trigger_server[64];
-  int trigger_port;
-  char device_name[64];
+// ── SD card pins (XIAO ESP32S3, hardware SPI) ────────────────────────────
+#define SD_CS_PIN   GPIO_NUM_44
+#define SD_MOSI_PIN GPIO_NUM_9
+#define SD_MISO_PIN GPIO_NUM_8
+#define SD_SCK_PIN  GPIO_NUM_7
+
+// ── Dialing ─────────────────────────────────────────────────────────────
+const unsigned long DIAL_TIMEOUT = 5000;  // ms idle before clearing number
+
+// The TelephoneState shows the physical state of the telephone.
+// This is related to, but not necessarily exactly the same as,
+// the CallState. TelephoneState drives CallState
+class TelephoneState {
+  bool buttonState[TelephoneButtons::TOTAL]; // State of the keypad buttons
+  bool offHook;                              // On or off hook?
+  bool isRinging;                            // Ringing or not ringing?  Enabled by RemoteConnection module
+  bool incomingCall;                         // Is there an incoming call pending? Enabled by RemoteConnection module
+  bool outgoingCall;                         // Is there an outgoing call pending? Enabled by RemoteConnection module
+  bool connected;                            // Are we connected to a call? Enabled by either LocalConnection module or RemoteConnection module
+  unsigned char dialSequence[16];            // number being dialed. We check to see if the number triggers a local or remote connection
 };
 
-// Trigger mapping structures
-struct PhoneTrigger {
-  String phone_number;
-  String trigger_name;
-  std::shared_ptr<OneShotTrigger> trigger;
+// Things that drive telephone state:
+// - Button state: Check GPIO
+// - Connection state: Check connection module. Runs in a different thread? How does it work.
+// - Ringer state: Check ringer module. Ringer module - responsible for ringing bell. Synchronous. Nothing else should be going on.
+// - Hook state: Check GPIO
+
+// Let's walk through the connection state. That's really the most complicated bit.
+// XXX - what about VAD? how do I get that in? Look at Shawn's code.
+// A connection can be local or remote. 
+// A local connection has a series of callbacks on it. It can play sounds, listen for sounds, respond to keypresses.
+// A remote connection has a socket to the remote telephone. It can listen for sounds, play sounds, and send and receive on the socket.
+// So. Connection module (socket) listens for incoming connection. Sets flag (need mutex?) if one is found. (is reading the flag atomic?)
+// If we're making an outgoing (non-local) connection, we flag the connection module, which then sets a flag for the outgoing connection
+// And it will set the isringing flag as well.
+// Okay. So a lot of the complexity here comes from the remote connection and he incoming/outgoing/isRinging logic, and the communication
+// between the threads. (?? Do I need to make it multithreaded? Just check the socket in the loop. There are so many http connections
+// going on... )
+
+// The CallState describes what the phone should be *doing*. It
+// depends on the TelephoneState, which describes the underlying *physical* state of the phone.
+enum class CallState {
+  INACTIVE,  // do nothing (transitions: from any state when hook is placed)
+  DIAL_TONE, // play dial tone (transitions: From inactive when hook is taken. 
+             //                              From INCOMING in corner case - incoming is cancelled as user picks up. Or timeout
+             //                              From CONNECTED if call drops
+             //                              From CONNECTION_ROUTING if timeout
+  DIALING,   // in the middle of dialing, play button tones. (transitions: from DIAL_TONE)
+  INCOMING,  // ring bell (transition: from INACTIVE)
+  CONNECTION_ROUTING, // Have dialed. Trying to figure out what to do with the connection (transition: From DIALING)
+  AWAITING_CONNECTION,   // Play simulated ringing in headset (transition: from CONNECTION_ROUTING)
+  CONNECTED, // Do whatever connection things, play button tones (transition: from AWAITING CONNECTION, if outgoing. From INCOMING, for incoming call)
+  BUSY,      // Play busy signal. (transition: From CONNECTION_ROUTING if the callee phone is unavailable)
+  OFF_HOOK_TIMEOUT1,  // 'If you'd like to make a call' (transition: From DIALING, from BUSY on timeout)
+  OFF_HOOK_TIMEOUT2   // beep beep beep beep beep (transition: from OFF_HOOK_TIMEOUT1)
+  OFF_HOOK   // Do nothing. Been off hook for too long. (transition: from OFF_HOOK_TIMEOUT2)
 };
 
-struct GenericTrigger {
-  String trigger_name;
-  std::shared_ptr<OneShotTrigger> trigger;
-};
+// Other state variables
+static unsigned long lastDigitTime = 0;
+static TriggerDevice*   gTriggerDevice = nullptr;
+static TelephoneConfig* gConfig = nullptr;
+static TelephoneState   gTelephoneState;
+static unsigned long    gInactivityTimeout = 0;  // timeout, used for various off-hook situations
+static constexpr OFF_HOOK_INACTIVITY_TIMEOUT = 10000; // 10 seconds
 
-// Global configuration
-TelephoneConfig config;
-TriggerDevice* triggerDevice = nullptr;
-std::vector<PhoneTrigger> phoneTriggers;
-std::vector<GenericTrigger> genericTriggers;
+// ═════════════════════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("\n\n=== Touch-Tone Telephone Trigger Device ===");
 
-// I2C Configuration for MCP23008 (XIAO ESP32S3)
-#define I2C_SDA GPIO_NUM_5   // SDA (D4)
-#define I2C_SCL GPIO_NUM_6   // SCL (D5)
+  // Initialize physical representation of state of telephone
+  initTelephoneState(gTelephoneState);
 
-// MCP23008 Pin Definitions
-const int ROW_PINS[4] = {0, 1, 2, 3};     // GP0-GP3: Keypad rows
-const int COL_PINS[3] = {4, 5, 6};        // GP4-GP6: Keypad columns
-#define HOOK_SWITCH_MCP_PIN 7             // GP7: Hook switch (was unused)
-#define MCP23008_ADDR 0x20
+  // initSharedState(); // XXX - do I actually want this shared state thing? All it does is create a state mutex, which is used for the ringer and the udpPort. 
 
-// L298N H-Bridge Configuration (No ENA - tie ENA pin HIGH on L298N board)
-#define HBRIDGE_IN1 GPIO_NUM_1   // Direction pin 1 (D0)
-#define HBRIDGE_IN2 GPIO_NUM_2   // Direction pin 2 (D1)
+  // IO expander (I2C + MCP23008)
+  initIOExpander();
 
-// SD Card - Standard 4-wire SPI (hardware SPI pins)
-#define SD_CS_PIN   GPIO_NUM_44   // Chip Select (RX)
-#define SD_MOSI_PIN GPIO_NUM_9   // MOSI (hardware SPI)
-#define SD_MISO_PIN GPIO_NUM_8   // MISO (hardware SPI)
-#define SD_SCK_PIN  GPIO_NUM_7   // SCK (hardware SPI, D8)
+  // H-bridge ringer
+  initRinger();
 
-// I2S Configuration for MAX98357A
-#define I2S_NUM         I2S_NUM_0
-#define I2S_BCK_PIN     GPIO_NUM_4   // Bit clock (D3)
-#define I2S_WS_PIN      GPIO_NUM_43  // Word select (TX/D6)
-#define I2S_DOUT_PIN    GPIO_NUM_3  // Data out (D2)
-#define SAMPLE_RATE     16000        // 16kHz sample rate
-#define TONE_DURATION   200          // Tone duration in ms
-
-
-// DTMF Frequency Table (Hz)
-// Row frequencies: 697, 770, 852, 941
-// Col frequencies: 1209, 1336, 1477
-const int DTMF_FREQ_ROW[4] = {697, 770, 852, 941};
-
-const int DTMF_FREQ_COL[3] = {1209, 1336, 1477};
-
-// 20Hz AC Generation via Timer
-#define AC_FREQ_HZ 20
-#define HALF_PERIOD_US 25000  // 25ms = 1/(2*20Hz)
-volatile bool hbridgeRunning = false;
-volatile bool hbridgePolarity = false;
-hw_timer_t *hbridgeTimer = NULL;
-
-// Keypad mapping
-const char KEYPAD[4][3] = {
-  {'1', '2', '3'},
-  {'4', '5', '6'},
-  {'7', '8', '9'},
-  {'*', '0', '#'}
-};
-
-// Button tracking
-const unsigned long DEBOUNCE_DELAY = 50;
-bool buttonState[4][3] = {false};
-bool lastButtonReading[4][3] = {false};
-unsigned long lastDebounceTime[4][3] = {0};
-
-// Phone number tracking
-String dialedNumber = "";
-const unsigned long DIAL_TIMEOUT = 5000;
-unsigned long lastDigitTime = 0;
-
-// Registration tracking
-const unsigned long REGISTRATION_INTERVAL = 120000;
-unsigned long lastRegistrationTime = 0;
-
-// Audio task for continuous I2S streaming
-TaskHandle_t audioTaskHandle = NULL;
-volatile int currentToneRow = -1;
-volatile int currentToneCol = -1;
-portMUX_TYPE audioMux = portMUX_INITIALIZER_UNLOCKED;
-
-uint8_t readRegister(int reg) {
-  int ret;
-  size_t numBytes;
-  Wire.beginTransmission(MCP23008_ADDR);
-  numBytes = Wire.write(reg);
-  if (numBytes != 1) {
-    Serial.printf("WIRE unable to write, returning %d\n", numBytes);
-    return 0;
-  }
-  ret = Wire.endTransmission(true); // release control of bus
-  if (ret) { 
-    Serial.printf("WIRE end transmission fails, %d\n", ret);
-    return 0;
+  // SD card (standard 4-wire SPI)
+  Serial.println("\n--- Initializing SD Card ---");
+  SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
+  if (SD.begin(SD_CS_PIN)) {
+    Serial.printf("SD card OK  (%llu MB)\n", SD.cardSize() / (1024 * 1024));
+  } else {
+    Serial.println("WARNING: SD card not found – continuing without it");
   }
 
-  numBytes = Wire.requestFrom(MCP23008_ADDR, 1);
-  if (numBytes != 1) {
-    Serial.printf("WIRE request returns error %d\n", numBytes);
-    return 0;
+  // I2S audio (MAX98357A)
+  Serial.println("\n--- Initializing I2S Audio ---");
+  initI2S();
+  delay(100);   // let I2S stabilise  XXX probably don't need this?
+
+  // Configuration (WiFi credentials + trigger server info)
+  if ((gConfig = loadConfig()) == nullptr) {
+    Serial.println("ERROR: Failed to load configuration");
+    while (1) delay(1000);
   }
 
-  ret = Wire.read();
-  if (ret == -1) {
-    Serial.printf("WIRE read returns error %d\n", ret);
-    return 0;
-  }
+  // WiFi. The timeout is very long, and is not appropriate for wifi disconnects.
+  // XXX how to handle this? Other core it?
+  connectToWiFi();
 
-  return (uint8_t)ret;
+  // Create trigger device and register hardcoded phone-number mappings
+  // XXX - the various local connections should register triggers. Should be InitConnections rather than InitTriggers
+  gTriggerDevice = new TriggerDevice(config->device_name,
+                                    config->trigger_server,
+                                    config->trigger_port);
+  initTriggers(gTriggerDevice);
+
+  // Triggers
+  registerTriggers();
+
+  Serial.println("\nSetup complete. Ready.\n");
 }
 
-void writeRegister(int reg, int val){
-  int ret;
-  size_t numBytes;
-  Wire.beginTransmission(MCP23008_ADDR);
-  numBytes = Wire.write(reg); // pullup status register
-  if (numBytes != 1) {
-    Serial.printf("WIRE unable to write, returning %d\n", numBytes);
-    return;
-  }
-  numBytes = Wire.write(val); // pullup status register
-  if (numBytes != 1) {
-    Serial.printf("WIRE unable to write, returning %d\n", numBytes);
-    return;
-  }
-  ret = Wire.endTransmission(true); // release control of bus
-  if (ret) { 
-    Serial.printf("WIRE end transmission fails, %d\n", ret);
-    return;
-  }
-  Serial.printf("Wrote 0x%x to %d\n", val, reg);
-}
 
-// Audio streaming task - runs continuously feeding I2S
-void audioTask(void *parameter) {
-  const int CHUNK_SIZE = 128;  // Small chunks for responsive streaming
-  int16_t buffer[CHUNK_SIZE];
-  
-  double phaseLow = 0.0;
-  double phaseHigh = 0.0;
-  
-  while (true) {
-    int row, col;
-    
-    // Safely read current tone
-    portENTER_CRITICAL(&audioMux);
-    row = currentToneRow;
-    col = currentToneCol;
-    portEXIT_CRITICAL(&audioMux);
-    
-    if (row >= 0 && col >= 0) {
-      // Generate tone
-      int freqLow = DTMF_FREQ_ROW[row];
-      int freqHigh = DTMF_FREQ_COL[col];
-      
-      double phaseIncrementLow = 2.0 * PI * (double)freqLow / (double)SAMPLE_RATE;
-      double phaseIncrementHigh = 2.0 * PI * (double)freqHigh / (double)SAMPLE_RATE;
-      
-      for (int i = 0; i < CHUNK_SIZE; i++) {
-        double sample1 = sin(phaseLow);
-        double sample2 = sin(phaseHigh);
-        buffer[i] = (int16_t)((sample1 + sample2) * 16000.0);
-        
-        phaseLow += phaseIncrementLow;
-        phaseHigh += phaseIncrementHigh;
-        
-        if (phaseLow >= 6.283185307) phaseLow -= 6.283185307;
-        if (phaseHigh >= 6.283185307) phaseHigh -= 6.283185307;
-      }
-    } else {
-      // Generate silence
-      memset(buffer, 0, CHUNK_SIZE * sizeof(int16_t));
-      phaseLow = 0.0;
-      phaseHigh = 0.0;
-    }
-    
-    // Write to I2S (blocks if buffer full - that's OK)
-    size_t bytes_written;
-    i2s_write(I2S_NUM, buffer, CHUNK_SIZE * sizeof(int16_t), &bytes_written, portMAX_DELAY);
+void copyTelephoneState(TelephoneState& telephoneState, TelephoneState* copyBuffer) {
+  if (copyBuffer) {
+    memcpy(copyBuffer, &telephoneState, sizeof(TelephoneState));
   }
 }
 
-// Start/update tone (called from main loop)
-void setTone(int row, int col) {
-  portENTER_CRITICAL(&audioMux);
-  currentToneRow = row;
-  currentToneCol = col;
-  portEXIT_CRITICAL(&audioMux);
-}
-
-// Stop tone (silence)
-void stopTone() {
-  portENTER_CRITICAL(&audioMux);
-  currentToneRow = -1;
-  currentToneCol = -1;
-  portEXIT_CRITICAL(&audioMux);
-}
-
-// Timer interrupt handler - toggles H-bridge polarity for AC output
-void IRAM_ATTR onTimer() {
-  if (hbridgeRunning) {
-    hbridgePolarity = !hbridgePolarity;
-    if (hbridgePolarity) {
-      // Forward: IN1=HIGH, IN2=LOW
-      digitalWrite(HBRIDGE_IN1, HIGH);
-      digitalWrite(HBRIDGE_IN2, LOW);
-    } else {
-      // Reverse: IN1=LOW, IN2=HIGH
-      digitalWrite(HBRIDGE_IN1, LOW);
-      digitalWrite(HBRIDGE_IN2, HIGH);
-    }
+void initTelephoneState(TelephoneState& telephoneState) {
+  memset(telephoneState, 0, sizeof(telephoneState));
+  for (int i=0; i<TelephoneButtons::TOTAL; i++) {
+    telephoneState.buttons[i] = false;
   }
 }
 
-// I2S initialization for MAX98357A
-void initI2S() {
-  i2s_config_t i2s_config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
-    .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 16,    // Increased from 8 to 16 buffers
-    .dma_buf_len = 512,     // Increased from 64 to 512 samples per buffer
-    .use_apll = false,
-    .tx_desc_auto_clear = true,
-    .fixed_mclk = 0
-  };
-  
-  i2s_pin_config_t pin_config = {
-    .bck_io_num = I2S_BCK_PIN,
-    .ws_io_num = I2S_WS_PIN,
-    .data_out_num = I2S_DOUT_PIN,
-    .data_in_num = I2S_PIN_NO_CHANGE
-  };
-  
-  i2s_driver_install(I2S_NUM, &i2s_config, 0, NULL);
-  i2s_set_pin(I2S_NUM, &pin_config);
-  i2s_zero_dma_buffer(I2S_NUM);
-  
-  Serial.println("I2S initialized for MAX98357A");
-}
 
-// Generate and play DTMF tone - generate all samples first, then stream
-void playDTMF(int row, int col) {
-  int freqLow = DTMF_FREQ_ROW[row];
-  int freqHigh = DTMF_FREQ_COL[col];
-  
-  Serial.printf("Playing DTMF: %d Hz + %d Hz\n", freqLow, freqHigh);
-  
-  int numSamples = (SAMPLE_RATE * TONE_DURATION) / 1000;
-  
-  // Allocate buffer for entire tone
-  int16_t *buffer = (int16_t*)malloc(numSamples * sizeof(int16_t));
-  if (buffer == NULL) {
-    Serial.println("ERROR: Failed to allocate audio buffer");
-    return;
-  }
-  
-  // Generate all samples with precise phase
-  double phaseLow = 0.0;
-  double phaseHigh = 0.0;
-  double phaseIncrementLow = 2.0 * PI * (double)freqLow / (double)SAMPLE_RATE;
-  double phaseIncrementHigh = 2.0 * PI * (double)freqHigh / (double)SAMPLE_RATE;
-  
-  for (int i = 0; i < numSamples; i++) {
-    double sample1 = sin(phaseLow);
-    double sample2 = sin(phaseHigh);
-    
-    // Mix and scale to 16-bit
-    buffer[i] = (int16_t)((sample1 + sample2) * 16000.0);
-    
-    // Increment phase
-    phaseLow += phaseIncrementLow;
-    phaseHigh += phaseIncrementHigh;
-    
-    // Wrap phase
-    if (phaseLow >= 6.283185307) phaseLow -= 6.283185307;
-    if (phaseHigh >= 6.283185307) phaseHigh -= 6.283185307;
-  }
-  
-  // Stream all samples to I2S in one write
-  size_t bytes_written;
-  i2s_write(I2S_NUM, buffer, numSamples * sizeof(int16_t), &bytes_written, portMAX_DELAY);
-  
-  free(buffer);
-}
-
-// H-Bridge control functions (ENA must be tied HIGH on L298N board)
-void hbridgeStart() {
-  hbridgeRunning = true;
-  hbridgePolarity = false;
-  
-  // Start with forward direction
-  digitalWrite(HBRIDGE_IN1, HIGH);
-  digitalWrite(HBRIDGE_IN2, LOW);
-  
-  // Start timer to alternate polarity
-  timerStart(hbridgeTimer);
-  
-  Serial.println("H-Bridge: STARTED (20Hz AC output)");
-}
-
-void hbridgeStop() {
-  timerStop(hbridgeTimer);
-  hbridgeRunning = false;
-  
-  // Brake: both LOW
-  digitalWrite(HBRIDGE_IN1, LOW);
-  digitalWrite(HBRIDGE_IN2, LOW);
-  
-  Serial.println("H-Bridge: STOPPED");
-}
-
-// Hook switch detection - now on MCP23008 GP7
-bool isOffHook(uint8_t gpioPortRead) {
-  return !(gpioPortRead && HOOK_SWITCH_MCP_PIN);
-}
-
-// Load configuration from LittleFS
-bool loadConfig() {
-  Serial.println("\n--- Loading Configuration from LittleFS ---");
-  
-  if (!LittleFS.begin(true)) {
-    Serial.println("Failed to mount LittleFS");
-    return false;
-  }
-  
-  if (!LittleFS.exists("/triggers.json")) {
-    Serial.println("Config file /triggers.json does not exist");
-    LittleFS.end();
-    return false;
-  }
-  
-  File file = LittleFS.open("/triggers.json", "r");
-  if (!file) {
-    Serial.println("Failed to open config file");
-    LittleFS.end();
-    return false;
-  }
-  
-  DynamicJsonDocument doc(2048);
-  DeserializationError error = deserializeJson(doc, file);
-  file.close();
-  LittleFS.end();
-  
-  if (error) {
-    Serial.print("Failed to parse config file: ");
-    Serial.println(error.c_str());
-    return false;
-  }
-  
-  strlcpy(config.wifi_ssid, doc["wifi_ssid"] | "not_set", sizeof(config.wifi_ssid));
-  strlcpy(config.wifi_pass, doc["wifi_pass"] | "not_set", sizeof(config.wifi_pass));
-  strlcpy(config.trigger_server, doc["trigger_server"] | "192.168.5.174", sizeof(config.trigger_server));
-  config.trigger_port = doc["trigger_port"] | 5002;
-  strlcpy(config.device_name, doc["device_name"] | "Telephone", sizeof(config.device_name));
-  
-  Serial.println("Configuration loaded successfully:");
-  Serial.printf("  Device Name: %s\n", config.device_name);
-  Serial.printf("  WiFi: %s\n", config.wifi_ssid);
-  Serial.printf("  Trigger Server: %s:%d\n", config.trigger_server, config.trigger_port);
-  
-  triggerDevice = new TriggerDevice(config.device_name, config.trigger_server, config.trigger_port);
-  
-  JsonArray triggers = doc["triggers"];
-  if (triggers.isNull()) {
-    Serial.println("No triggers defined in config");
-    return true;
-  }
-  
-  Serial.println("\nTrigger Configuration:");
-  
-  int phoneCount = 0;
-  int genericCount = 0;
-  
-  for (JsonObject triggerObj : triggers) {
-    String triggerName = triggerObj["name"].as<String>();
-    
-    if (triggerObj.containsKey("phone_number")) {
-      PhoneTrigger phoneTrigger;
-      phoneTrigger.phone_number = triggerObj["phone_number"].as<String>();
-      phoneTrigger.trigger_name = triggerName;
-      phoneTrigger.trigger = triggerDevice->AddOneShotTrigger(phoneTrigger.trigger_name);
-      phoneTriggers.push_back(phoneTrigger);
-      
-      Serial.printf("  %s -> %s.%s\n", 
-                    phoneTrigger.phone_number.c_str(), 
-                    config.device_name,
-                    phoneTrigger.trigger_name.c_str());
-      phoneCount++;
-    } else {
-      GenericTrigger genericTrigger;
-      genericTrigger.trigger_name = triggerName;
-      genericTrigger.trigger = triggerDevice->AddOneShotTrigger(genericTrigger.trigger_name);
-      genericTriggers.push_back(genericTrigger);
-      genericCount++;
-    }
-  }
-  
-  Serial.printf("\nTotal triggers: %d phone-based, %d generic\n", phoneCount, genericCount);
-  
-  return true;
-}
+// ── Periodic re-registration ─────────────────────────────────────────────
+static constexpr REGISTRATION_INTERVAL = 120000; // 2 minute registration interval
+static unsigned long gLastTriggerRegistrationTime = 0;
 
 void connectToWiFi() {
   Serial.println("\n--- WiFi Connection ---");
-  Serial.print("Connecting to ");
-  Serial.print(config.wifi_ssid);
-  Serial.println("...");
-  
+  Serial.printf("Connecting to %s ...\n", config.wifi_ssid);
+
   WiFi.begin(config.wifi_ssid, config.wifi_pass);
-  
+
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
     Serial.print(".");
     attempts++;
   }
-  
+
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nWiFi connected!");
     Serial.print("IP Address: ");
@@ -483,320 +197,346 @@ void connectToWiFi() {
   }
 }
 
-void checkForTriggerMatch() {
-  for (PhoneTrigger& phoneTrigger : phoneTriggers) {
-    if (dialedNumber == phoneTrigger.phone_number) {
-      Serial.println("\n*** PHONE NUMBER MATCH ***");
-      Serial.printf("Dialed: %s -> Triggering: %s.%s\n", 
-                    dialedNumber.c_str(),
-                    config.device_name,
-                    phoneTrigger.trigger_name.c_str());
-      
-      phoneTrigger.trigger->SendTriggerEvent();
-      
-      dialedNumber = "";
-      lastDigitTime = millis();
-      return;
+void wifiUpdate(unsigned long currentTime) {
+  // ── WiFi watchdog ────────────────────────────────────────────────────
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi disconnected – reconnecting...");
+    connectToWiFi();
+  } // XXX - need to make this non-blocking
+
+  // ── Periodic trigger-server re-registration ──────────────────────────
+  if (WiFi.status() == WL_CONNECTED) {
+    if (gTriggerDevice && (currentTime - gLastTriggerRegistrationTime >= REGISTRATION_INTERVAL)) {
+      gTriggerDevice->RegisterDevice();
+      gLastTriggerRegistrationTime = currentTime;
     }
   }
 }
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  
-  Serial.println("\n\n=== Touch-Tone Telephone Trigger Device ===");
-  
-  // Initialize I2C with explicit pins
-  Wire.begin(I2C_SDA, I2C_SCL);
-  Serial.println("\n--- I2C Initialized ---");
-  Serial.printf("  SDA: GPIO %d\n", I2C_SDA);
-  Serial.printf("  SCL: GPIO %d\n", I2C_SCL);
-  Wire.setClock(10000);
-
-  // Scan I2C bus for devices
-  delay(2000);
-  Serial.println("\n--- Scanning I2C Bus ---");
-  int devicesFound = 0;
-  for (byte address = 1; address < 127; address++) {
-    Wire.beginTransmission(address);
-    byte error = Wire.endTransmission();
-    
-    if (error == 0) {
-      Serial.printf("  I2C device found at address 0x%02X\n", address);
-      devicesFound++;
-    }
-  }
-  
-  if (devicesFound == 0) {
-    Serial.println("  WARNING: No I2C devices found!");
-    Serial.println("  Check:");
-    Serial.println("    - SDA/SCL connections");
-    Serial.println("    - Pull-up resistors (3.3k on SDA and SCL)");
-    Serial.println("    - MCP23008 power (VDD=3.3V)");
-    Serial.println("    - Address pins (A0,A1,A2 to GND for 0x20)");
+void registerTriggers() {
+  if (WiFi.status() == WL_CONNECTED) {
+    gTriggerDevice->RegisterDevice();
+    lastRegistrationTime = millis();
+    startHttpServer();   // spawns Core-0 task  // XXX what happens if wifi goes away?
   } else {
-    Serial.printf("  Found %d I2C device(s)\n", devicesFound);
+    Serial.println("WARNING: No WiFi – HTTP server not started");
   }
-  
-  // Initialize MCP23008
-  Serial.println("\n--- Initializing MCP23008 IO Expander ---");
-  Serial.printf("  Expected address: 0x%02X\n", MCP23008_ADDR);
+}
 
-/*
-  if (!MCP.begin(true)) {
-    Serial.println("!!!!!MCP BEGIN FAILURE!!!!!!");
-  }
+// ═════════════════════════════════════════════════════════════════════════
 
-  Serial.print("Connect: ");
-  Serial.println(MCP.isConnected());
+CallState oldCallState = NO_CALL;
+// why don't I just do a buffer swap rather than a copy?
+void getTelephoneState(TelephoneState* telephoneStateOut) {
+  // read buttons
+  // read hook
+  // Check flag for whether ringer is ringing
+  // Check for whether there is an incoming call pending (flag from another thread)
+  // Check for whether we're connected
+  // Check for whether there's an outgoing call
+  // Check for whether we're in the middle of dialing
+}
 
-  //  all at once.
-  if (!MCP.pinMode8(0xFF)) {
-    Serial.println("**** MCP PINMODE FAILURE!!!!");
-  }
-  */
-  /*
-  //  set individual pins
-  for (int pin = 0; pin < 8; pin++)
-  {
-    MCP.pinMode1(pin, INPUT);
-  */
-  
-  /*
-  int retryCount = 0;
-  while (retryCount++ < 4) {
-    Serial.println("Attempting to connect to IO expander");
-    if (!mcp.begin_I2C(MCP23008_ADDR)) {
-      Serial.println("ERROR: Failed to initialize MCP23008!");
-      Serial.println("\nTroubleshooting steps:");
-      Serial.println("  1. Verify MCP23008 is powered (3.3V on VDD pin)");
-      Serial.println("  2. Check I2C connections:");
-      Serial.printf("     - SDA: GPIO %d to MCP23008 SDA\n", I2C_SDA);
-      Serial.printf("     - SCL: GPIO %d to MCP23008 SCL\n", I2C_SCL);
-      Serial.println("  3. Add 4.7k pull-up resistors on SDA and SCL to 3.3V");
-      Serial.println("  4. Verify address pins: A0=GND, A1=GND, A2=GND (for 0x20)");
-      Serial.println("  5. Check if device appears in I2C scan above");
-      delay(1000);
+// Determine new CallState based on current CallState and TelephoneState
+// The *only* responsibilty of this function is to determine the CallState.
+// It sets no state variables and has no side effects.
+CallState runStateMachine(TelephoneState& telephoneState, CallState currentCallState) {
+  CallState newCallState = currentCallState;
+  switch (currentCallState) {
+  case CallState::INACTIVE:
+    if (telephoneState.incomingCall) {
+      newCallState = CallState::INCOMING;
+    } else if (telephoneState.offHook) { 
+      newCallState = CallState::DIAL_TONE;
+    }
+  break;
+  case CallState::DIAL_TONE:
+    if (!telephoneState.offHook) {
+      // User hung up. change state to INACTIVE
+      newCallState = CallState::INACTIVE;
+    } else if (buttonsPressed(telephoneState)) {
+      newCallState = CallState::DIALING;
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = CallState::OFF_HOOK_TIMEOUT_1;
+    }
+  break;
+  case CallState::DIALING:
+    if (!telephoneState.offHook) {
+      newCallState = CallState::INACTIVE;
+    } else if (telephoneState.outgoingCall) {
+      newCallState = CallState::CONNECTION_ROUTING;
+    } else if (buttonsPressed(telephoneState)) {
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = CallState::OFF_HOOK_TIMEOUT_1;
+    }
+  break;
+  case CallState::INCOMING:
+    if (!telephoneState.incomingCall) {
+      if (telephoneState.offHook) {
+        newCallState = CallState::DIAL_TONE;
+      } else {
+        newCallState = CallState::INACTIVE;
+      }
+    } else if (telephoneState.offHook) {
+      newCallState = CallState::CONNECTED.
+      // XXX TODO Connect to other side.
+    }
+  break;
+  case CallState::CONNECTION_ROUTING:
+    // XXX - check connection status. Should be busy, available, connected, or unknown
+    ConnectionStatus connectionStatus = GetConnectionStatus();
+    if (connectionStatus == ConnectionStatus::BUSY) {
+      newCallState = CallState::Busy;
+    } else if (connectionStatus == ConnectionStatus::AVAILABLE) {
+      newCallState = CallState::AWAITING_CONNECTION;
+    } else if (connectionStatus == ConnectionStatus::CONNECTED) {
+      newCallState = CallState::CONNECTED;
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = OFF_HOOK_TIMEOUT1;
+    } else {
+     // do nothing. Still trying to figure out how to handle this connection request
+    }
+  break;
+  case CallState::AWAITING_CONNECTION:
+    if (telephoneState.connected) {
+      newCallState = CallState::CONNECTED; 
+    } else if (!telephoneState.offHook) {
+      // Change state to INACTIVE
+      newCallState = CallState::INACTIVE;
+    } else if (!telephoneState.outGoingCall) {
+      newCallState = CallState::DIAL_TONE;
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = CallState::OFF_HOOK_TIMEOUT1;
     }
     break;
+  case CallState::CONNECTED:
+    if (!telephoneState.offHook) {
+      newCallState = CallState::INACTIVE;
+    } else if (!telephoneState.connected) {
+      newCallState = CallState::DIAL_TONE;
+    }
+    break;
+  case CallState::BUSY:
+    if (!telephoneState.offHook) {
+      newCallState = CallState::INACTIVE;
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = OFF_HOOK_TIMEOUT_1;
+    }
+    break;
+  case CallState::OFF_HOOK_TIMEOUT_1:
+    if (!telephoneState.offHook) {
+      newCallState = CallState::INACTIVE;
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = OFF_HOOK_TIMEOUT2;
+    }
+    break;
+  case CallState::OFF_HOOK_TIMEOUT_2:
+    if (!telephoneState.offHook) {
+      newCallState = CallState::INACTIVE;
+    } else if (currentTime > gInactivityTimeout) {
+      newCallState = CallState::OFF_HOOK;
+    }
+    break;
+  case CallState::OFF_HOOK:  // NB - this is off hook, timed out.
+    if (!telephoneState.offHook) {
+      newCallState = CallState::INACTIVE;
+    }
+    break;
+    default:
+    break;
   }
-  if (retryCount < 4) {
-    Serial.println("MCP23008 initialized successfully!");
-  } else {
-    Serial.println("Failed to initialize MCP23008!!");
-  }
-  
-  // Configure MCP23008 pins
-  for (int i = 0; i < 4; i++) {
-    mcp.pinMode(ROW_PINS[i], INPUT_PULLUP);
-  }
-  for (int i = 0; i < 3; i++) {
-    mcp.pinMode(COL_PINS[i], INPUT_PULLUP);
-  }
-  // Configure hook switch pin
-  mcp.pinMode(HOOK_SWITCH_MCP_PIN, INPUT_PULLUP);
-  */
-  delay(200);
-
-  for (int i=0; i<4; i++) {
-    readRegister(0x06);
-    delay(200);
-  }
-
-  // Set all ports as input
-  Serial.println("Attempting to set register 0 (GPIO config)) write 0xFF all 1 (input)");
-  writeRegister(0x00, 0xFF);
-  delay(10);
-
-  // pullups
-  Serial.println("Attempting to set register 6 (GPIO pullup) to all 1s (all input pullup)");
-  writeRegister(0x06, 0xFF);
-
-  delay(10);
-
-  // Read io...
-  uint8_t gpio = readRegister(0x09);
-
-  // Initialize Hook Switch (on MCP23008 GP7)
-  Serial.println("\n--- Initializing Hook Switch ---");
-  Serial.printf("  Hook Switch: MCP23008 GP%d\n", HOOK_SWITCH_MCP_PIN);
-  Serial.printf("  Current State: %s\n", isOffHook(gpio) ? "OFF-HOOK" : "ON-HOOK");
-  
-  // Initialize L298N H-Bridge for AC generation (NO ENA PIN)
-  Serial.println("\n--- Initializing L298N H-Bridge (20Hz AC) ---");
-  Serial.println("  NOTE: Tie L298N ENA pin HIGH on board");
-  
-  pinMode(HBRIDGE_IN1, OUTPUT);
-  pinMode(HBRIDGE_IN2, OUTPUT);
-  
-  digitalWrite(HBRIDGE_IN1, LOW);
-  digitalWrite(HBRIDGE_IN2, LOW);
-  
-  /*
-  // Create timer for 20Hz AC generation (alternates every 25ms)
-  hbridgeTimer = timerBegin(1000000);  // 1MHz timer frequency
-  timerAttachInterrupt(hbridgeTimer, &onTimer);
-  timerAlarm(hbridgeTimer, HALF_PERIOD_US, true, 0);  // 25000us period, auto-reload
-  */
-  
-  Serial.println("L298N H-Bridge initialized for 20Hz AC output!");
-  Serial.printf("  IN1: GPIO %d\n", HBRIDGE_IN1);
-  Serial.printf("  IN2: GPIO %d\n", HBRIDGE_IN2);
-  Serial.printf("  AC Frequency: %d Hz\n", AC_FREQ_HZ);
-  Serial.println("  State: STOPPED");
-  
-  // Initialize SD Card (Standard 4-wire SPI)
-  Serial.println("\n--- Initializing SD Card (4-wire SPI) ---");
-  
-  // Initialize SPI with all 4 pins (CLK, MISO, MOSI, CS)
-  SPI.begin(SD_SCK_PIN, SD_MISO_PIN, SD_MOSI_PIN, SD_CS_PIN);
-  
-  if (SD.begin(SD_CS_PIN)) {
-    Serial.println("SD Card initialized successfully!");
-    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
-    Serial.printf("  SD Card Size: %llu MB\n", cardSize);
-    Serial.printf("  CS: GPIO %d\n", SD_CS_PIN);
-    Serial.printf("  SCK: GPIO %d\n", SD_SCK_PIN);
-    Serial.printf("  MOSI: GPIO %d\n", SD_MOSI_PIN);
-    Serial.printf("  MISO: GPIO %d\n", SD_MISO_PIN);
-  } else {
-    Serial.println("WARNING: SD Card initialization failed");
-    Serial.println("  System will continue without SD card");
-  }
-  
-  // Initialize I2S for MAX98357A
-  Serial.println("\n--- Initializing I2S Audio (MAX98357A) ---");
-  initI2S();
-  Serial.printf("  BCK: GPIO %d\n", I2S_BCK_PIN);
-  Serial.printf("  WS: GPIO %d\n", I2S_WS_PIN);
-  Serial.printf("  DOUT: GPIO %d\n", I2S_DOUT_PIN);
-  Serial.printf("  Sample Rate: %d Hz\n", SAMPLE_RATE);
-  Serial.println("  DTMF tones enabled");
-  
-  // Give I2S time to fully initialize
-  delay(100);
-  
-  /*
-  // Start audio streaming task on Core 1 (ESP32S3 is dual core)
-  Serial.println("\n--- Starting Audio Task ---");
-  xTaskCreatePinnedToCore(
-    audioTask,              // Function
-    "AudioTask",            // Name
-    8192,                   // Stack size
-    NULL,                   // Parameters
-    1,                      // Priority
-    &audioTaskHandle,       // Handle
-    1                       // Core 1 (Core 0 runs loop())
-  );
-  Serial.println("Audio task started on Core 1 (ESP32S3 dual core)");
-  delay(100);  // Let task start
-  */
-  
-  // Load configuration
-  if (!loadConfig()) {
-    Serial.println("ERROR: Failed to load configuration");
-    while (1) delay(1000);
-  }
-  
-  // Connect to WiFi
-  connectToWiFi();
-  
-  // Register device
-  if (triggerDevice && WiFi.status() == WL_CONNECTED) {
-    triggerDevice->RegisterDevice();
-    lastRegistrationTime = millis();
-  }
-  
-  Serial.println("\nSetup complete. Ready to detect phone numbers.\n");
+ return newCallState;
 }
 
-unsigned long lastTime = 0;
+TelephoneState gTelephoneState;  // XXX need to initialize
+CallState gCallState = CallState::INACTIVE;
+
+// I need a pointer to a callback function for the connection
+// A connection gets defined as
+// A callback for cancel
+// A callback for loop
+// A callback for setup
+// A callback for current status.
+// And the connection can do whatever the fuck it wants
+
+void IncomingCallTerminate() {
+  if (gTelephoneState.incomingCall) {
+    // XXX TODO send message back to caller terminating the call
+    // This means I need the address of the caller
+    gTelephoneState.incomingCall = false;
+    Serial.println("CONNECTION: Terminating incoming call");
+  }
+}
+
+void OutgoingCallTerminate() {
+  if (gTelephoneState.outgoingCall) {
+    // XXX TODO send message back to recipient terminating the call
+    // XXX this means I need the address of the recipient
+    gTelephoneState.outgoingCall = false;
+    Serial.println("CONNECTION: Terminating out going call");
+  }
+}
+
+void ConnectionCancel() {
+  if (gTelephoneState.connected) {
+    Serial.println("CONNECTION: Notifying current connection of cancelation");
+    // connectionCancelCallback(gTelephoneState, gCallState);
+    gTelephoneState.connected = false;
+  }
+}
+
+void StopSound() {
+  Serial.println("SOUND: Stopping all sounds");
+}
+
+void RingerStop() {
+  if (gTelephoneState.isRinging) {
+    Serial.println("RINGER: Stopping ringer");
+    gTelephoneState.isRinging = false;
+  }
+}
+
+void PlayDialTone() {
+  Serial.println("SOUND: Starting Dial Tone");
+}
+
+void PlayBusySignal() {
+  Serial.println("SOUND: Playing Busy Signal");
+}
+
+void PlayRinging() {
+  Serial.println("SOUND: Playing simulated Ringing");
+}
+
+void PlayIfYoudLikeToMakeACall() {
+  Serial.println("SOUND: Playing if you'd like to make a call...");
+}
+
+void PlayBeepBeepBeep() {
+  Serial.println("SOUND: Playing Beep beep beep");
+}
+
+void CancelConnections(TelephoneState& telephoneState) {
+  // stop any incoming call
+  if (telephoneState.incomingCall) {
+   IncomingCallTerminate();
+  }
+  // stop any outgoing call
+  if (telephoneState.outgoingCall) {
+    OutgoingCallTerminate();
+  }
+  // cancel any open connections
+  if (telephoneState.connected) {
+    ConnectionCancel();
+  }
+  // XXX TODO - also stop any ringing!
+}
+
+
+// This function is responsible for changing internal state variables in response to a
+// desired change in the CallState. 
+void changeState(CallState newCallState, CallState oldCallState, TelephoneState& telephoneState, unsigned long currentTime) {
+  if (newCallState != oldCallState) {
+    gInactivityTimeout = currentTime + OFF_HOOK_INACTIVITY_TIMEOUT;
+    switch (newCallState) {
+    case CallState::INACTIVE:
+      // stop sound
+      SoundStop();
+      // cancel any pending or active connections
+      CancelConnections();
+      // stop any ringing
+      if (telephoneState.isRinging) {
+         RingerStop();
+      }
+      break;
+    case CallState::DIALING:
+      // stop previous sound
+      SoundStop();
+      // Cancel any pending or active connections
+      CancelConnections();
+      // Play DTMF sound (there *should* be a button down. Just play the sound for the first one we find)
+      // XXX need to initiaize the dial sequence. Here's where we want the *changes*!!! XXX TODO
+      memset(telephoneState.dialSequence, 0, sizeof(telephoneState.dialSequence));
+      for (int i=0; i<TelephoneButtons::TOTAL; i++ ) {
+         if (telephoneState.buttonState[i] == true) {
+            PlayDTMFSound(i);  // Or is this just later - part of the state, not part of the transition?
+            break;
+         }
+      }
+      break;
+    case CallState::DIAL_TONE:
+      // change sound to dial tone
+      PlayDialTone();
+      // cancel any pending or active connections. (This will also stop ringing)
+      CancelConnections();
+      break;
+    case CallState::CONNECTION_ROUTING:
+      SoundStop();
+      RingerStop();
+      CancelIncomingConnections();
+      CancelConnectedConnections();
+      break;
+    case CallState::INCOMING:
+      SoundStop();
+      CancelConnectedConnections();
+      CancelOutgoingConnections();
+      RingerStart();
+      break;
+    case CallState::AWAITING_CONNECTION:
+      CancelIncomingConnections();
+      CancelConnectedConnections();
+      PlayRinging();
+      break;
+    case CallState::BUSY:
+      CancelIncomingConnections();
+      CancelConnectedConnections();
+      PlayBusySignal();
+      break;
+    case CallState::OFF_HOOK_TIMEOUT1:
+      CancelConnections();
+      PlayIfYoudLikeToMakeACall();
+      break;
+    case CallState::OFF_HOOK_TIMEOUT2:
+      CancelConnections();
+      PlayBeepBeepBeep();
+      break;
+    case CallState::OFF_HOOK:
+      CancelConnections();
+      SoundStop();
+      break;
+    case default:
+      Serial.println("Unknown CallState");
+      break;
+  }
+}
+
+// And then depending on the current state, we either
+// - feed the sound buffer
+// - play a dtmf tone
+// - give control to the local connection to do whatever it wants
+// - gather the dialed numbers and match against the registered local connections
+
 void loop() {
   unsigned long currentTime = millis();
-  
-  // Test: continuous tone while looping
-  // setTone(1, 2);  // Set tone for button "2" (697 Hz + 1336 Hz)
 
-/*
-  // Check WiFi
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi disconnected. Reconnecting...");
-    connectToWiFi();
-  }
-*/
-  
-  /*
-  // Periodic registration
-  if (triggerDevice && (currentTime - lastRegistrationTime >= REGISTRATION_INTERVAL)) {
-    triggerDevice->RegisterDevice();
-    lastRegistrationTime = currentTime;
-  }
-  */
-  
-  // Dial timeout
-  if (dialedNumber.length() > 0 && (currentTime - lastDigitTime > DIAL_TIMEOUT)) {
-    Serial.print("Dial timeout. Clearing: ");
-    Serial.println(dialedNumber);
+  // ── Get current state of buttons and call --------------------──────
+  GPIOChange& buttonChanges = readButtons(currentTime); // XXX need to figure out how I want to use the button changes.
+  newTelephoneState = getTelephoneState(currentTime); 
+  CallState newCallState = runStateMachine(oldCallState, newTelephoneState, oldTelephoneState, currentTime);
+  changeCallState(newCallState, oldCallState, newTelephoneState, currentTime);
+
+  bool ringerActive = getRingerActive();  // Is ringer *physically* ringing?
+
+
+  // ── Ringer (HTTP-driven via shared state) ────────────────────────────
+  updateRinger(currentTime, ringerActive);
+
+  // ── Dial timeout: clear stale partial number ─────────────────────────
+  if (dialedNumber.length() > 0 &&
+      (currentTime - lastDigitTime > DIAL_TIMEOUT)) {
+    Serial.printf("Dial timeout – clearing: %s\n", dialedNumber.c_str());
     dialedNumber = "";
   }
-  
-  uint8_t mcpGPIOData = readRegister(0x09);
 
-  // Read keypad
-  bool rowActive[4];
-  for (int r = 0; r < 4; r++) {
-    rowActive[r] = (mcpGPIOData & (1<<r)) == 0;
-  }
-  
-  bool colActive[3];
-  for (int c = 0; c < 3; c++) {
-    colActive[c] = (mcpGPIOData & (1 <<(c + 4))) == 0;
-  }
-  
-  // Check buttons
-  for (int r = 0; r < 4; r++) {
-    for (int c = 0; c < 3; c++) {
-      bool currentReading = rowActive[r] && colActive[c];
-      
-      if (currentReading != lastButtonReading[r][c]) {
-        lastDebounceTime[r][c] = currentTime;
-        lastButtonReading[r][c] = currentReading;
-      }
-      
-      if ((currentTime - lastDebounceTime[r][c]) > DEBOUNCE_DELAY) {
-        if (currentReading != buttonState[r][c]) {
-          buttonState[r][c] = currentReading;
-          
-          char key = KEYPAD[r][c];
-          if (buttonState[r][c]) {
-            Serial.print("Button PRESSED: '");
-            Serial.print(key);
-            Serial.println("'");
-            
-            // Play DTMF tone
-            playDTMF(r, c);
-            
-            if (key >= '0' && key <= '9') {
-              dialedNumber += key;
-              lastDigitTime = currentTime;
-              Serial.print("Dialed: ");
-              Serial.println(dialedNumber);
-              checkForTriggerMatch();
-            } else if (key == '#') {
-              Serial.print("Complete: ");
-              Serial.println(dialedNumber);
-              checkForTriggerMatch();
-            } else if (key == '*') {
-              Serial.println("Clearing");
-              dialedNumber = "";
-              lastDigitTime = currentTime;
-            }
-          }
-        }
-      }
-    }
-  }
-  
   delay(1);
 }
