@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BirdBath Calibration</title>
+    <title>BirdBath Configuration</title>
     <style>
         body {
             margin: 0;
@@ -259,7 +259,7 @@
     <div class="mode-banner">
         <div>
             <span class="mode-label">Mode:</span>
-            <span class="mode-indicator">CALIBRATE</span>
+            <span class="mode-indicator">CONFIGURE</span>
         </div>
         <div style="display:flex;align-items:center;">
             <span class="status-msg" id="switchStatus"></span>
@@ -272,7 +272,7 @@
     <!-- Tab bar -->
     <div class="tab-bar">
         <button class="tab-btn active" id="tab-btn-calibration"
-                onclick="showTab('calibration')">Nozzle Calibration</button>
+                        onclick="showTab('calibration')">Nozzle Calibration</button>
         <button class="tab-btn" id="tab-btn-patterns"
                 onclick="showTab('patterns')">Pattern Config</button>
     </div>
@@ -582,8 +582,8 @@
                 const r = await fetch('/mode');
                 if (r.ok) {
                     const d = await r.json();
-                    el.textContent = d.mode === 'calibrate' ? 'Calibrate Mode' : 'Wrong Mode: ' + d.mode;
-                    el.className   = 'server-status ' + (d.mode === 'calibrate' ? 'server-connected' : 'server-disconnected');
+                    el.textContent = d.mode === 'configure' ? 'Configure Mode' : 'Wrong Mode: ' + d.mode;
+                    el.className   = 'server-status ' + (d.mode === 'configure' ? 'server-connected' : 'server-disconnected');
                 } else throw new Error();
             } catch { el.textContent = 'Unreachable'; el.className = 'server-status server-disconnected'; }
         }

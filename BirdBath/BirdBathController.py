@@ -31,7 +31,7 @@ from pattern_driver import PatternDriver
 STATE_FILE = 'birdbath_state.json'
 DEFAULT_MODE = 'run'
 HTTP_PORT = 8080
-VALID_MODES = {'run', 'calibrate'}
+VALID_MODES = {'run', 'configure'}
 
 # ArtNet packet type codes (must match controller firmware)
 ARTNET_FRAME = 0
@@ -446,7 +446,7 @@ def load_configuration(config_file: str) -> Tuple[List[Dict[str, str]], float]:
 
 
 # ---------------------------------------------------------------------------
-# Driver config helpers (calibration)
+# Driver config helpers
 # ---------------------------------------------------------------------------
 
 def load_driver_config(config_file: str = 'driver_config.yaml') -> dict:
@@ -654,7 +654,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         if path in ('/', '/index.html'):
             self._serve_page(mode)
         elif path == '/nozzles':
-            self._serve_run_nozzles() if mode == 'run' else self._serve_calibrate_nozzles()
+            self._serve_run_nozzles() if mode == 'run' else self._serve_configure_nozzles()
         elif path == '/mode':
             self._send_json(200, {'mode': mode})
         elif path == '/patterns/available':
@@ -690,7 +690,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
             self._send_404()
 
     def _serve_page(self, mode: str):
-        filename = 'nozzle_visualization.html' if mode == 'run' else 'nozzle_calibration.html'
+        filename = 'nozzle_visualization.html' if mode == 'run' else 'configuration.html'
         if os.path.exists(filename):
             with open(filename, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -705,7 +705,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
     def _serve_run_nozzles(self):
         self._send_json(200, self.app_state.get_latest_frame().tolist())
 
-    def _serve_calibrate_nozzles(self):
+    def _serve_configure_nozzles(self):
         controllers = self._get_controllers()
         all_values, controller_responses = [], {}
         for idx, ctrl in enumerate(controllers):
@@ -733,7 +733,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         self._send_json(200, {'status': 'ok', 'requested_mode': target})
 
     def _get_nozzle_calibration(self, nozzle_id: int):
-        if not self._require_calibrate_mode():
+        if not self._require_configure_mode():
             return
         if not self._validate_nozzle_id(nozzle_id):
             return
@@ -742,7 +742,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         self._send_json(200, {'nozzle_id': nozzle_id, 'calibration': {'low': rng[0], 'high': rng[1]}})
 
     def _set_nozzle_calibration(self, nozzle_id: int, endpoint: str):
-        if not self._require_calibrate_mode():
+        if not self._require_configure_mode():
             return
         if not self._validate_nozzle_id(nozzle_id):
             return
@@ -766,7 +766,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         self._send_json(200, {'nozzle_id': nozzle_id, 'range': config['ranges'][nozzle_id]})
 
     def _set_nozzle_position(self, nozzle_id: int):
-        if not self._require_calibrate_mode():
+        if not self._require_configure_mode():
             return
         if not self._validate_nozzle_id(nozzle_id):
             return
@@ -785,9 +785,9 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         else:
             self._send_json(500, {'error': f'Failed to send ArtNet to nozzle {nozzle_id}'})
 
-    def _require_calibrate_mode(self) -> bool:
-        if self.app_state.mode != 'calibrate':
-            self._send_json(409, {'error': 'Only available in calibrate mode'})
+    def _require_configure_mode(self) -> bool:
+        if self.app_state.mode != 'configure':
+            self._send_json(409, {'error': 'Only available in configure mode'})
             return False
         return True
 
@@ -845,8 +845,8 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
             self._send_json(500, {'error': f'Error reading config: {e}'})
 
     def _put_patterns_config(self):
-        """Validate and atomically write a new patterns.yaml. Calibrate mode only."""
-        if not self._require_calibrate_mode():
+        """Validate and atomically write a new patterns.yaml. Configure mode only."""
+        if not self._require_configure_mode():
             return
         body = self._read_json_body()
         if body is None:
@@ -930,7 +930,7 @@ def main():
                         default='driver_config.yaml',
                         help='Driver/calibration config file (default: driver_config.yaml)')
     parser.add_argument('--mode', choices=list(VALID_MODES), default=None,
-                        help='Override startup mode (run|calibrate); persists as new default')
+                        help='Override startup mode (run|configure); persists as new default')
     parser.add_argument('--port', type=int, default=HTTP_PORT,
                         help=f'HTTP server port (default: {HTTP_PORT})')
     parser.add_argument('--daemon', '-d',
@@ -949,15 +949,15 @@ def main():
     print(f"BirdBathController starting. Mode: '{initial_mode}'. Web UI: http://localhost:{args.port}/")
 
     # Outer mode loop — runs forever until Ctrl+C.
-    # Mode transitions (calibrate ↔ run) restart this loop without creating
+    # Mode transitions (configure ↔ run) restart this loop without creating
     # a new HTTP server or a new AppState.
     while True:
       try:
         current_mode = app_state.mode
 
-        # If in calibrate mode, just wait for a run transition
-        if current_mode == 'calibrate':
-            print("Calibrate mode active. Use the web UI to switch to run mode.")
+        # If in configure mode, just wait for a run transition
+        if current_mode == 'configure':
+            print("Configure mode active. Use the web UI to switch to run mode.")
             while True:
                 next_mode = app_state.wait_for_transition_request(timeout=1.0)
                 if next_mode == 'run':
@@ -1197,7 +1197,7 @@ def main():
             with app_state.lock:
                 app_state._set_mode_unsafe(pending_mode)
             save_persisted_mode(pending_mode)
-            # Loop back; the calibrate or run branch at the top will handle the new mode.
+            # Loop back; the configure or run branch at the top will handle the new mode.
             continue
 
       except FileNotFoundError as e:
