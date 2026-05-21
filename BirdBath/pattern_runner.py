@@ -42,12 +42,15 @@ class PatternRunner:
             if hasattr(current_module, self.pattern_class_name):
                 pattern_class = getattr(current_module, self.pattern_class_name)
             else:
-                # If not found in main, try to import from a module with various naming conventions
+                # If not found in main, try to import from a module with various naming conventions.
+                # snake_case conversion: AmplitudePattern -> amplitude_pattern
+                snake = ''.join(['_' + c.lower() if c.isupper() and i > 0 else c.lower()
+                                 for i, c in enumerate(self.pattern_class_name)])
                 module_names_to_try = [
                     self.pattern_class_name.lower(),  # TestPattern -> testpattern
-                    # Convert CamelCase to snake_case: TestPattern -> test_pattern
-                    ''.join(['_' + c.lower() if c.isupper() and i > 0 else c.lower()
-                            for i, c in enumerate(self.pattern_class_name)])
+                    snake,                            # AmplitudePattern -> amplitude_pattern
+                    f'patterns.{snake}',              # patterns/amplitude_pattern.py
+                    f'patterns.{self.pattern_class_name.lower()}',
                 ]
 
                 pattern_class = None

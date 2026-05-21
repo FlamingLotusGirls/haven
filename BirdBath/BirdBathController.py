@@ -5,6 +5,7 @@ BirdBathController - Main controller for running pattern processes.
 
 import sys
 import argparse
+import importlib
 import multiprocessing
 import time
 import yaml
@@ -469,6 +470,43 @@ def _save_driver_config(config: dict, config_file: str = 'driver_config.yaml'):
     os.replace(tmp, config_file)
 
 
+def discover_available_patterns(patterns_dir: str = 'patterns') -> List[str]:
+    """
+    Scan the patterns/ package directory and return the names of all concrete
+    Pattern subclasses found there.
+
+    Each *.py file (except __init__.py) is imported as patterns.<stem>.
+    Any class that is a non-abstract subclass of Pattern is included.
+    importlib caches modules in sys.modules, so repeated calls are cheap.
+    """
+    import glob
+    import inspect as _inspect
+    from pattern import Pattern as _Pattern
+
+    found: List[str] = []
+    pattern_files = glob.glob(os.path.join(patterns_dir, '*.py'))
+
+    for filepath in sorted(pattern_files):
+        stem = os.path.splitext(os.path.basename(filepath))[0]
+        if stem == '__init__':
+            continue
+        module_name = f'patterns.{stem}'
+        try:
+            module = importlib.import_module(module_name)
+        except Exception as e:
+            print(f"Warning: could not import {module_name}: {e}")
+            continue
+
+        for name, obj in _inspect.getmembers(module, _inspect.isclass):
+            if (issubclass(obj, _Pattern)
+                    and obj is not _Pattern
+                    and not _inspect.isabstract(obj)
+                    and obj.__module__ == module_name):
+                found.append(name)
+
+    return sorted(found)
+
+
 # ---------------------------------------------------------------------------
 # Run mode lifecycle helpers
 # ---------------------------------------------------------------------------
@@ -606,6 +644,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
     """
     app_state: AppState = None
     driver_config_file: str = 'driver_config.yaml'
+    patterns_config_file: str = 'patterns.yaml'
     _controllers_cache: Optional[list] = None
 
     def do_GET(self):
@@ -618,6 +657,10 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
             self._serve_run_nozzles() if mode == 'run' else self._serve_calibrate_nozzles()
         elif path == '/mode':
             self._send_json(200, {'mode': mode})
+        elif path == '/patterns/available':
+            self._get_available_patterns()
+        elif path == '/patterns/config':
+            self._get_patterns_config()
         else:
             m = re.match(r'^/nozzle/(\d+)/calibration$', path)
             if m:
@@ -634,6 +677,9 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         m = re.match(r'^/nozzle/(\d+)/position$', path)
         if m:
             self._set_nozzle_position(int(m.group(1)))
+            return
+        if path == '/patterns/config':
+            self._put_patterns_config()
             return
         self._send_404()
 
@@ -779,6 +825,71 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _get_available_patterns(self):
+        """Return list of all concrete Pattern subclasses in the patterns/ directory."""
+        try:
+            names = discover_available_patterns()
+            self._send_json(200, {'patterns': names})
+        except Exception as e:
+            self._send_json(500, {'error': f'Error discovering patterns: {e}'})
+
+    def _get_patterns_config(self):
+        """Return current patterns.yaml as JSON."""
+        try:
+            with open(self.patterns_config_file, 'r') as f:
+                config = yaml.safe_load(f)
+            self._send_json(200, config)
+        except FileNotFoundError:
+            self._send_json(404, {'error': f'Config file not found: {self.patterns_config_file}'})
+        except Exception as e:
+            self._send_json(500, {'error': f'Error reading config: {e}'})
+
+    def _put_patterns_config(self):
+        """Validate and atomically write a new patterns.yaml. Calibrate mode only."""
+        if not self._require_calibrate_mode():
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+
+        # Validate structure
+        patterns = body.get('patterns')
+        if not isinstance(patterns, list) or len(patterns) == 0:
+            self._send_json(400, {'error': "\"patterns\" must be a non-empty list"}); return
+        if len(patterns) > 6:
+            self._send_json(400, {'error': 'Maximum 6 patterns allowed'}); return
+
+        available = discover_available_patterns()
+        for i, entry in enumerate(patterns):
+            if not isinstance(entry, dict):
+                self._send_json(400, {'error': f'Entry {i} must be an object'}); return
+            if 'pattern' not in entry or 'input_channel' not in entry:
+                self._send_json(400, {'error': f"Entry {i} must have 'pattern' and 'input_channel'"}); return
+            if entry['pattern'] not in available:
+                self._send_json(400, {'error': f"Unknown pattern '{entry['pattern']}'. Available: {available}"}); return
+            if not isinstance(entry['input_channel'], str) or not entry['input_channel']:
+                self._send_json(400, {'error': f"Entry {i}: 'input_channel' must be a non-empty string"}); return
+
+        frame_interval_ms = body.get('frame_interval_ms', 100)
+        if not isinstance(frame_interval_ms, (int, float)) or frame_interval_ms <= 0:
+            self._send_json(400, {'error': "'frame_interval_ms' must be a positive number"}); return
+
+        # Build the config dict and write atomically
+        new_config = {
+            'patterns': [{'pattern': e['pattern'], 'input_channel': e['input_channel']}
+                         for e in patterns],
+            'frame_interval_ms': frame_interval_ms,
+        }
+        tmp = self.patterns_config_file + '.tmp'
+        try:
+            with open(tmp, 'w') as f:
+                yaml.dump(new_config, f, default_flow_style=False, indent=2)
+            os.replace(tmp, self.patterns_config_file)
+        except Exception as e:
+            self._send_json(500, {'error': f'Error writing config: {e}'}); return
+
+        self._send_json(200, {'status': 'ok', 'config': new_config})
+
     def _send_404(self):
         self._send_json(404, {'error': 'Not Found'})
 
@@ -786,18 +897,22 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         print(f"[HTTP {time.strftime('%H:%M:%S')}] {fmt % args}")
 
 
-def make_handler_class(app_state: AppState, driver_config_file: str):
+def make_handler_class(app_state: AppState, driver_config_file: str,
+                       patterns_config_file: str = 'patterns.yaml'):
     """Return a BirdbathHTTPHandler subclass with class-level state injected."""
     class Handler(BirdbathHTTPHandler):
         pass
     Handler.app_state = app_state
     Handler.driver_config_file = driver_config_file
+    Handler.patterns_config_file = patterns_config_file
     return Handler
 
 
-def start_http_server(app_state: AppState, port: int, driver_config_file: str) -> HTTPServer:
+def start_http_server(app_state: AppState, port: int, driver_config_file: str,
+                      patterns_config_file: str = 'patterns.yaml') -> HTTPServer:
     """Start the HTTP server on a daemon thread; return the server object."""
-    server = HTTPServer(('0.0.0.0', port), make_handler_class(app_state, driver_config_file))
+    server = HTTPServer(('0.0.0.0', port),
+                        make_handler_class(app_state, driver_config_file, patterns_config_file))
     threading.Thread(target=server.serve_forever, daemon=True, name="HTTPServer").start()
     print(f"HTTP server started on http://0.0.0.0:{port}/")
     return server
@@ -824,17 +939,23 @@ def main():
 
     args = parser.parse_args()
 
-    # Mode persistence and HTTP server (always running)
+    # Mode persistence and HTTP server (started ONCE, reused across all mode transitions)
     if args.mode is not None:
         save_persisted_mode(args.mode)
-    current_mode = args.mode or load_persisted_mode()
-    app_state = AppState(current_mode)
-    http_server = start_http_server(app_state, args.port, args.driver_config)
+    initial_mode = args.mode or load_persisted_mode()
+    app_state = AppState(initial_mode)
+    http_server = start_http_server(app_state, args.port, args.driver_config, args.config)
 
-    print(f"BirdBathController starting. Mode: '{current_mode}'. Web UI: http://localhost:{args.port}/")
+    print(f"BirdBathController starting. Mode: '{initial_mode}'. Web UI: http://localhost:{args.port}/")
 
-    try:
-        # If starting in calibrate mode, skip subprocess setup entirely
+    # Outer mode loop — runs forever until Ctrl+C.
+    # Mode transitions (calibrate ↔ run) restart this loop without creating
+    # a new HTTP server or a new AppState.
+    while True:
+      try:
+        current_mode = app_state.mode
+
+        # If in calibrate mode, just wait for a run transition
         if current_mode == 'calibrate':
             print("Calibrate mode active. Use the web UI to switch to run mode.")
             while True:
@@ -844,8 +965,7 @@ def main():
                         app_state._set_mode_unsafe('run')
                     save_persisted_mode('run')
                     break
-            main()  # NB - this weirdness is temporary. Will put all code in an if block for the mode.
-            return
+            continue   # back to top of while True; will now enter run-mode branch
 
         # Load pattern configuration
         patterns, frame_interval = load_configuration(args.config)
@@ -1069,35 +1189,24 @@ def main():
             print("All processes terminated")
             return  # Ctrl+C path exits here; fall-through only on mode switch
 
-        # --- Mode-switch path: frame loop exited via break, not Ctrl+C ---
+        # --- Mode-switch path: frame loop exited via break (not Ctrl+C) ---
         if pending_mode:
             pipe_reader.close_pipe()
-            stop_run_mode(app_state)  # shuts down driver + pattern subprocesses
+            stop_run_mode(app_state)
 
             with app_state.lock:
                 app_state._set_mode_unsafe(pending_mode)
             save_persisted_mode(pending_mode)
+            # Loop back; the calibrate or run branch at the top will handle the new mode.
+            continue
 
-            if pending_mode == 'calibrate':
-                print("Calibrate mode active. Use the web UI to switch back to run mode.")
-                while True:
-                    next_mode = app_state.wait_for_transition_request(timeout=1.0)
-                    if next_mode == 'run':
-                        with app_state.lock:
-                            app_state._set_mode_unsafe('run')
-                        save_persisted_mode('run')
-                        break
-                # Restart the run loop (re-enters main() with updated persisted mode)
-                main()
-                return
-
-    except FileNotFoundError as e:
+      except FileNotFoundError as e:
         print(f"Configuration file error: {str(e)}")
         sys.exit(1)
-    except (yaml.YAMLError, ValueError) as e:
+      except (yaml.YAMLError, ValueError) as e:
         print(f"Configuration error: {str(e)}")
         sys.exit(1)
-    except Exception as e:
+      except Exception as e:
         print(f"Error: {str(e)}")
         sys.exit(1)
 
