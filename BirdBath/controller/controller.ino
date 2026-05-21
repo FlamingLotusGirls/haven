@@ -3,15 +3,24 @@
 #include <Adafruit_NeoPixel.h>
 #include <WiFiUdp.h>
 
+// NB - 'ArtMode' is, effectively, an attract mode. In the original LightCurve code, it
+// ran when there was no communication with the controlling RPI.
+// For the birdbath, I do not want an attract mode. If there is no communication with
+// the controller, the birdbath servos should stay as they are.
 // #define USE_ARTMODE
+
+// NB - The original Lightcurve used a solenoid valve to turn a poofing effect on or off.
+// In the birdbath, all the outputs are intended to be lit all the time, and there
+// is no solenoid in the system.
+// (Whether this continues to be true as the birdbath evolves, we'll see. I do have 36 
+// solenoids just waiting a chance to be put in, assuming we add some ignition system.)
 // #define USE_SOLENOIDS
 
 #define board_version 2
 
-// NB - The three board addresses are hardcoded to 4, 5, 6. 
-// Must recompile when generating software for a different board
+// Board addresses are chosen from the setting of three pins on the main DIP switch
+// (marked AUX6, AUX7 and AUX8)
 const int BOARD_ADDRESSES[] = {3,4,5,6,7,8,2,1};
-// #define BOARD_ADDRESS 4
 
 #define ARTNET_FRAME 0
 #define ARTNET_NOZZLE 1
@@ -33,8 +42,6 @@ PCA9539 pca9539(0x77);
 #include <ArtnetWifi.h>
 
 IPAddress gateway(10, 0, 0, 9);  // NB - Controlling rpi is acting as access point and router
-//IPAddress ip(192, 168, 13, BOARD_ADDRESS);
-//IPAddress gateway(192, 168, 13, 1);
 IPAddress subnet(255, 255, 255, 0);
 const char *ssid = "birdbath";
 const char *password = "flg-birdbath";
@@ -335,7 +342,6 @@ void beginWifi()
   int dipValue = 7 - ((switches.GetValue(Switches::SW_DIP1) << 2) + (switches.GetValue(Switches::SW_DIP2) << 1) + switches.GetValue(Switches::SW_DIP3));
   Serial.print("DIP value is ");
   Serial.println(dipValue);
-  // int boardAddress = 4;
   int boardAddress = BOARD_ADDRESSES[dipValue];
   Serial.print("Board address is ");
   Serial.println(boardAddress);
