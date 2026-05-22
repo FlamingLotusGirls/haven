@@ -23,6 +23,20 @@ from typing import List, Dict, Any, Optional, Tuple
 from pattern_runner import PatternRunner
 from pattern_driver import PatternDriver
 
+# ---------------------------------------------------------------------------
+# Beertap calibration support (optional — hardware libraries only on Pi)
+# ---------------------------------------------------------------------------
+_beertaps_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'beertaps')
+if _beertaps_dir not in sys.path:
+    sys.path.insert(0, _beertaps_dir)
+try:
+    import beertap_calibration_core
+    _BEERTAPS_AVAILABLE = True
+except Exception as e:
+    print(f"Exception loading beertap core {e}")
+    beertap_calibration_core = None  # type: ignore
+    _BEERTAPS_AVAILABLE = False
+
 
 # ---------------------------------------------------------------------------
 # Mode persistence
@@ -306,6 +320,9 @@ class AppState:
         # Mode transition request
         self._transition_target: Optional[str] = None
         self._transition_event = threading.Event()
+        # Mock input support
+        self._input_source: str = 'hardware'   # 'hardware' | 'mock'
+        self._mock_inputs: Dict[str, float] = {}
 
     @property
     def mode(self) -> str:
@@ -367,6 +384,26 @@ class AppState:
             target = self._transition_target
             self._transition_target = None
         return target
+
+    # ------------------------------------------------------------------
+    # Mock input helpers
+    # ------------------------------------------------------------------
+
+    def get_input_source(self) -> str:
+        with self.lock:
+            return self._input_source
+
+    def set_input_source(self, source: str) -> None:
+        with self.lock:
+            self._input_source = source
+
+    def set_mock_input(self, channel: str, value: float) -> None:
+        with self.lock:
+            self._mock_inputs[channel] = max(-1.0, min(1.0, float(value)))
+
+    def get_mock_inputs(self) -> Dict[str, float]:
+        with self.lock:
+            return dict(self._mock_inputs)
 
 
 def load_configuration(config_file: str) -> Tuple[List[Dict[str, str]], float]:
@@ -645,6 +682,7 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
     app_state: AppState = None
     driver_config_file: str = 'driver_config.yaml'
     patterns_config_file: str = 'patterns.yaml'
+    calibrate_json: str = 'beertaps/calibrate.json'
     _controllers_cache: Optional[list] = None
 
     def do_GET(self):
@@ -661,12 +699,22 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
             self._get_available_patterns()
         elif path == '/patterns/config':
             self._get_patterns_config()
+        elif path == '/beertaps/channels':
+            self._get_beertap_channels()
+        elif path == '/beertaps/service':
+            self._get_beertap_service()
+        elif path == '/input/source':
+            self._get_input_source()
         else:
             m = re.match(r'^/nozzle/(\d+)/calibration$', path)
             if m:
                 self._get_nozzle_calibration(int(m.group(1)))
-            else:
-                self._send_404()
+                return
+            m = re.match(r'^/beertaps/channels/([^/]+)/voltage$', path)
+            if m:
+                self._get_beertap_voltage(m.group(1))
+                return
+            self._send_404()
 
     def do_PUT(self):
         path = urlparse(self.path).path
@@ -681,12 +729,27 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
         if path == '/patterns/config':
             self._put_patterns_config()
             return
+        m = re.match(r'^/beertaps/channels/([^/]+)/calibration$', path)
+        if m:
+            self._put_beertap_calibration(m.group(1))
+            return
         self._send_404()
 
     def do_POST(self):
-        if urlparse(self.path).path == '/mode':
+        path = urlparse(self.path).path
+        if path == '/mode':
             self._handle_mode_switch()
+        elif path == '/input/source':
+            self._post_input_source()
+        elif path == '/input/mock':
+            self._post_input_mock()
+        elif path == '/beertaps/service':
+            self._post_beertap_service()
         else:
+            m = re.match(r'^/beertaps/channels/([^/]+)/capture$', path)
+            if m:
+                self._post_beertap_capture(m.group(1))
+                return
             self._send_404()
 
     def _serve_page(self, mode: str):
@@ -890,6 +953,155 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
 
         self._send_json(200, {'status': 'ok', 'config': new_config})
 
+    # -----------------------------------------------------------------------
+    # Beertap endpoints
+    # -----------------------------------------------------------------------
+
+    def _get_beertap_channels(self):
+        """Return all tap channel names and current calibration values (JSON only)."""
+        if not _BEERTAPS_AVAILABLE:
+            self._send_json(503, {'error': 'Beertap support not available on this host'})
+            return
+        try:
+            channels = beertap_calibration_core.load_all_channels(self.calibrate_json)
+            result = [info.to_dict() for info in sorted(channels.values(), key=lambda c: c.name)]
+            self._send_json(200, {'channels': result})
+        except Exception as e:
+            self._send_json(500, {'error': str(e)})
+
+    def _get_beertap_service(self):
+        """Return status of all adc-reader systemd services."""
+        if not _BEERTAPS_AVAILABLE:
+            self._send_json(503, {'error': 'Beertap support not available'})
+            return
+        try:
+            status = beertap_calibration_core.get_service_status()
+            all_active = all(v == 'active' for v in status.values())
+            all_inactive = all(v != 'active' for v in status.values())
+            summary = 'active' if all_active else ('inactive' if all_inactive else 'mixed')
+            self._send_json(200, {'services': status, 'summary': summary})
+        except Exception as e:
+            self._send_json(500, {'error': str(e)})
+
+    def _post_beertap_service(self):
+        """Start or stop all adc-reader services.  Body: {"action": "start"|"stop"}"""
+        if not _BEERTAPS_AVAILABLE:
+            self._send_json(503, {'error': 'Beertap support not available'})
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        action = body.get('action')
+        if action not in ('start', 'stop'):
+            self._send_json(400, {'error': "action must be 'start' or 'stop'"})
+            return
+        try:
+            if action == 'stop':
+                ok, msg = beertap_calibration_core.stop_adc_services()
+            else:
+                ok, msg = beertap_calibration_core.start_adc_services()
+            code = 200 if ok else 500
+            self._send_json(code, {'ok': ok, 'message': msg,
+                                   'services': beertap_calibration_core.get_service_status()})
+        except Exception as e:
+            self._send_json(500, {'error': str(e)})
+
+    def _get_beertap_voltage(self, channel_name: str):
+        """Read a single live voltage sample.  Service must be stopped."""
+        if not _BEERTAPS_AVAILABLE:
+            self._send_json(503, {'error': 'Beertap support not available'})
+            return
+        try:
+            voltage, calibrated = beertap_calibration_core.read_voltage(channel_name,
+                                                                         self.calibrate_json)
+            self._send_json(200, {'channel': channel_name,
+                                  'voltage': voltage,
+                                  'calibrated': calibrated})
+        except Exception as e:
+            # I2CDeviceInUseError, ValueError, ImportError all land here
+            self._send_json(409, {'error': str(e)})
+
+    def _post_beertap_capture(self, channel_name: str):
+        """
+        Run a timed min-max capture.  Blocks until complete.
+        Body: {"duration": <seconds, default 10>}
+        """
+        if not _BEERTAPS_AVAILABLE:
+            self._send_json(503, {'error': 'Beertap support not available'})
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        duration = float(body.get('duration', 10.0))
+        if duration <= 0 or duration > 120:
+            self._send_json(400, {'error': 'duration must be between 0 and 120 seconds'})
+            return
+        try:
+            result = beertap_calibration_core.capture_minmax(
+                channel_name, duration=duration, calibrate_json=self.calibrate_json)
+            self._send_json(200, result.to_dict())
+        except Exception as e:
+            self._send_json(409, {'error': str(e)})
+
+    def _put_beertap_calibration(self, channel_name: str):
+        """Save calibration values for a channel.  Body: {"min_voltage": V, "max_voltage": V}"""
+        if not _BEERTAPS_AVAILABLE:
+            self._send_json(503, {'error': 'Beertap support not available'})
+            return
+        body = self._read_json_body()
+        if body is None:
+            return
+        try:
+            min_v = float(body['min_voltage'])
+            max_v = float(body['max_voltage'])
+        except (KeyError, TypeError, ValueError) as e:
+            self._send_json(400, {'error': f'min_voltage and max_voltage (floats) required: {e}'})
+            return
+        try:
+            beertap_calibration_core.save_calibration(channel_name, min_v, max_v, self.calibrate_json)
+            self._send_json(200, {'channel': channel_name,
+                                  'min_voltage': min_v, 'max_voltage': max_v})
+        except Exception as e:
+            self._send_json(500, {'error': str(e)})
+
+    # -----------------------------------------------------------------------
+    # Mock input endpoints
+    # -----------------------------------------------------------------------
+
+    def _get_input_source(self):
+        """Return current input source and all mock channel values."""
+        self._send_json(200, {
+            'source': self.app_state.get_input_source(),
+            'channels': self.app_state.get_mock_inputs(),
+        })
+
+    def _post_input_source(self):
+        """Switch input source.  Body: {"source": "hardware"|"mock"}"""
+        body = self._read_json_body()
+        if body is None:
+            return
+        source = body.get('source')
+        if source not in ('hardware', 'mock'):
+            self._send_json(400, {'error': "source must be 'hardware' or 'mock'"})
+            return
+        self.app_state.set_input_source(source)
+        self._send_json(200, {'source': source})
+
+    def _post_input_mock(self):
+        """Set a mock value for one channel.  Body: {"channel": "tap1", "value": 0.5}"""
+        body = self._read_json_body()
+        if body is None:
+            return
+        try:
+            channel = str(body['channel'])
+            value = float(body['value'])
+        except (KeyError, TypeError, ValueError) as e:
+            self._send_json(400, {'error': f'channel (str) and value (float) required: {e}'})
+            return
+        clamped = max(-1.0, min(1.0, value))
+        self.app_state.set_mock_input(channel, clamped)
+        self._send_json(200, {'channel': channel, 'value': clamped})
+
     def _send_404(self):
         self._send_json(404, {'error': 'Not Found'})
 
@@ -898,21 +1110,25 @@ class BirdbathHTTPHandler(BaseHTTPRequestHandler):
 
 
 def make_handler_class(app_state: AppState, driver_config_file: str,
-                       patterns_config_file: str = 'patterns.yaml'):
+                       patterns_config_file: str = 'patterns.yaml',
+                       calibrate_json: str = 'beertaps/calibrate.json'):
     """Return a BirdbathHTTPHandler subclass with class-level state injected."""
     class Handler(BirdbathHTTPHandler):
         pass
     Handler.app_state = app_state
     Handler.driver_config_file = driver_config_file
     Handler.patterns_config_file = patterns_config_file
+    Handler.calibrate_json = calibrate_json
     return Handler
 
 
 def start_http_server(app_state: AppState, port: int, driver_config_file: str,
-                      patterns_config_file: str = 'patterns.yaml') -> HTTPServer:
+                      patterns_config_file: str = 'patterns.yaml',
+                      calibrate_json: str = 'beertaps/calibrate.json') -> HTTPServer:
     """Start the HTTP server on a daemon thread; return the server object."""
     server = HTTPServer(('0.0.0.0', port),
-                        make_handler_class(app_state, driver_config_file, patterns_config_file))
+                        make_handler_class(app_state, driver_config_file,
+                                           patterns_config_file, calibrate_json))
     threading.Thread(target=server.serve_forever, daemon=True, name="HTTPServer").start()
     print(f"HTTP server started on http://0.0.0.0:{port}/")
     return server
@@ -944,7 +1160,8 @@ def main():
         save_persisted_mode(args.mode)
     initial_mode = args.mode or load_persisted_mode()
     app_state = AppState(initial_mode)
-    http_server = start_http_server(app_state, args.port, args.driver_config, args.config)
+    http_server = start_http_server(app_state, args.port, args.driver_config,
+                                    args.config)
 
     print(f"BirdBathController starting. Mode: '{initial_mode}'. Web UI: http://localhost:{args.port}/")
 
@@ -1071,11 +1288,18 @@ def main():
                 # Read all channel values from hardware pipe
                 pipe_reader.read_latest_values()
 
+                # Determine whether to use hardware pipe or mock values this frame
+                _input_source = app_state.get_input_source()
+                _mock_inputs = app_state.get_mock_inputs() if _input_source == 'mock' else None
+
                 # Send frame request to all pattern processes with channel-specific values
                 for i, (process, pattern_name, input_channel, process_id) in enumerate(processes):
                     try:
                         # Get the input value for this pattern's specific channel
-                        input_value = pipe_reader.get_channel_value(input_channel)
+                        if _mock_inputs is not None:
+                            input_value = _mock_inputs.get(input_channel, 0.0)
+                        else:
+                            input_value = pipe_reader.get_channel_value(input_channel)
                         pipes[i].send(('start_frame', input_value))
                     except Exception as e:
                         print(f"Error sending frame request to process {i} ({pattern_name}): {str(e)}")

@@ -1,0 +1,18 @@
+# /etc/sudoers.d/birdbath-adc
+#
+# Allow the BirdBath service account to start/stop the ADC reader services
+# without a password.  Install with:
+#   sudo cp beertaps/sudoers.d/birdbath-adc /etc/sudoers.d/birdbath-adc
+#   sudo chmod 440 /etc/sudoers.d/birdbath-adc
+#
+# Replace "birdbath" below with the actual service account user name.
+
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl start  adc-reader-1.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl stop   adc-reader-1.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl start  adc-reader-2.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl stop   adc-reader-2.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl start  adc-reader-3.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl stop   adc-reader-3.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl is-active adc-reader-1.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl is-active adc-reader-2.service
+birdbath ALL=(ALL) NOPASSWD: /bin/systemctl is-active adc-reader-3.service

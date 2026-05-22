@@ -275,6 +275,8 @@
                         onclick="showTab('calibration')">Nozzle Calibration</button>
         <button class="tab-btn" id="tab-btn-patterns"
                 onclick="showTab('patterns')">Pattern Config</button>
+        <button class="tab-btn" id="tab-btn-beertaps"
+                onclick="showTab('beertaps')">Beertap Cal</button>
     </div>
 
     <!-- ================================================================
@@ -398,6 +400,389 @@
 
     </div><!-- #tab-patterns -->
 
+    <!-- ================================================================
+         TAB 3: Beertap Calibration
+         ================================================================ -->
+    <div class="tab-panel" id="tab-beertaps">
+        <div style="padding:16px 20px;width:100%;box-sizing:border-box;">
+
+            <!-- Service status bar -->
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;
+                        background:#1e1e1e;border:1px solid #444;border-radius:6px;padding:12px 16px;">
+                <span style="color:#aaa;font-size:14px;font-weight:bold;">ADC Services:</span>
+                <span id="btSvcSummary" style="font-size:14px;font-weight:bold;color:#888;">—</span>
+                <div id="btSvcDetails" style="flex:1;font-size:12px;color:#777;"></div>
+                <button class="btn btn-warning" onclick="btStopServices()" id="btStopBtn">Stop Services</button>
+                <button class="btn btn-success" onclick="btStartServices()" id="btStartBtn">Start Services</button>
+                <button class="btn btn-secondary" onclick="btRefreshAll()" style="padding:6px 12px;">↻ Refresh</button>
+            </div>
+
+            <!-- Channel grid -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:20px;"
+                 id="btChannelGrid"></div>
+
+            <!-- Selected channel detail -->
+            <div id="btDetail" style="display:none;background:#1a1a1a;border:1px solid #555;
+                                       border-radius:8px;padding:16px;max-width:600px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                    <h3 style="margin:0;color:#fff;" id="btDetailTitle">tap1</h3>
+                    <button onclick="btDeselectChannel()" style="background:none;border:none;color:#aaa;
+                            font-size:18px;cursor:pointer;">✕</button>
+                </div>
+
+                <!-- Live voltage -->
+                <div style="background:#111;border-radius:6px;padding:10px 14px;margin-bottom:12px;">
+                    <div style="font-size:12px;color:#888;margin-bottom:4px;">Live Voltage
+                        <span id="btLiveStatus" style="margin-left:8px;font-size:11px;color:#666;">(stop services to read)</span>
+                    </div>
+                    <div style="display:flex;align-items:baseline;gap:16px;">
+                        <span id="btVoltageDisplay" style="font-size:28px;font-weight:bold;color:#4ecdc4;font-family:monospace;">—</span>
+                        <span style="font-size:13px;color:#aaa;">→ output</span>
+                        <span id="btCalibratedDisplay" style="font-size:22px;color:#ffd700;font-family:monospace;">—</span>
+                    </div>
+                    <!-- voltage bar -->
+                    <div style="margin-top:6px;height:8px;background:#333;border-radius:4px;overflow:hidden;">
+                        <div id="btVoltageBar" style="height:100%;width:50%;background:#4ecdc4;transition:width 0.1s;"></div>
+                    </div>
+                </div>
+
+                <!-- Current calibration -->
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+                    <div style="background:#111;padding:8px 12px;border-radius:4px;">
+                        <div style="font-size:11px;color:#888;">Min voltage</div>
+                        <div id="btCurrentMin" style="font-size:16px;color:#ff6b6b;font-family:monospace;">—</div>
+                    </div>
+                    <div style="background:#111;padding:8px 12px;border-radius:4px;">
+                        <div style="font-size:11px;color:#888;">Max voltage</div>
+                        <div id="btCurrentMax" style="font-size:16px;color:#45b7d1;font-family:monospace;">—</div>
+                    </div>
+                </div>
+
+                <!-- Action buttons -->
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn-warning" onclick="btSetMin()" id="btSetMinBtn">Set Current as Min</button>
+                    <button class="btn btn-success" onclick="btSetMax()" id="btSetMaxBtn">Set Current as Max</button>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+                    <button class="btn btn-primary" onclick="btStartCapture()" id="btCaptureBtn">Timed Capture</button>
+                    <input type="number" id="btCaptureDuration" value="10" min="2" max="60"
+                           style="width:60px;background:#333;border:1px solid #555;color:#fff;padding:4px 6px;border-radius:4px;">
+                    <span style="color:#aaa;font-size:13px;">seconds — sweep handle through full range</span>
+                </div>
+
+                <!-- Capture progress / result -->
+                <div id="btCaptureProgress" style="display:none;background:#111;border-radius:6px;padding:10px 14px;margin-bottom:10px;">
+                    <div style="font-size:13px;color:#ffd700;margin-bottom:4px;" id="btCaptureMsg">Capturing…</div>
+                    <div style="height:6px;background:#333;border-radius:3px;overflow:hidden;">
+                        <div id="btCaptureBar" style="height:100%;width:0%;background:#ffd700;transition:width 0.5s;"></div>
+                    </div>
+                </div>
+                <div id="btCaptureResult" style="display:none;background:#111;border-radius:6px;
+                                                  padding:10px 14px;margin-bottom:10px;">
+                    <div style="font-size:13px;color:#5dba85;margin-bottom:6px;">✓ Capture complete</div>
+                    <div style="font-size:12px;color:#ccc;" id="btCaptureResultText"></div>
+                    <div style="display:flex;gap:8px;margin-top:8px;">
+                        <button class="btn btn-success" onclick="btApplyCaptureResult()" id="btApplyBtn">Apply & Save</button>
+                        <button class="btn btn-secondary" onclick="btDiscardCaptureResult()">Discard</button>
+                    </div>
+                </div>
+
+                <div id="btDetailMsg" style="font-size:13px;margin-top:4px;"></div>
+            </div>
+        </div>
+    </div><!-- #tab-beertaps -->
+
+    <script>
+        // Beertap Calibration tab
+        // ----------------------------------------------------------------
+        let btSelectedChannel = null;      // name of selected tap
+        let btChannelData     = {};        // {name: {calibration:{min_voltage, max_voltage}, ...}}
+        let btLiveInterval    = null;      // setInterval handle for live voltage polling
+        let btServiceStopped  = false;     // true when all services inactive
+        let btLastCapture     = null;      // CaptureResult from last timed capture
+        let btCaptureTimeout  = null;      // fake progress timer
+
+        async function btRefreshAll() {
+            await Promise.all([btLoadChannels(), btLoadServiceStatus()]);
+        }
+
+        async function btLoadChannels() {
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/channels`);
+                if (!resp.ok) { btChannelData = {}; renderBtGrid(); return; }
+                const data = await resp.json();
+                btChannelData = {};
+                (data.channels || []).forEach(ch => { btChannelData[ch.name] = ch; });
+                renderBtGrid();
+                // If we have a selected channel, refresh its detail
+                if (btSelectedChannel && btChannelData[btSelectedChannel]) {
+                    btShowDetail(btSelectedChannel);
+                }
+            } catch (e) { console.error('btLoadChannels', e); }
+        }
+
+        async function btLoadServiceStatus() {
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/service`);
+                const data = resp.ok ? await resp.json() : {summary:'unknown', services:{}};
+                const summary = data.summary || 'unknown';
+                btServiceStopped = (summary === 'inactive');
+
+                const sumEl = document.getElementById('btSvcSummary');
+                sumEl.textContent = summary;
+                sumEl.style.color = summary === 'active' ? '#5dba85'
+                                  : summary === 'inactive' ? '#e07060' : '#ffd700';
+
+                const det = Object.entries(data.services || {})
+                    .map(([k,v]) => `${k}: <span style="color:${v==='active'?'#5dba85':'#e07060'}">${v}</span>`)
+                    .join(' &nbsp;|&nbsp; ');
+                document.getElementById('btSvcDetails').innerHTML = det;
+
+                // Start/stop live voltage polling based on service state
+                if (btServiceStopped && btSelectedChannel) {
+                    btStartLivePolling();
+                } else {
+                    btStopLivePolling();
+                    btClearVoltageDisplay();
+                }
+            } catch (e) { console.error('btLoadServiceStatus', e); }
+        }
+
+        function renderBtGrid() {
+            const grid = document.getElementById('btChannelGrid');
+            grid.innerHTML = '';
+            Object.values(btChannelData).sort((a,b) => a.name.localeCompare(b.name)).forEach(ch => {
+                const cal = ch.calibration;
+                const isSelected = (ch.name === btSelectedChannel);
+                const card = document.createElement('div');
+                card.style.cssText = `background:${isSelected?'#1e3a4a':'#1e1e1e'};border:1px solid ${isSelected?'#4ecdc4':'#444'};
+                    border-radius:8px;padding:12px 14px;cursor:pointer;transition:border-color 0.2s;`;
+                card.innerHTML = `
+                    <div style="font-size:16px;font-weight:bold;color:${isSelected?'#4ecdc4':'#fff'};margin-bottom:6px;">${ch.name}</div>
+                    <div style="font-size:11px;color:#888;margin-bottom:2px;">Min: <span style="color:#ff6b6b;">${cal.min_voltage.toFixed(4)}V</span></div>
+                    <div style="font-size:11px;color:#888;">Max: <span style="color:#45b7d1;">${cal.max_voltage.toFixed(4)}V</span></div>`;
+                card.onclick = () => btSelectChannel(ch.name);
+                grid.appendChild(card);
+            });
+        }
+
+        function btSelectChannel(name) {
+            btSelectedChannel = name;
+            renderBtGrid();
+            btShowDetail(name);
+            if (btServiceStopped) btStartLivePolling();
+        }
+
+        function btDeselectChannel() {
+            btSelectedChannel = null;
+            btStopLivePolling();
+            document.getElementById('btDetail').style.display = 'none';
+            renderBtGrid();
+        }
+
+        function btShowDetail(name) {
+            const ch = btChannelData[name];
+            if (!ch) return;
+            document.getElementById('btDetailTitle').textContent = name;
+            document.getElementById('btCurrentMin').textContent = ch.calibration.min_voltage.toFixed(4) + 'V';
+            document.getElementById('btCurrentMax').textContent = ch.calibration.max_voltage.toFixed(4) + 'V';
+            document.getElementById('btDetail').style.display = 'block';
+            document.getElementById('btCaptureProgress').style.display = 'none';
+            document.getElementById('btCaptureResult').style.display = 'none';
+            document.getElementById('btDetailMsg').textContent = '';
+            btLastCapture = null;
+        }
+
+        // ---- Live voltage polling ----
+
+        function btStartLivePolling() {
+            if (btLiveInterval || !btSelectedChannel) return;
+            document.getElementById('btLiveStatus').textContent = '(live)';
+            btLiveInterval = setInterval(btPollVoltage, 200);
+            btPollVoltage();
+        }
+
+        function btStopLivePolling() {
+            if (btLiveInterval) { clearInterval(btLiveInterval); btLiveInterval = null; }
+            document.getElementById('btLiveStatus').textContent = '(stop services to read)';
+        }
+
+        function btClearVoltageDisplay() {
+            document.getElementById('btVoltageDisplay').textContent = '—';
+            document.getElementById('btCalibratedDisplay').textContent = '—';
+            document.getElementById('btVoltageBar').style.width = '50%';
+        }
+
+        async function btPollVoltage() {
+            if (!btSelectedChannel) return;
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/channels/${btSelectedChannel}/voltage`);
+                if (!resp.ok) { btClearVoltageDisplay(); return; }
+                const d = await resp.json();
+                document.getElementById('btVoltageDisplay').textContent = d.voltage.toFixed(4) + 'V';
+                document.getElementById('btCalibratedDisplay').textContent = d.calibrated.toFixed(3);
+                // voltage bar: map calibrated [-1,1] → [0%,100%]
+                const pct = Math.max(0, Math.min(100, (d.calibrated + 1) * 50));
+                document.getElementById('btVoltageBar').style.width = pct + '%';
+            } catch (e) { /* ignore */ }
+        }
+
+        // ---- Service control ----
+
+        async function btStopServices() {
+            document.getElementById('btStopBtn').disabled = true;
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/service`, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'stop'})
+                });
+                const d = await resp.json();
+                if (!resp.ok) btShowDetailMsg('Stop failed: ' + (d.error || resp.status), false);
+            } finally {
+                document.getElementById('btStopBtn').disabled = false;
+                await btLoadServiceStatus();
+            }
+        }
+
+        async function btStartServices() {
+            document.getElementById('btStartBtn').disabled = true;
+            btStopLivePolling();
+            btClearVoltageDisplay();
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/service`, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({action:'start'})
+                });
+                const d = await resp.json();
+                if (!resp.ok) btShowDetailMsg('Start failed: ' + (d.error || resp.status), false);
+            } finally {
+                document.getElementById('btStartBtn').disabled = false;
+                await btLoadServiceStatus();
+            }
+        }
+
+        // ---- Set Min / Set Max ----
+
+        async function btSetMin() {
+            if (!btSelectedChannel || !btServiceStopped) {
+                btShowDetailMsg('Stop ADC services first', false); return;
+            }
+            const resp = await fetch(`${serverUrl}/beertaps/channels/${btSelectedChannel}/voltage`);
+            if (!resp.ok) { btShowDetailMsg('Could not read voltage', false); return; }
+            const d = await resp.json();
+            await btSaveCalibration(d.voltage, null);
+        }
+
+        async function btSetMax() {
+            if (!btSelectedChannel || !btServiceStopped) {
+                btShowDetailMsg('Stop ADC services first', false); return;
+            }
+            const resp = await fetch(`${serverUrl}/beertaps/channels/${btSelectedChannel}/voltage`);
+            if (!resp.ok) { btShowDetailMsg('Could not read voltage', false); return; }
+            const d = await resp.json();
+            await btSaveCalibration(null, d.voltage);
+        }
+
+        // ---- Timed capture ----
+
+        async function btStartCapture() {
+            if (!btSelectedChannel || !btServiceStopped) {
+                btShowDetailMsg('Stop ADC services first', false); return;
+            }
+            const duration = parseFloat(document.getElementById('btCaptureDuration').value) || 10;
+            btStopLivePolling();
+            btClearVoltageDisplay();
+
+            document.getElementById('btCaptureProgress').style.display = 'block';
+            document.getElementById('btCaptureResult').style.display   = 'none';
+            document.getElementById('btCaptureMsg').textContent = `Capturing ${duration}s — sweep handle through full range…`;
+            document.getElementById('btCaptureBar').style.width = '0%';
+            document.getElementById('btCaptureBtn').disabled = true;
+
+            // Fake progress bar
+            let elapsed = 0;
+            btCaptureTimeout = setInterval(() => {
+                elapsed += 0.5;
+                const pct = Math.min(99, (elapsed / duration) * 100);
+                document.getElementById('btCaptureBar').style.width = pct + '%';
+            }, 500);
+
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/channels/${btSelectedChannel}/capture`, {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({duration})
+                });
+                clearInterval(btCaptureTimeout);
+                document.getElementById('btCaptureBar').style.width = '100%';
+
+                if (!resp.ok) {
+                    const e = await resp.json();
+                    btShowDetailMsg('Capture failed: ' + (e.error || resp.status), false);
+                    document.getElementById('btCaptureProgress').style.display = 'none';
+                    return;
+                }
+                const result = await resp.json();
+                btLastCapture = result;
+
+                document.getElementById('btCaptureProgress').style.display = 'none';
+                document.getElementById('btCaptureResult').style.display   = 'block';
+                let txt = `Min: ${result.min_voltage.toFixed(4)}V &nbsp; Max: ${result.max_voltage.toFixed(4)}V &nbsp; Range: ${result.voltage_range.toFixed(4)}V`;
+                if (result.warning) txt += `<br><span style="color:#ffd700;">⚠ ${result.warning}</span>`;
+                document.getElementById('btCaptureResultText').innerHTML = txt;
+            } catch (e) {
+                clearInterval(btCaptureTimeout);
+                btShowDetailMsg('Error: ' + e.message, false);
+                document.getElementById('btCaptureProgress').style.display = 'none';
+            } finally {
+                document.getElementById('btCaptureBtn').disabled = false;
+                if (btServiceStopped) btStartLivePolling();
+            }
+        }
+
+        async function btApplyCaptureResult() {
+            if (!btLastCapture) return;
+            await btSaveCalibration(btLastCapture.min_voltage, btLastCapture.max_voltage);
+            document.getElementById('btCaptureResult').style.display = 'none';
+            btLastCapture = null;
+        }
+
+        function btDiscardCaptureResult() {
+            document.getElementById('btCaptureResult').style.display = 'none';
+            btLastCapture = null;
+        }
+
+        // ---- Save calibration ----
+
+        async function btSaveCalibration(newMin, newMax) {
+            if (!btSelectedChannel) return;
+            const ch = btChannelData[btSelectedChannel];
+            const min_voltage = (newMin !== null) ? newMin : ch.calibration.min_voltage;
+            const max_voltage = (newMax !== null) ? newMax : ch.calibration.max_voltage;
+
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/channels/${btSelectedChannel}/calibration`, {
+                    method: 'PUT', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({min_voltage, max_voltage})
+                });
+                const d = await resp.json();
+                if (resp.ok) {
+                    btShowDetailMsg('✓ Saved', true);
+                    await btLoadChannels();
+                } else {
+                    btShowDetailMsg('Error: ' + (d.error || resp.status), false);
+                }
+            } catch (e) { btShowDetailMsg('Error: ' + e.message, false); }
+        }
+
+        function btShowDetailMsg(msg, success) {
+            const el = document.getElementById('btDetailMsg');
+            el.style.color = success ? '#5dba85' : '#e07060';
+            el.textContent = msg;
+            if (success) setTimeout(() => { el.textContent = ''; }, 3000);
+        }
+
+    </script>
+
     <script>
         // ----------------------------------------------------------------
         // Shared
@@ -406,14 +791,16 @@
         document.getElementById('serverUrl').textContent = serverUrl;
 
         function showTab(name) {
-            ['calibration', 'patterns'].forEach(t => {
+            ['calibration', 'patterns', 'beertaps'].forEach(t => {
                 document.getElementById('tab-btn-' + t).classList.toggle('active', t === name);
                 document.getElementById('tab-' + t).classList.toggle('active', t === name);
             });
-            // Lazy-load pattern config the first time the tab is opened
             if (name === 'patterns' && !patternConfigLoaded) {
                 patternConfigLoaded = true;
                 loadPatternConfig();
+            }
+            if (name === 'beertaps') {
+                btRefreshAll();
             }
         }
 
@@ -473,6 +860,8 @@
             loadAllCalibrations();
             checkServerConnection();
             canvas.addEventListener('click', handleCanvasClick);
+            // Pre-load tap channel names for Pattern Config dropdowns
+            loadTapChannelNames();
         });
 
         function generateNozzles() {
@@ -714,8 +1103,44 @@
         // ----------------------------------------------------------------
         // Pattern Config tab
         // ----------------------------------------------------------------
-        let availablePatterns  = [];
+        let availablePatterns   = [];
         let patternConfigLoaded = false;
+        // Tap channel names loaded from /beertaps/channels (populated at load time)
+        let tapChannelNames = [];
+
+        async function loadTapChannelNames() {
+            try {
+                const resp = await fetch(`${serverUrl}/beertaps/channels`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    tapChannelNames = (data.channels || []).map(c => c.name).sort();
+                }
+            } catch (e) { /* non-Pi host — use free text */ }
+        }
+
+        function buildChannelInput(selectedValue) {
+            if (tapChannelNames.length > 0) {
+                let opts = '<option value="">-- select --</option>';
+                tapChannelNames.forEach(n => {
+                    opts += `<option value="${n}"${n === selectedValue ? ' selected' : ''}>${n}</option>`;
+                });
+                return `<select class="channel-select">${opts}</select>`;
+            }
+            return `<input type="text" class="channel-input" placeholder="e.g. tap1" value="${selectedValue}">`;
+        }
+
+        function rebuildChannelDropdowns() {
+            // Called when tap channel list changes; rebuild any existing dropdowns in the pattern list
+            document.querySelectorAll('#patternEntriesList .pattern-entry').forEach(row => {
+                const oldInput = row.querySelector('.channel-input, .channel-select');
+                if (!oldInput) return;
+                const currentValue = oldInput.value;
+                const newEl = document.createElement('span');
+                newEl.innerHTML = buildChannelInput(currentValue);
+                const newInput = newEl.firstElementChild;
+                oldInput.replaceWith(newInput);
+            });
+        }
 
         async function loadPatternConfig() {
             const msgEl = document.getElementById('patternConfigMsg');
@@ -758,7 +1183,7 @@
                 <label>Pattern:</label>
                 <select>${options}</select>
                 <label>Input&nbsp;channel:</label>
-                <input type="text" placeholder="e.g. tap1" value="${channel}">
+                ${buildChannelInput(channel)}
                 <button class="btn-remove" onclick="removePatternEntry(this)">Remove</button>`;
             list.appendChild(row);
             renumberEntries();
@@ -778,7 +1203,8 @@
             let valid = true;
             rows.forEach((row, i) => {
                 const pName = row.querySelector('select').value;
-                const ch    = row.querySelector('input[type="text"]').value.trim();
+                const chEl  = row.querySelector('.channel-select, .channel-input, input[type="text"]');
+                const ch    = chEl ? chEl.value.trim() : '';
                 if (!pName) { valid = false; showPatternMsg(`Entry #${i+1}: please select a pattern`, false); }
                 if (!ch)    { valid = false; showPatternMsg(`Entry #${i+1}: input channel is required`, false); }
                 entries.push({ pattern: pName, input_channel: ch });

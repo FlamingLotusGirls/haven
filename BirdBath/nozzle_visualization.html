@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nozzle Layout Visualization</title>
+    <title>Nozzle Visualization</title>
     <style>
         body {
             margin: 0;
@@ -74,6 +74,101 @@
             min-width: 160px;
         }
 
+        /* ---- Input source toggle ---- */
+        .input-source-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+        }
+
+        .input-source-group .src-label {
+            color: #aaa;
+            margin-right: 4px;
+        }
+
+        .src-btn {
+            background: #444;
+            color: #bbb;
+            border: 1px solid #666;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .src-btn:hover { background: #555; color: #eee; }
+
+        .src-btn.active {
+            background: #2980b9;
+            color: #fff;
+            border-color: #5ba8d8;
+        }
+
+        /* ---- Mock slider panel (in-page, not fixed) ---- */
+        .input-controls-section {
+            width: 820px;
+            margin-bottom: 12px;
+        }
+
+        .input-source-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .input-source-row .src-row-label {
+            color: #aaa;
+        }
+
+        .mock-panel {
+            background: #152232;
+            border: 1px solid #2980b9;
+            border-radius: 6px;
+            display: none;
+        }
+
+        .mock-panel.visible {
+            display: block;
+        }
+
+        .mock-panel-inner {
+            padding: 10px 20px 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px;
+            align-items: center;
+        }
+
+        .mock-channel {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mock-channel label {
+            color: #5ba8d8;
+            font-size: 13px;
+            font-weight: bold;
+            min-width: 40px;
+        }
+
+        .mock-channel input[type=range] {
+            width: 180px;
+            accent-color: #2980b9;
+        }
+
+        .mock-channel .mock-val {
+            color: #ccc;
+            font-size: 12px;
+            font-family: monospace;
+            min-width: 48px;
+            text-align: right;
+        }
+
         h1 {
             margin-bottom: 20px;
         }
@@ -123,7 +218,24 @@
         </div>
     </div>
 
-    <h1 style="margin-top: 52px;">Nozzle Layout Visualization</h1>
+    <h1 style="margin-top: 52px;">Nozzle Visualization</h1>
+
+    <!-- Input source controls and mock sliders — below the header, in normal flow -->
+    <div class="input-controls-section">
+        <div class="input-source-row">
+            <span class="src-row-label">Input source:</span>
+            <button class="src-btn active" id="srcHardwareBtn"
+                    onclick="setInputSource('hardware')">Hardware</button>
+            <button class="src-btn" id="srcMockBtn"
+                    onclick="setInputSource('mock')">Web UI Mock</button>
+        </div>
+        <div class="mock-panel" id="mockPanel">
+            <div class="mock-panel-inner" id="mockSliders">
+                <!-- populated by JS -->
+            </div>
+        </div>
+    </div>
+
     <canvas id="canvas" width="800" height="800"></canvas>
 
     <div class="info">
@@ -396,6 +508,113 @@
 
         console.log('Generated', nozzles.length, 'nozzles');
         console.log('Live visualization started - fetching data every 100ms');
+
+        // ---------------------------------------------------------------
+        // Mock input support
+        // ---------------------------------------------------------------
+
+        let _currentSource = 'hardware';
+        let _mockChannels = [];   // unique channel names from patterns config
+
+        async function initInputSource() {
+            // Load current source state
+            try {
+                const r = await fetch('/input/source');
+                if (r.ok) {
+                    const d = await r.json();
+                    _applySourceState(d.source);
+                }
+            } catch(e) { /* silently ignore on load */ }
+
+            // Load channel list: prefer all beertap channels (tap1–tap6),
+            // fall back to the channels listed in patterns.yaml.
+            let loaded = false;
+            try {
+                const r = await fetch('/beertaps/channels');
+                if (r.ok) {
+                    const d = await r.json();
+                    const names = (d.channels || []).map(c => c.name).sort();
+                    names.forEach(n => _mockChannels.push(n));
+                    loaded = names.length > 0;
+                }
+            } catch(e) { /* beertap not available on this host */ }
+
+            if (!loaded) {
+                // Fall back to patterns.yaml input channels
+                try {
+                    const r = await fetch('/patterns/config');
+                    if (r.ok) {
+                        const cfg = await r.json();
+                        const seen = new Set();
+                        (cfg.patterns || []).forEach(p => {
+                            if (p.input_channel && !seen.has(p.input_channel)) {
+                                seen.add(p.input_channel);
+                                _mockChannels.push(p.input_channel);
+                            }
+                        });
+                    }
+                } catch(e) { /* silently ignore */ }
+            }
+
+            _buildSliders();
+        }
+
+        function _buildSliders() {
+            const container = document.getElementById('mockSliders');
+            container.innerHTML = '';
+            _mockChannels.forEach(ch => {
+                const wrap = document.createElement('div');
+                wrap.className = 'mock-channel';
+                wrap.innerHTML = `
+                    <label>${ch}</label>
+                    <input type="range" min="-1" max="1" step="0.01" value="0"
+                           id="slider-${ch}"
+                           oninput="onSliderChange('${ch}', this.value)">
+                    <span class="mock-val" id="val-${ch}">0.00</span>`;
+                container.appendChild(wrap);
+            });
+        }
+
+        function _applySourceState(source) {
+            _currentSource = source;
+            const isMock = source === 'mock';
+            document.getElementById('srcHardwareBtn').classList.toggle('active', !isMock);
+            document.getElementById('srcMockBtn').classList.toggle('active', isMock);
+            document.getElementById('mockPanel').classList.toggle('visible', isMock);
+        }
+
+        async function setInputSource(source) {
+            try {
+                const r = await fetch('/input/source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source })
+                });
+                if (r.ok) {
+                    _applySourceState(source);
+                }
+            } catch(e) {
+                console.error('Failed to set input source:', e);
+            }
+        }
+
+        async function onSliderChange(channel, rawValue) {
+            const value = parseFloat(rawValue);
+            const display = document.getElementById('val-' + channel);
+            if (display) display.textContent = value.toFixed(2);
+            try {
+                await fetch('/input/mock', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel, value })
+                });
+            } catch(e) {
+                console.error('Failed to post mock value:', e);
+            }
+        }
+
+        // Kick off init after page load
+        initInputSource();
 
         async function switchMode(targetMode) {
             const btn = document.getElementById('switchModeBtn');

@@ -1,756 +1,516 @@
 #!/usr/bin/env python3
 """
-Unified ADS1115 Calibration Tool
-Calibrates channels across multiple ADC config files by channel name
-Loads configuration from calibrate.json
+Unified ADS1115 Calibration Tool (CLI)
+Calibrates tap channels defined in calibrate.json.
+
+Core I2C logic lives in beertap_calibration_core.py and is shared with the web UI.
+This module handles the interactive terminal session.
 """
 
 import json
-import argparse
-import time
-import os
+import select
 import sys
-import board
-import busio
-import adafruit_ads1x15.ads1115 as ADS
-from adafruit_ads1x15.analog_in import AnalogIn
+import termios
+import threading
+import time
+import tty
 
-from i2c_lock import I2CLock, I2CDeviceInUseError
+import beertap_calibration_core
+from beertap_calibration_core import (
+    ChannelInfo,
+    CaptureResult,
+    load_all_channels,
+    save_calibration,
+    read_voltage,
+    capture_minmax,
+    _ensure_beertaps_on_path,
+    _normalize_address,
+    _open_adc_channel,
+)
+
+DEFAULT_CALIBRATE_JSON = 'calibrate.json'
 
 
-class UnifiedCalibrator:
-    def __init__(self, master_config_file='calibrate.json'):
-        """Initialize unified calibrator with master configuration file"""
-        self.master_config_file = master_config_file
-        self.channel_map = {}  # Maps channel name to (config_file, channel_index, full_config)
-        self.active_locks = {}  # Maps I2C address to I2CLock object
-        self.load_all_configs()
+# ---------------------------------------------------------------------------
+# Display helpers
+# ---------------------------------------------------------------------------
 
-    def load_all_configs(self):
-        """Load master config and all referenced ADC config files"""
-        # Load master config
-        with open(self.master_config_file, 'r') as f:
-            master_config = json.load(f)
+def _print_all_current_values(calibrate_json: str) -> None:
+    """Read and display current voltage from every channel."""
+    channels = load_all_channels(calibrate_json)
+    sorted_names = sorted(channels.keys())
 
-        self.config_files = master_config['config_files']
-        self.calibration_margin_percent = master_config.get('calibration_margin_percent', 0.0)
-        self.endstop_sample_count = master_config.get('endstop_sample_count', 20)
+    print('\n' + '=' * 70)
+    print('Current ADC Readings — All Channels')
+    print('=' * 70)
 
-        # Load each ADC config and build channel map
-        for config_file in self.config_files:
-            if not os.path.exists(config_file):
-                print(f"Warning: Config file '{config_file}' not found, skipping")
-                continue
-
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-
-            # Map each channel name to its config file and index
-            for i, channel_config in enumerate(config['channels']):
-                channel_name = channel_config['name']
-                self.channel_map[channel_name] = {
-                    'config_file': config_file,
-                    'channel_index': i,
-                    'adc_config': config,
-                    'channel_config': channel_config
-                }
-
-        if not self.channel_map:
-            print("Error: No channels found in any config files")
-            sys.exit(1)
-
-        print(f"Loaded {len(self.channel_map)} channels from {len(self.config_files)} config files")
-
-    def _acquire_lock_for_address(self, address):
-        """Acquire I2C lock for an address if not already held"""
-        # Normalize address
-        if isinstance(address, str):
-            address = int(address, 16)
-
-        if address in self.active_locks:
-            return True  # Already have the lock
-
+    for name in sorted_names:
+        info = channels[name]
         try:
-            lock = I2CLock(address)
-            lock.acquire()
-            self.active_locks[address] = lock
-            return True
-        except I2CDeviceInUseError as e:
-            print(str(e))
-            return False
-
-    def _release_lock_for_address(self, address):
-        """Release I2C lock for an address"""
-        if isinstance(address, str):
-            address = int(address, 16)
-
-        if address in self.active_locks:
-            self.active_locks[address].release()
-            del self.active_locks[address]
-
-    def _release_all_locks(self):
-        """Release all held I2C locks"""
-        for lock in self.active_locks.values():
-            lock.release()
-        self.active_locks.clear()
-
-    def setup_adc_for_channel(self, channel_name, acquire_lock=True):
-        """Initialize ADC for a specific channel"""
-        if channel_name not in self.channel_map:
-            print(f"Error: Channel '{channel_name}' not found")
-            return None
-
-        channel_info = self.channel_map[channel_name]
-        adc_config = channel_info['adc_config']
-
-        try:
-            # Get address
-            address = adc_config['address']
-            if isinstance(address, str):
-                address = int(address, 16)
-
-            # Acquire I2C lock if requested
-            if acquire_lock:
-                if not self._acquire_lock_for_address(address):
-                    return None
-
-            # Create I2C bus
-            i2c = busio.I2C(board.SCL, board.SDA)
-
-            # Create ADS object with configured address
-            ads = ADS.ADS1115(i2c, address=address)
-            ads.gain = adc_config['gain']
-
-            # Create channel object for the specific channel
-            ch_config = channel_info['channel_config']
-            pos_pin = getattr(ADS, ch_config['positive_pin'])
-            neg_pin = getattr(ADS, ch_config['negative_pin'])
-
-            channel = AnalogIn(ads, pos_pin, neg_pin)
-
-            return {
-                'channel': channel,
-                'config': ch_config,
-                'name': channel_name,
-                'config_file': channel_info['config_file'],
-                'address': address
-            }
-
+            voltage, calibrated = read_voltage(name, calibrate_json)
+            cal = info.calibration
+            print(f"  {name:10s}: cal [{cal['min_voltage']:+.4f}V .. {cal['max_voltage']:+.4f}V] | "
+                  f"now {voltage:+.4f}V → output {calibrated:+.4f}")
         except Exception as e:
-            print(f"Error initializing ADC for '{channel_name}': {e}")
-            return None
+            print(f"  {name:10s}: ERROR — {e}")
 
-    def save_channel_config(self, channel_name):
-        """Save configuration for a specific channel back to its config file"""
-        channel_info = self.channel_map[channel_name]
-        config_file = channel_info['config_file']
+    print('=' * 70)
 
-        # Reload the entire config file
-        with open(config_file, 'r') as f:
-            config = json.load(f)
 
-        # Update the specific channel
-        channel_index = channel_info['channel_index']
-        config['channels'][channel_index] = channel_info['channel_config']
+# ---------------------------------------------------------------------------
+# CLI calibration methods
+# ---------------------------------------------------------------------------
 
-        # Save back to file
-        with open(config_file, 'w') as f:
-            json.dump(config, f, indent=2)
+def _cli_minmax_capture(channel_name: str, calibrate_json: str) -> bool:
+    """
+    Min-Max Capture: sample until the user presses Enter, then apply.
+    Uses beertap_calibration_core.capture_minmax with a threading.Event stop trigger.
+    """
+    channels = load_all_channels(calibrate_json)
+    if channel_name not in channels:
+        print(f"Unknown channel: {channel_name!r}")
+        return False
 
-    def read_all_current_values(self):
-        """Read and display current values from all channels"""
-        print("\n" + "="*70)
-        print("Current ADC Readings - All Channels")
-        print("="*70)
+    info = channels[channel_name]
+    cal = info.calibration
+    print(f"\n--- Min-Max Capture: {channel_name} ---")
+    print(f"Current calibration: Min {cal['min_voltage']:+.4f}V  Max {cal['max_voltage']:+.4f}V")
+    print("\nMove the control through its FULL range.")
+    print("Press Enter when done, Ctrl+C to cancel.\n")
 
-        # Group channels by config file and get ADC address
-        by_config = {}
-        config_addresses = {}
-        for name, info in self.channel_map.items():
-            config_file = info['config_file']
-            if config_file not in by_config:
-                by_config[config_file] = []
-                # Get ADC address from config
-                address = info['adc_config']['address']
-                if isinstance(address, str):
-                    address = int(address, 16)
-                config_addresses[config_file] = address
-            by_config[config_file].append(name)
+    stop_event = threading.Event()
 
-        # Display grouped by config file
-        for config_file in sorted(by_config.keys()):
-            address = config_addresses[config_file]
-            adc_address_hex = hex(address)
+    def wait_for_enter():
+        input()
+        stop_event.set()
 
-            # Try to acquire lock for this ADC
-            if not self._acquire_lock_for_address(address):
-                print(f"\n{config_file} (ADC {adc_address_hex}): SKIPPED - device in use")
-                continue
+    t = threading.Thread(target=wait_for_enter, daemon=True)
+    t.start()
 
-            print(f"\n{config_file} (ADC {adc_address_hex}):")
-            for channel_name in sorted(by_config[config_file]):
-                ch_info = self.setup_adc_for_channel(channel_name, acquire_lock=False)
-                if ch_info:
-                    channel = ch_info['channel']
-                    config = ch_info['config']
+    def progress(elapsed, voltage, mn, mx):
+        rng = mx - mn
+        print(f"\rCurrent {voltage:+.4f}V | Min {mn:+.4f}V | Max {mx:+.4f}V | "
+              f"Range {rng:.4f}V   ",
+              end='', flush=True)
 
-                    voltage = channel.voltage
-                    raw = channel.value
+    try:
+        result = capture_minmax(
+            channel_name,
+            duration=3600,       # effectively unlimited — stopped by Enter
+            calibrate_json=calibrate_json,
+            stop_event=stop_event,
+            progress_callback=progress,
+        )
+    except KeyboardInterrupt:
+        print('\n\nCalibration cancelled.')
+        return False
 
-                    cal = config['calibration']
-                    min_v = cal['min_voltage']
-                    max_v = cal['max_voltage']
+    print(f'\n\nResults for {channel_name}:')
+    print(f'  Min: {result.min_voltage:.4f}V | Max: {result.max_voltage:.4f}V | '
+          f'Range: {result.max_voltage - result.min_voltage:.4f}V')
+    if result.warning:
+        print(f'  WARNING: {result.warning}')
 
-                    # Calculate calibrated value with clamping (same as adc_reader.py)
-                    if max_v != min_v:
-                        normalized = (voltage - min_v) / (max_v - min_v)
-                        calibrated = 2.0 * normalized - 1.0
-                    else:
-                        calibrated = 0.0
+    confirm = input('Apply these values? (y/N): ').strip().lower()
+    if confirm == 'y':
+        save_calibration(channel_name, result.min_voltage, result.max_voltage, calibrate_json)
+        print(f'✓ Calibration saved for {channel_name}')
+        return True
+    print('✗ Calibration skipped')
+    return False
 
-                    # Clamp output to exactly -1.0 to 1.0 range
-                    calibrated = max(-1.0, min(1.0, calibrated))
 
-                    print(f"  {channel_name:10s}: Calibration: [{min_v:+.4f}V to {max_v:+.4f}V] | "
-                          f"Current: {voltage:+.4f}V | Output: {calibrated:+.4f}")
+def _cli_endstop_averaging(channel_name: str, calibrate_json: str,
+                            endstop_sample_count: int = 20) -> bool:
+    """
+    End-Stop Averaging: record the extreme voltage each time the handle
+    crosses the midpoint.  Average across N crossings.
+    """
+    _ensure_beertaps_on_path(calibrate_json)
+    from i2c_lock import I2CLock, I2CDeviceInUseError  # type: ignore
 
-            # Release lock for this ADC before moving to next
-            self._release_lock_for_address(address)
+    channels = load_all_channels(calibrate_json)
+    if channel_name not in channels:
+        print(f"Unknown channel: {channel_name!r}")
+        return False
 
-        print("\n" + "="*70)
+    info = channels[channel_name]
+    cal = info.calibration
+    current_min = cal['min_voltage']
+    current_max = cal['max_voltage']
+    midpoint = (current_min + current_max) / 2.0
 
-    def auto_calibrate_minmax_capture(self, channel_name, show_header=True):
-        """Min-Max Capture calibration mode - tracks min/max while user moves control"""
-        ch_info = self.setup_adc_for_channel(channel_name)
-        if not ch_info:
-            return False
+    print(f"\n--- End-Stop Averaging: {channel_name} ---")
+    print(f"Current calibration: Min {current_min:+.4f}V  Max {current_max:+.4f}V  "
+          f"Midpoint {midpoint:+.4f}V")
+    print(f"Move sensor from max to min {endstop_sample_count} times.")
+    print("Press Ctrl+C to cancel.\n")
 
-        channel = ch_info['channel']
-        config = ch_info['config']
-        address = ch_info['address']
+    try:
+        i2c_lock = I2CLock(info.adc_address)
+        i2c_lock.acquire()
+    except I2CDeviceInUseError as e:
+        print(str(e))
+        return False
 
-        if show_header:
-            print(f"\n" + "="*60)
-            print(f"AUTOMATIC CALIBRATION - {channel_name}")
-            print("="*60)
-        else:
-            print(f"\n--- Calibrating {channel_name} (Min-Max Capture) ---")
+    try:
+        ch = _open_adc_channel(info)
 
-        # Get current calibration and reading
-        cal = config['calibration']
-        current_voltage = channel.voltage
-        print(f"Current calibration: Min: {cal['min_voltage']:+.4f}V | Max: {cal['max_voltage']:+.4f}V | Current reading: {current_voltage:+.4f}V")
+        max_samples, min_samples = [], []
+        initial_voltage = ch.voltage
+        looking_for = 'max' if initial_voltage > midpoint else 'min'
+        current_extreme = initial_voltage
+        had_first_crossing = False
+        latest_max = latest_min = None
 
-        # Initialize with current reading
-        initial_voltage = current_voltage
-        tracked_min = initial_voltage
-        tracked_max = initial_voltage
+        display_interval = 0.2
+        last_display = time.time()
+        sample_count = 0
+        current_voltage = initial_voltage
 
-        print("\nMove your control through its FULL range")
-        print("Press Enter when done, Ctrl+C to cancel\n")
-
-        # Start a thread to check for Enter key
-        import threading
+        # Optional Enter-key early exit
         done_flag = threading.Event()
 
         def wait_for_enter():
             input()
             done_flag.set()
 
-        enter_thread = threading.Thread(target=wait_for_enter)
-        enter_thread.daemon = True
+        enter_thread = threading.Thread(target=wait_for_enter, daemon=True)
         enter_thread.start()
 
-        # Display update timing
-        display_interval = 0.2  # Update display 5 times per second
-        last_display_time = time.time()
-        sample_count = 0
-
-        # Variables for display
-        current_voltage = initial_voltage
-        current_raw = 0
-
         try:
-            while not done_flag.is_set():
-                # Sample as fast as possible
-                voltage = channel.voltage
-                raw = channel.value
-                sample_count += 1
+            while (len(max_samples) < endstop_sample_count or
+                   len(min_samples) < endstop_sample_count) and not done_flag.is_set():
 
-                # Update tracked min/max from every sample
-                if voltage < tracked_min:
-                    tracked_min = voltage
-                if voltage > tracked_max:
-                    tracked_max = voltage
-
-                # Store current values for display
-                current_voltage = voltage
-                current_raw = raw
-
-                # Only update display at controlled rate
-                current_time = time.time()
-                if current_time - last_display_time >= display_interval:
-                    # Calculate what the calibrated value would be
-                    if tracked_max != tracked_min:
-                        normalized = (current_voltage - tracked_min) / (tracked_max - tracked_min)
-                        calibrated = 2.0 * normalized - 1.0
-                    else:
-                        calibrated = 0.0
-
-                    # Calculate sampling rate
-                    elapsed = current_time - last_display_time
-                    samples_per_sec = sample_count / elapsed if elapsed > 0 else 0
-
-                    # Display current status
-                    print(f"\rCurrent: {current_voltage:.4f}V | "
-                          f"Min: {tracked_min:.4f}V | "
-                          f"Max: {tracked_max:.4f}V | "
-                          f"Range: {tracked_max - tracked_min:.4f}V | "
-                          f"Output: {calibrated:+.4f} | "
-                          f"({samples_per_sec:.0f} Hz)   ",
-                          end='', flush=True)
-
-                    # Reset counters for next display cycle
-                    last_display_time = current_time
-                    sample_count = 0
-
-        except KeyboardInterrupt:
-            print("\n\nCalibration cancelled")
-            return False
-
-        print(f"\n\nResults for {channel_name}:")
-        print(f"  Measured Min: {tracked_min:.4f}V | Max: {tracked_max:.4f}V | Range: {tracked_max - tracked_min:.4f}V")
-
-        # Apply calibration margin to contract the range (ensure full -1.0 to +1.0 is reachable)
-        voltage_range = tracked_max - tracked_min
-        margin_amount = voltage_range * (self.calibration_margin_percent / 100.0)
-        adjusted_min = tracked_min + margin_amount
-        adjusted_max = tracked_max - margin_amount
-
-        if self.calibration_margin_percent > 0:
-            print(f"  Calibration margin: {self.calibration_margin_percent}% -> contracting range by {margin_amount:.4f}V on each side")
-            print(f"  Adjusted Min: {adjusted_min:.4f}V | Max: {adjusted_max:.4f}V")
-
-        if tracked_max - tracked_min < 0.1:
-            print("  WARNING: Small range detected - may not have moved through full range")
-
-        confirm = input("Apply these values? (y/N): ").strip().lower()
-
-        result = False
-        if confirm == 'y':
-            config['calibration']['min_voltage'] = adjusted_min
-            config['calibration']['max_voltage'] = adjusted_max
-            self.save_channel_config(channel_name)
-            print(f"✓ Calibration saved for {channel_name}")
-            result = True
-        else:
-            print("✗ Calibration skipped")
-
-        # Release the lock for this address
-        self._release_lock_for_address(address)
-        return result
-
-    def auto_calibrate_endstop_averaging(self, channel_name, show_header=True):
-        """End-Stop Averaging calibration mode - records extremes during multiple crossings"""
-        ch_info = self.setup_adc_for_channel(channel_name)
-        if not ch_info:
-            return False
-
-        channel = ch_info['channel']
-        config = ch_info['config']
-        address = ch_info['address']
-
-        if show_header:
-            print(f"\n" + "="*60)
-            print(f"END-STOP AVERAGING CALIBRATION - {channel_name}")
-            print("="*60)
-        else:
-            print(f"\n--- Calibrating {channel_name} (End-Stop Averaging) ---")
-
-        # Calculate midpoint from current calibration
-        cal = config['calibration']
-        current_min = cal['min_voltage']
-        current_max = cal['max_voltage']
-        midpoint = (current_min + current_max) / 2.0
-
-        # Get current reading
-        current_voltage = channel.voltage
-        print(f"Current calibration: Min: {current_min:+.4f}V | Max: {current_max:+.4f}V | Current reading: {current_voltage:+.4f}V")
-
-        print(f"Using midpoint: {midpoint:.4f}V")
-        print(f"Move sensor from max to min {self.endstop_sample_count} times")
-        print("Press Ctrl+C to cancel\n")
-
-        # Initialize tracking variables
-        max_samples = []
-        min_samples = []
-
-        # Get initial reading to determine starting state
-        initial_voltage = channel.voltage
-
-        # Single state variable: what are we currently looking for?
-        if initial_voltage > midpoint:
-            looking_for = 'max'  # Above midpoint, looking for maximum
-            current_extreme = initial_voltage
-        else:
-            looking_for = 'min'  # Below midpoint, looking for minimum
-            current_extreme = initial_voltage
-
-        had_first_crossing = False  # Don't record until after first midpoint crossing
-
-        # Start a thread to check for Enter key (optional early exit)
-        import threading
-        done_flag = threading.Event()
-
-        def wait_for_enter():
-            input()
-            done_flag.set()
-
-        enter_thread = threading.Thread(target=wait_for_enter)
-        enter_thread.daemon = True
-        enter_thread.start()
-
-        # Display update timing
-        display_interval = 0.2  # Update display 5 times per second
-        last_display_time = time.time()
-        sample_count = 0
-
-        # Variables for display
-        current_voltage = initial_voltage
-        latest_max = None
-        latest_min = None
-
-        try:
-            while (len(max_samples) < self.endstop_sample_count or
-                   len(min_samples) < self.endstop_sample_count) and not done_flag.is_set():
-
-                # Sample as fast as possible
-                voltage = channel.voltage
+                voltage = ch.voltage
                 sample_count += 1
                 current_voltage = voltage
 
-                # Update current extreme based on what we're looking for
                 if looking_for == 'max':
-                    # Looking for maximum - update if we find a higher value
                     if voltage > current_extreme:
                         current_extreme = voltage
-                    # Check if we crossed below midpoint
                     if voltage <= midpoint:
-                        # Crossed below - record max if we've had first crossing
-                        if had_first_crossing and len(max_samples) < self.endstop_sample_count:
+                        if had_first_crossing and len(max_samples) < endstop_sample_count:
                             max_samples.append(current_extreme)
                             latest_max = current_extreme
-                            timestamp = time.strftime("%H:%M:%S")
-                            print(f"\n[{timestamp}] Recorded MAXIMUM #{len(max_samples)}: {current_extreme:.4f}V (crossed from ABOVE to BELOW)")
-
-                        # Mark first crossing and switch to looking for minimum
-                        if not had_first_crossing:
-                            had_first_crossing = True
+                            ts = time.strftime('%H:%M:%S')
+                            print(f'\n[{ts}] MAX #{len(max_samples)}: {current_extreme:.4f}V')
+                        had_first_crossing = True
                         looking_for = 'min'
                         current_extreme = voltage
-                else:  # looking_for == 'min'
-                    # Looking for minimum - update if we find a lower value
+                else:
                     if voltage < current_extreme:
                         current_extreme = voltage
-                    # Check if we crossed above midpoint
                     if voltage > midpoint:
-                        # Crossed above - record min if we've had first crossing
-                        if had_first_crossing and len(min_samples) < self.endstop_sample_count:
+                        if had_first_crossing and len(min_samples) < endstop_sample_count:
                             min_samples.append(current_extreme)
                             latest_min = current_extreme
-                            timestamp = time.strftime("%H:%M:%S")
-                            print(f"\n[{timestamp}] Recorded MINIMUM #{len(min_samples)}: {current_extreme:.4f}V (crossed from BELOW to ABOVE)")
-
-                        # Mark first crossing and switch to looking for maximum
-                        if not had_first_crossing:
-                            had_first_crossing = True
+                            ts = time.strftime('%H:%M:%S')
+                            print(f'\n[{ts}] MIN #{len(min_samples)}: {current_extreme:.4f}V')
+                        had_first_crossing = True
                         looking_for = 'max'
                         current_extreme = voltage
 
-                # Update display at controlled rate
-                current_time = time.time()
-                if current_time - last_display_time >= display_interval:
-                    # Calculate sampling rate
-                    elapsed = current_time - last_display_time
-                    samples_per_sec = sample_count / elapsed if elapsed > 0 else 0
-
-                    # Build display string
-                    max_str = f"{len(max_samples)}/{self.endstop_sample_count}"
+                now = time.time()
+                if now - last_display >= display_interval:
+                    side = 'ABOVE' if looking_for == 'max' else 'BELOW'
+                    max_s = f"{len(max_samples)}/{endstop_sample_count}"
                     if latest_max is not None:
-                        max_str += f" (latest: {latest_max:.4f}V)"
-
-                    min_str = f"{len(min_samples)}/{self.endstop_sample_count}"
+                        max_s += f" (last {latest_max:.4f}V)"
+                    min_s = f"{len(min_samples)}/{endstop_sample_count}"
                     if latest_min is not None:
-                        min_str += f" (latest: {latest_min:.4f}V)"
-
-                    side_str = "ABOVE" if looking_for == 'max' else "BELOW"
-
-                    print(f"\rCurrent: {current_voltage:.4f}V [{side_str}] Midpoint: {midpoint:.4f}V | "
-                          f"Maximums: {max_str} | Minimums: {min_str} | "
-                          f"({samples_per_sec:.0f} Hz)   ",
+                        min_s += f" (last {latest_min:.4f}V)"
+                    print(f'\r{current_voltage:+.4f}V [{side}] | '
+                          f'Maxes: {max_s} | Mins: {min_s}   ',
                           end='', flush=True)
-
-                    # Reset counters for next display cycle
-                    last_display_time = current_time
+                    elapsed = now - last_display
+                    last_display = now
                     sample_count = 0
 
         except KeyboardInterrupt:
-            print("\n\nCalibration cancelled")
+            print('\n\nCalibration cancelled.')
             return False
 
-        print("\n")
+        print('\n')
 
-        # Check if we have enough samples
-        if len(max_samples) < self.endstop_sample_count or len(min_samples) < self.endstop_sample_count:
-            print(f"Incomplete: Only collected {len(max_samples)} maximums and {len(min_samples)} minimums")
-            print("Need to complete more crossings. Calibration cancelled.")
-            self._release_lock_for_address(address)
+        if len(max_samples) < endstop_sample_count or len(min_samples) < endstop_sample_count:
+            print(f'Incomplete: {len(max_samples)} maxima, {len(min_samples)} minima collected.')
             return False
 
-        # Calculate averages
         avg_max = sum(max_samples) / len(max_samples)
         avg_min = sum(min_samples) / len(min_samples)
 
-        print(f"Results for {channel_name}:")
-        print(f"  Collected {len(max_samples)} maximums: avg = {avg_max:.4f}V (range: {min(max_samples):.4f}V to {max(max_samples):.4f}V)")
-        print(f"  Collected {len(min_samples)} minimums: avg = {avg_min:.4f}V (range: {min(min_samples):.4f}V to {max(min_samples):.4f}V)")
-        print(f"  Final calibration range: {avg_max - avg_min:.4f}V")
-        print(f"  (No calibration margin applied for end-stop averaging)")
+        print(f'Results for {channel_name}:')
+        print(f'  {len(max_samples)} maxima avg: {avg_max:.4f}V '
+              f'(range {min(max_samples):.4f}..{max(max_samples):.4f}V)')
+        print(f'  {len(min_samples)} minima avg: {avg_min:.4f}V '
+              f'(range {min(min_samples):.4f}..{max(min_samples):.4f}V)')
+        print(f'  Final calibration range: {avg_max - avg_min:.4f}V')
 
         if avg_max - avg_min < 0.1:
-            print("  WARNING: Small range detected")
+            print('  WARNING: Small range detected')
 
-        confirm = input("\nApply these values? (y/N): ").strip().lower()
-
-        result = False
+        confirm = input('\nApply these values? (y/N): ').strip().lower()
         if confirm == 'y':
-            config['calibration']['min_voltage'] = avg_min
-            config['calibration']['max_voltage'] = avg_max
-            self.save_channel_config(channel_name)
-            print(f"✓ Calibration saved for {channel_name}")
-            result = True
+            save_calibration(channel_name, avg_min, avg_max, calibrate_json)
+            print(f'✓ Calibration saved for {channel_name}')
+            return True
+        print('✗ Calibration skipped')
+        return False
+
+    finally:
+        i2c_lock.release()
+
+
+def _cli_monitor_channel(channel_name: str, calibrate_json: str) -> None:
+    """Continuously display live voltage + calibrated output until a key is pressed."""
+    _ensure_beertaps_on_path(calibrate_json)
+    from i2c_lock import I2CLock, I2CDeviceInUseError  # type: ignore
+
+    channels = load_all_channels(calibrate_json)
+    if channel_name not in channels:
+        print(f"Unknown channel: {channel_name!r}")
+        return
+
+    info = channels[channel_name]
+    print('\nMonitoring (press any key to stop)...')
+
+    try:
+        i2c_lock = I2CLock(info.adc_address)
+        i2c_lock.acquire()
+    except I2CDeviceInUseError as e:
+        print(str(e))
+        return
+
+    try:
+        ch = _open_adc_channel(info)
+        cal = info.calibration
+        display_interval = 0.2
+        last_display = time.time()
+        sample_count = 0
+
+        old_settings = termios.tcgetattr(sys.stdin)
+        try:
+            tty.setcbreak(sys.stdin.fileno())
+            while True:
+                if select.select([sys.stdin], [], [], 0)[0]:
+                    sys.stdin.read(1)
+                    break
+                voltage = ch.voltage
+                raw = ch.value
+                sample_count += 1
+                now = time.time()
+                if now - last_display >= display_interval:
+                    calibrated = beertap_calibration_core._apply_calibration(
+                        voltage, cal['min_voltage'], cal['max_voltage'])
+                    elapsed = now - last_display
+                    hz = sample_count / elapsed if elapsed > 0 else 0
+                    print(f'\rVoltage {voltage:+.4f}V (raw {raw:5d}) → '
+                          f'output {calibrated:+.4f} ({hz:.0f} Hz)   ',
+                          end='', flush=True)
+                    last_display = now
+                    sample_count = 0
+        except KeyboardInterrupt:
+            pass
+        finally:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            print('\n')
+
+    finally:
+        i2c_lock.release()
+
+
+def _calibrate_channel_interactive(channel_name: str, calibrate_json: str,
+                                   endstop_sample_count: int) -> None:
+    """Full interactive calibration menu for one channel."""
+    channels = load_all_channels(calibrate_json)
+    if channel_name not in channels:
+        print(f"Unknown channel: {channel_name!r}")
+        return
+
+    info = channels[channel_name]
+    cal = info.calibration
+    print(f'\n--- Calibrating {channel_name} ---')
+    print(f'Current calibration: Min {cal["min_voltage"]:.4f}V  Max {cal["max_voltage"]:.4f}V')
+
+    while True:
+        print('\nOptions:')
+        print('  A. Min-Max Capture (sweep through full range, press Enter when done)')
+        print('  B. End-Stop Averaging (N midpoint crossings)')
+        print('  1. Set current reading as MINIMUM (−1.0)')
+        print('  2. Set current reading as MAXIMUM (+1.0)')
+        print('  3. Set custom MIN voltage')
+        print('  4. Set custom MAX voltage')
+        print('  5. Monitor live readings')
+        print('  Q. Done')
+
+        choice = input('\nChoice: ').strip().upper()
+
+        if choice == 'A':
+            _cli_minmax_capture(channel_name, calibrate_json)
+            # Reload calibration to show updated values
+            channels = load_all_channels(calibrate_json)
+            info = channels.get(channel_name)
+            if info:
+                cal = info.calibration
+                print(f'Current calibration: Min {cal["min_voltage"]:.4f}V  '
+                      f'Max {cal["max_voltage"]:.4f}V')
+
+        elif choice == 'B':
+            _cli_endstop_averaging(channel_name, calibrate_json, endstop_sample_count)
+            channels = load_all_channels(calibrate_json)
+            info = channels.get(channel_name)
+            if info:
+                cal = info.calibration
+                print(f'Current calibration: Min {cal["min_voltage"]:.4f}V  '
+                      f'Max {cal["max_voltage"]:.4f}V')
+
+        elif choice == '1':
+            try:
+                voltage, _ = read_voltage(channel_name, calibrate_json)
+                channels = load_all_channels(calibrate_json)
+                info = channels[channel_name]
+                cal = info.calibration
+                save_calibration(channel_name, voltage, cal['max_voltage'], calibrate_json)
+                print(f'Set MIN to {voltage:.4f}V and saved')
+            except Exception as e:
+                print(f'Error: {e}')
+
+        elif choice == '2':
+            try:
+                voltage, _ = read_voltage(channel_name, calibrate_json)
+                channels = load_all_channels(calibrate_json)
+                info = channels[channel_name]
+                cal = info.calibration
+                save_calibration(channel_name, cal['min_voltage'], voltage, calibrate_json)
+                print(f'Set MAX to {voltage:.4f}V and saved')
+            except Exception as e:
+                print(f'Error: {e}')
+
+        elif choice == '3':
+            try:
+                value = float(input('Enter MIN voltage: '))
+                channels = load_all_channels(calibrate_json)
+                info = channels[channel_name]
+                cal = info.calibration
+                save_calibration(channel_name, value, cal['max_voltage'], calibrate_json)
+                print(f'Set MIN to {value:.4f}V and saved')
+            except ValueError:
+                print('Invalid value')
+
+        elif choice == '4':
+            try:
+                value = float(input('Enter MAX voltage: '))
+                channels = load_all_channels(calibrate_json)
+                info = channels[channel_name]
+                cal = info.calibration
+                save_calibration(channel_name, cal['min_voltage'], value, calibrate_json)
+                print(f'Set MAX to {value:.4f}V and saved')
+            except ValueError:
+                print('Invalid value')
+
+        elif choice == '5':
+            _cli_monitor_channel(channel_name, calibrate_json)
+
+        elif choice == 'Q':
+            break
         else:
-            print("✗ Calibration skipped")
+            print('Invalid choice')
 
-        # Release the lock for this address
-        self._release_lock_for_address(address)
-        return result
-
-    def calibrate_channel(self, channel_name):
-        """Interactive calibration for a specific channel"""
-        ch_info = self.setup_adc_for_channel(channel_name)
-        if not ch_info:
-            return
-
-        channel = ch_info['channel']
-        config = ch_info['config']
-        address = ch_info['address']
-
-        print(f"\n--- Calibrating {channel_name} ---")
-        current_voltage = channel.voltage
-        print("Current calibration values:")
-        print(f"  Min: {config['calibration']['min_voltage']:.3f}V")
-        print(f"  Max: {config['calibration']['max_voltage']:.3f}V")
-        print(f"  Current reading: {current_voltage:+.4f}V")
-
-        while True:
-            print("\nOptions:")
-            print("  A. End-Stop Averaging (automatic)")
-            print("  B. Min-Max Capture (automatic)")
-            print("  1. Set current reading as MINIMUM (-1.0)")
-            print("  2. Set current reading as MAXIMUM (+1.0)")
-            print("  3. Set custom MIN value")
-            print("  4. Set custom MAX value")
-            print("  5. Monitor current reading")
-            print("  Q. Done with this channel")
-
-            choice = input("\nChoice: ").strip().upper()
-
-            if choice == 'A':
-                if self.auto_calibrate_endstop_averaging(channel_name, show_header=False):
-                    # Show updated values after auto calibration
-                    print(f"\nCurrent calibration for {channel_name}:")
-                    print(f"  Min: {config['calibration']['min_voltage']:.4f}V")
-                    print(f"  Max: {config['calibration']['max_voltage']:.4f}V")
-
-            elif choice == 'B':
-                if self.auto_calibrate_minmax_capture(channel_name, show_header=False):
-                    # Show updated values after auto calibration
-                    print(f"\nCurrent calibration for {channel_name}:")
-                    print(f"  Min: {config['calibration']['min_voltage']:.4f}V")
-                    print(f"  Max: {config['calibration']['max_voltage']:.4f}V")
-
-            elif choice == '1':
-                voltage = channel.voltage
-                config['calibration']['min_voltage'] = voltage
-                self.save_channel_config(channel_name)
-                print(f"Set MIN to current reading: {voltage:.4f}V and saved")
-
-            elif choice == '2':
-                voltage = channel.voltage
-                config['calibration']['max_voltage'] = voltage
-                self.save_channel_config(channel_name)
-                print(f"Set MAX to current reading: {voltage:.4f}V and saved")
-
-            elif choice == '3':
-                try:
-                    value = float(input("Enter MIN voltage value: "))
-                    config['calibration']['min_voltage'] = value
-                    self.save_channel_config(channel_name)
-                    print(f"Set MIN to {value:.4f}V and saved")
-                except ValueError:
-                    print("Invalid value")
-
-            elif choice == '4':
-                try:
-                    value = float(input("Enter MAX voltage value: "))
-                    config['calibration']['max_voltage'] = value
-                    self.save_channel_config(channel_name)
-                    print(f"Set MAX to {value:.4f}V and saved")
-                except ValueError:
-                    print("Invalid value")
-
-            elif choice == '5':
-                print("\nMonitoring (press any key to stop)...")
-
-                # Display update timing
-                display_interval = 0.2  # Update display 5 times per second
-                last_display_time = time.time()
-                sample_count = 0
-
-                # Set up non-blocking input
-                import select
-                import termios
-                import tty
-
-                old_settings = termios.tcgetattr(sys.stdin)
-                try:
-                    tty.setcbreak(sys.stdin.fileno())
-
-                    while True:
-                        # Check if any key was pressed (non-blocking)
-                        if select.select([sys.stdin], [], [], 0)[0]:
-                            # Key pressed, read it and exit
-                            sys.stdin.read(1)
-                            break
-
-                        # Sample as fast as possible
-                        voltage = channel.voltage
-                        raw = channel.value
-                        sample_count += 1
-
-                        # Only update display at controlled rate
-                        current_time = time.time()
-                        if current_time - last_display_time >= display_interval:
-                            cal = config['calibration']
-                            min_v = cal['min_voltage']
-                            max_v = cal['max_voltage']
-
-                            if max_v != min_v:
-                                normalized = (voltage - min_v) / (max_v - min_v)
-                                calibrated = 2.0 * normalized - 1.0
-                            else:
-                                calibrated = 0.0
-
-                            # Clamp output to exactly -1.0 to 1.0 range (same as adc_reader.py)
-                            calibrated = max(-1.0, min(1.0, calibrated))
-
-                            # Calculate sampling rate
-                            elapsed = current_time - last_display_time
-                            samples_per_sec = sample_count / elapsed if elapsed > 0 else 0
-
-                            print(f"\rVoltage: {voltage:+.4f}V (raw: {raw:5d}) -> "
-                                  f"Output: {calibrated:+.4f} ({samples_per_sec:.0f} Hz)   ",
-                                  end='', flush=True)
-
-                            # Reset counters for next display cycle
-                            last_display_time = current_time
-                            sample_count = 0
-
-                except KeyboardInterrupt:
-                    pass
-                finally:
-                    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                    print("\n")
-
-            elif choice == 'Q':
-                break
-            else:
-                print("Invalid choice")
-
-        print(f"\nFinal calibration for {channel_name}:")
-        print(f"  Min: {config['calibration']['min_voltage']:.4f}V")
-        print(f"  Max: {config['calibration']['max_voltage']:.4f}V")
-
-        # Release the lock for this address
-        self._release_lock_for_address(address)
-
-    def run_interactive(self):
-        """Run interactive calibration session"""
-        print("\n" + "="*70)
-        print(f"Unified ADC Calibration Tool")
-        print("="*70)
-
-        while True:
-            print("\nAvailable channels:")
-            sorted_names = sorted(self.channel_map.keys())
-            for i, name in enumerate(sorted_names, 1):
-                config_file = self.channel_map[name]['config_file']
-                print(f"  {i}. {name} ({config_file})")
-
-            print("\nOptions:")
-            print("  [channel name]: Calibrate specific channel by name (e.g., 'tap1')")
-            print("  [number]: Calibrate channel by number from list above")
-            print("  R: Read current values")
-            print("  Q: Quit")
-
-            choice = input("\nChoice: ").strip()
-
-            if choice.upper() == 'R':
-                self.read_all_current_values()
-
-            elif choice.upper() == 'Q':
-                print("Exiting")
-                break
-
-            elif choice.isdigit():
-                channel_index = int(choice) - 1
-                if 0 <= channel_index < len(sorted_names):
-                    channel_name = sorted_names[channel_index]
-                    self.calibrate_channel(channel_name)
-                else:
-                    print("Invalid channel number")
-
-            elif choice in self.channel_map:
-                self.calibrate_channel(choice)
-
-            else:
-                print(f"Unknown channel: {choice}")
+    # Show final calibration
+    channels = load_all_channels(calibrate_json)
+    if channel_name in channels:
+        cal = channels[channel_name].calibration
+        print(f'\nFinal calibration for {channel_name}: '
+              f'Min {cal["min_voltage"]:.4f}V  Max {cal["max_voltage"]:.4f}V')
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Unified ADS1115 ADC Calibration Tool')
-    parser.add_argument('--config', default='calibrate.json',
-                       help='Path to master configuration file (default: calibrate.json)')
-    parser.add_argument('--channel', type=str,
-                       help='Calibrate specific channel by name (e.g., tap1)')
+# ---------------------------------------------------------------------------
+# Main interactive loop
+# ---------------------------------------------------------------------------
 
-    args = parser.parse_args()
-
-    # Check if config file exists
-    if not os.path.exists(args.config):
-        print(f"Error: Master configuration file '{args.config}' not found")
+def run_interactive(calibrate_json: str = DEFAULT_CALIBRATE_JSON) -> None:
+    try:
+        with open(calibrate_json) as f:
+            master = json.load(f)
+    except FileNotFoundError:
+        print(f'Error: {calibrate_json!r} not found')
         sys.exit(1)
 
-    calibrator = UnifiedCalibrator(args.config)
+    endstop_sample_count = master.get('endstop_sample_count', 20)
+
+    print('\n' + '=' * 70)
+    print('Unified ADC Calibration Tool')
+    print('=' * 70)
+
+    while True:
+        try:
+            channels = load_all_channels(calibrate_json)
+        except Exception as e:
+            print(f'Error loading channels: {e}')
+            sys.exit(1)
+
+        sorted_names = sorted(channels.keys())
+        print('\nAvailable channels:')
+        for i, name in enumerate(sorted_names, 1):
+            cal = channels[name].calibration
+            print(f'  {i}. {name}  '
+                  f'(min {cal["min_voltage"]:+.4f}V, max {cal["max_voltage"]:+.4f}V)')
+
+        print('\nOptions:')
+        print('  [name] or [number]: calibrate that channel')
+        print('  R: read current values from all channels')
+        print('  Q: quit')
+
+        choice = input('\nChoice: ').strip()
+
+        if choice.upper() == 'R':
+            _print_all_current_values(calibrate_json)
+
+        elif choice.upper() == 'Q':
+            print('Exiting')
+            break
+
+        elif choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(sorted_names):
+                _calibrate_channel_interactive(sorted_names[idx], calibrate_json,
+                                               endstop_sample_count)
+            else:
+                print('Invalid channel number')
+
+        elif choice in channels:
+            _calibrate_channel_interactive(choice, calibrate_json, endstop_sample_count)
+
+        else:
+            print(f'Unknown channel: {choice!r}')
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description='Unified ADS1115 ADC Calibration Tool')
+    parser.add_argument('--config', default=DEFAULT_CALIBRATE_JSON,
+                        help='Master config file (default: calibrate.json)')
+    parser.add_argument('--channel', type=str,
+                        help='Calibrate specific channel by name (e.g. tap1)')
+    args = parser.parse_args()
+
+    if not __import__('os').path.exists(args.config):
+        print(f'Error: {args.config!r} not found')
+        sys.exit(1)
 
     if args.channel:
-        # Single channel calibration mode - run interactive for that channel
-        calibrator.calibrate_channel(args.channel)
+        with open(args.config) as f:
+            master = __import__('json').load(f)
+        endstop_sample_count = master.get('endstop_sample_count', 20)
+        _calibrate_channel_interactive(args.channel, args.config, endstop_sample_count)
     else:
-        # Interactive mode
-        calibrator.run_interactive()
+        run_interactive(args.config)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

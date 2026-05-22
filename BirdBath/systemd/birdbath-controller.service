@@ -1,0 +1,20 @@
+[Unit]
+Description=BirdBath Controller (pattern runner + web UI)
+After=network.target adc-reader-1.service adc-reader-2.service adc-reader-3.service
+Wants=adc-reader-1.service adc-reader-2.service adc-reader-3.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/haven/BirdBath
+ExecStart=/usr/bin/python3 /home/pi/haven/BirdBath/BirdBathController.py
+Restart=on-failure
+RestartSec=10
+# Allow time for pattern subprocesses to shut down cleanly on stop/restart
+TimeoutStopSec=30
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

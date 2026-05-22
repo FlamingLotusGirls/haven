@@ -1,353 +1,288 @@
-# Beertaps: ADC Reader System using RPI and ADS1115
+# Beertaps: ADC Reader System
 
-This system reads values from ADS1115 ADC controllers over I2C and sends calibrated values (-1.0 to 1.0) through named pipes for inter-process communication.
+Reads position values from six beer-tap potentiometers via three ADS1115 ADC
+chips over I2C and streams calibrated values (−1.0 to +1.0) to a shared named
+pipe consumed by `BirdBathController.py`.
+
+---
 
 ## Features
 
-- Reads from individual ADS1115 controllers (configured for 3 controllers at addresses 0x48, 0x49, 0x4a)
-- Each controller reads 2 differential channels
-- Calibration system to map voltage ranges to -1.0 to 1.0
-- Named pipes (FIFOs) for inter-process communication with multiple writer support
-- Systemd service templates for auto-starting
-- JSON-based configuration files
+- Three ADS1115 controllers at I2C addresses `0x48`, `0x49`, `0x4a`; two
+  differential channels each → six tap channels (`tap1`–`tap6`)
+- Calibration maps raw voltage ranges to [−1.0, +1.0]
+- Shared named pipe (`/tmp/beertap_pipe`) with file-locked atomic writes
+  supports multiple concurrent writer processes
+- Systemd service templates for automatic startup
+- Calibration available both from the **command line** (`calibrate.py`) and
+  from the **BirdBathController web UI** (Configure → Beertap tab)
 
-## Notes!
-
-The Systemd service is built with pyenv in mind. If you install on a non-pyenv system, you will have to make
-some modifications.
-
-If you attempt to calibrate, you likely have to stop the three services reading from those ADC units.
-
-The system is written to allow both readers and writers to come up in any order. Named pipes have a
-code convention: everyone, readers and writers, attempts to create the /tmp before reading (or on read failure).
-If you write code to use this, follow the convention, or risk a timing hole.
-
-The wiring is built for *differential* use. This is due to concern about long run length (design requirement: placed 10' or more
-from controller to ADC unit). While this may not be strictly necessary, it was chosen to increase reliability.
+---
 
 ## Files
 
-### Main Programs
+### Main programs
 
-- `adc_reader.py` - Main ADC reader program that continuously reads values and sends to named pipes
-- `calibrate_adc.py` - Interactive calibration tool to set min/max voltage values
-- `pipe_reader_test.py` - Test program to read and display data from named pipes
+| File | Description |
+|------|-------------|
+| `adc_reader.py` | Continuous ADC reader; writes to named pipe |
+| `calibrate.py` | Unified interactive calibration tool (CLI) |
+| `beertap_calibration_core.py` | Shared calibration library used by both `calibrate.py` and `BirdBathController.py` |
+| `i2c_lock.py` | File-based I2C device locking |
 
-### Configuration Files
+> **Note:** The older `calibrate_adc.py` is superseded by `calibrate.py` +
+> `beertap_calibration_core.py`.  New code should use the current tools.
 
-- `adc_config_1.json` - Configuration for controller 1 (address 0x48)
-- `adc_config_2.json` - Configuration for controller 2 (address 0x49)
-- `adc_config_3.json` - Configuration for controller 3 (address 0x4a)
+### Configuration files
 
-### Systemd Services
+| File | ADC address | Tap channels |
+|------|-------------|--------------|
+| `adc_config_1.json` | `0x48` | tap3, tap4 |
+| `adc_config_2.json` | `0x49` | tap5, tap6 |
+| `adc_config_3.json` | `0x4a` | tap1, tap2 |
+| `calibrate.json` | — | Master config; lists all three `adc_config_*.json` files |
+| `adc_config_mock.json` | — | Development / testing without hardware |
 
-- `systemd/adc-reader-1.service` - Service for controller 1
-- `systemd/adc-reader-2.service` - Service for controller 2
-- `systemd/adc-reader-3.service` - Service for controller 3
+### Systemd services
 
-## Configuration File Format
+- `systemd/adc-reader-1.service` — controller at `0x48`
+- `systemd/adc-reader-2.service` — controller at `0x49`
+- `systemd/adc-reader-3.service` — controller at `0x4a`
+
+---
+
+## Configuration file format
 
 ```json
 {
-  "address": "0x48",        // I2C address of the ADS1115
-  "gain": 1,                // ADC gain setting
+  "address": "0x48",
+  "gain": 1,
   "channels": [
     {
-      "name": "tap1",        // Name for the channel - tap1, tap2, etc
-      "positive_pin": "P0",  // Positive differential input
-      "negative_pin": "P1",  // Negative differential input
+      "name": "tap3",
+      "positive_pin": "P0",
+      "negative_pin": "P1",
       "calibration": {
-        "min_voltage": 0.0,  // Voltage that maps to -1.0
-        "max_voltage": 3.3   // Voltage that maps to +1.0
+        "min_voltage": -3.300875,
+        "max_voltage": -0.000125
       }
-    },
-    // ... more channels
+    }
   ],
-  "output_pipe": "/tmp/beertap_pipe",  // Shared named pipe for all writers
-  "read_interval": 0.05       // Seconds between readings
+  "output_pipe": "/tmp/beertap_pipe",
+  "read_interval": 0.05
 }
 ```
 
-## Usage
+`calibrate.json` is the master index:
 
-### Running a Single ADC Reader
+```json
+{
+  "config_files": ["adc_config_1.json", "adc_config_2.json", "adc_config_3.json"],
+  "calibration_margin_percent": 5.0,
+  "endstop_sample_count": 20
+}
+```
+
+---
+
+## Running the ADC readers
 
 ```bash
-# Make the scripts executable
-chmod +x adc_reader.py
-chmod +x calibrate_adc.py
-chmod +x pipe_reader_test.py
-
-# Run ADC reader for controller 1 (silent mode - errors only)
+# Run one reader directly (for testing)
 ./adc_reader.py adc_config_1.json
 
-# Run with debug output (shows readings once per second)
+# With debug output (prints readings once/second)
 ./adc_reader.py adc_config_1.json --debug
 ```
 
-### Calibrating Channels
+---
 
-The calibration tool offers automatic and manual calibration modes:
+## Calibration
 
-#### Automatic Calibration (Recommended)
-The automatic mode tracks min/max values while you move the control through its range:
+### ⚠️ Stop the services first
+
+Calibration needs exclusive I2C access.  Stop the reader services before
+running the calibration tool (or use the web UI, which handles this for you):
 
 ```bash
-# Interactive mode with automatic calibration option
-./calibrate_adc.py adc_config_1.json
-# Then select 'A' for automatic calibration
-
-# Quick automatic calibration for channel 1
-./calibrate_adc.py adc_config_1.json --quick 1 --set auto
+sudo systemctl stop adc-reader-1.service adc-reader-2.service adc-reader-3.service
 ```
 
-During automatic calibration:
-1. Move your control smoothly between minimum and maximum positions
-2. The system tracks the lowest and highest values in real-time
-3. Press Enter when you've covered the full range
-4. Confirm to save the tracked values
-
-#### Manual Calibration
-For precise control or specific voltage values:
+### CLI calibration — `calibrate.py`
 
 ```bash
-# Set current reading as minimum for channel 1
-./calibrate_adc.py adc_config_1.json --quick 1 --set min
+# Interactive menu (lists all channels, choose by name or number)
+cd /path/to/BirdBath
+python3 beertaps/calibrate.py
 
-# Set current reading as maximum for channel 2
-./calibrate_adc.py adc_config_1.json --quick 2 --set max
+# Jump straight to a specific channel
+python3 beertaps/calibrate.py --channel tap1
 ```
 
-### Testing Pipe Communication
+Inside the interactive menu, per-channel options include:
 
-In one terminal, run the ADC reader:
+| Option | Description |
+|--------|-------------|
+| **A** | Min-Max Capture — sweep the tap through full range, press Enter when done |
+| **B** | End-Stop Averaging — record N midpoint crossings for a statistical average |
+| **1 / 2** | Set current live reading as MIN or MAX immediately |
+| **3 / 4** | Enter a custom voltage as MIN or MAX |
+| **5** | Monitor live voltage + calibrated output |
+
+### Web UI calibration
+
+With `BirdBathController.py` running in **configure** mode, open the
+**Beertap** tab in the web UI:
+
+1. The page shows all six channels with current calibration ranges.
+2. Use the **Stop services** button before reading live voltages or capturing.
+3. Click a channel to open a capture panel — set duration and click **Capture**.
+4. Review the result and click **Save** to persist the new min/max.
+5. **Restart services** when done.
+
+---
+
+## Systemd service installation
+
 ```bash
-./adc_reader.py adc_config_1.json
-```
-
-In another terminal, run the pipe reader test:
-```bash
-# Read from the default shared pipe
-./pipe_reader_test.py
-
-# Read from a custom pipe with verbose output
-./pipe_reader_test.py /tmp/my_custom_pipe -v
-```
-
-### Installing as Systemd Services
-
-1. Copy the service files to systemd directory:
-```bash
+# 1. Copy service files
 sudo cp systemd/adc-reader-*.service /etc/systemd/system/
-```
 
-2. Reload systemd daemon:
-```bash
+# 2. Reload daemon
 sudo systemctl daemon-reload
-```
 
-3. Enable services to start on boot:
-```bash
-sudo systemctl enable adc-reader-1.service
-sudo systemctl enable adc-reader-2.service
-sudo systemctl enable adc-reader-3.service
-```
+# 3. Enable on boot
+sudo systemctl enable adc-reader-1.service adc-reader-2.service adc-reader-3.service
 
-4. Start the services:
-```bash
-sudo systemctl start adc-reader-1.service
-sudo systemctl start adc-reader-2.service
-sudo systemctl start adc-reader-3.service
-```
+# 4. Start now
+sudo systemctl start adc-reader-1.service adc-reader-2.service adc-reader-3.service
 
-5. Check service status:
-```bash
+# 5. Check status
 sudo systemctl status adc-reader-1.service
-sudo systemctl status adc-reader-2.service
-sudo systemctl status adc-reader-3.service
-```
 
-6. View logs:
-```bash
+# 6. View logs
 sudo journalctl -u adc-reader-1.service -f
 ```
 
-## Named Pipe Data Format
+> **pyenv note:** The service files assume pyenv.  If you installed Python
+> system-wide, update the `ExecStart` path in each `.service` file.
 
-Data is sent through a single shared named pipe as pickled Python objects with a 4-byte length header. The pipe supports multiple uncoordinated writers using file locking for atomic writes.
+### sudoers for web UI service control
 
-The Python object contains:
-```python
-{
-  "channel": "tap1",                  # Unique channel name from config - tap1, tap2, ...
-  "value": 0.5432,                    # Calibrated value (-1.0 to 1.0)
-  "timestamp": 1635789012.345         # Unix timestamp
-}
+`BirdBathController.py` calls `sudo systemctl start/stop` via the web UI.
+Install the provided sudoers snippet so this works without a password:
+
+```bash
+sudo cp sudoers.d/birdbath-adc /etc/sudoers.d/
+sudo chmod 440 /etc/sudoers.d/birdbath-adc
 ```
 
-The message format:
-1. 4 bytes (big-endian uint32): Length of pickled data
-2. N bytes: Pickled Python object (using pickle protocol)
+---
 
-## Reading from Named Pipes in Your Application
+## Named pipe data format
 
-Example Python code to read from the shared pipe:
+All three reader processes write to a single shared pipe (`/tmp/beertap_pipe`)
+using file locking for atomic writes.
+
+Each message is a length-prefixed pickled Python dict:
+
+```
+[4 bytes big-endian uint32: length of pickled data]
+[N bytes: pickle of {"channel": "tap1", "value": 0.5432, "timestamp": 1234567890.0}]
+```
+
+`value` is always in [−1.0, +1.0].
+
+### Reading from the pipe in Python
 
 ```python
-import struct
-import pickle
-import os
+import struct, pickle, os
 
 class PipeReader:
-    def __init__(self, pipe_path='/tmp/adc_pipe_main'):
+    def __init__(self, pipe_path='/tmp/beertap_pipe'):
         self.pipe_path = pipe_path
         self.buffer = b''
+        self.pipe_fd = os.open(pipe_path, os.O_RDONLY | os.O_NONBLOCK)
 
-        # Open pipe for reading
-        self.pipe_fd = os.open(pipe_path, os.O_RDONLY)
+    def read_latest_values(self):
+        try:
+            chunk = os.read(self.pipe_fd, 4096)
+            if chunk:
+                self.buffer += chunk
+        except OSError:
+            return  # no data yet
 
-    def read_messages(self):
-        """Read and yield messages from the pipe"""
-        # Read available data
-        chunk = os.read(self.pipe_fd, 4096)
-        if not chunk:
-            return
-
-        self.buffer += chunk
-
-        # Process complete messages from buffer
         while len(self.buffer) >= 4:
-            # Read length header
             length = struct.unpack('>I', self.buffer[:4])[0]
-
-            # Check if we have the complete message
-            if len(self.buffer) >= 4 + length:
-                # Extract and unpickle the message
-                pickled_data = self.buffer[4:4+length]
-                self.buffer = self.buffer[4+length:]
-
-                data = pickle.loads(pickled_data)
-                yield data
-            else:
+            if len(self.buffer) < 4 + length:
                 break
-
-# Example usage
-reader = PipeReader('/tmp/adc_pipe_main')
-for message in reader.read_messages():
-    print(f"Channel: {message['channel']}")
-    print(f"Value: {message['value']}")
-    print(f"Timestamp: {message['timestamp']}")
+            data = pickle.loads(self.buffer[4:4 + length])
+            self.buffer = self.buffer[4 + length:]
+            print(f"{data['channel']}: {data['value']:+.4f}")
 ```
 
-## Hardware Setup
+---
 
-The system expects ADS1115 ADCs connected via I2C:
-- Controller 1: Address 0x48
-- Controller 2: Address 0x49
-- Controller 3: Address 0x4a
+## I2C device locking
 
-Each controller reads two differential channels:
-- Channel 1: P0 (positive) and P1 (negative)
-- Channel 2: P2 (positive) and P3 (negative)
+All tools that access the hardware (`adc_reader.py`, `calibrate.py`) use
+`i2c_lock.py` to acquire an exclusive file lock under `/var/lock/` before
+touching the I2C bus.
+
+If a second process tries to open the same ADC while it is locked, it gets:
+
+```
+************************************************************
+*  ERROR: I2C DEVICE IN USE
+************************************************************
+  ADS1115 at 0x48 is in use by PID 1234 (adc_reader.py)
+  Stop that process first, e.g.:
+    sudo systemctl stop adc-reader-1.service
+************************************************************
+```
+
+---
+
+## Hardware
+
+| Component | Details |
+|-----------|---------|
+| Pi | Raspberry Pi OS Bookworm |
+| ADC | Adafruit ADS1115 × 3 (product 1085) |
+| Pot | 15 mm 20 kΩ linear potentiometer (Digikey) |
+| Wiring | Differential over ethernet (1 pair V+/GND, 3 pairs WIPER/GND) |
+| I2C addresses | `0x48`, `0x49`, `0x4a` (set via ADDR pin) |
+
+Each ADS1115 reads two differential channels:
+- Channel A: pins P0 (+) / P1 (−)
+- Channel B: pins P2 (+) / P3 (−)
+
+---
 
 ## Dependencies
 
-Install required Python packages using the provided requirements file:
 ```bash
 pip3 install -r beertaps/requirements.txt
-```
-
-Or install manually:
-```bash
+# or manually:
 pip3 install adafruit-circuitpython-ads1x15 adafruit-blinka
 ```
 
-## I2C Device Locking
-
-### ⚠️ Important: Preventing Concurrent Access Issues
-
-The ADS1115 ADC chips communicate over I2C, and **multiple processes cannot safely access the same I2C device simultaneously**. If two programs try to read from the same ADC at the same time, you'll get corrupted/erroneous readings.
-
-### How Locking Works
-
-All main tools (`adc_reader.py`, `calibrate.py`, `calibrate_adc.py`) use a file-based locking mechanism:
-
-- **Lock files** are created in `/var/lock/` (e.g., `/var/lock/i2c-ads1115-0x48.lock`)
-- When a program starts using an ADC, it acquires an **exclusive lock** for that I2C address
-- If another program tries to access the same ADC, it will see a clear error message:
-
-```
-************************************************************
-*  ERROR: I2C DEVICE IN USE                                *
-************************************************************
-!
-!  ADS1115 ADC device at address 0x48 in use by another process.
-!  Currently held by: PID 1234 (adc_reader.py)
-!
-!  Stop that process first, e.g.:
-!    sudo systemctl stop adc-reader-*.service
-!
-************************************************************
-```
-
-### Common Scenario: Calibrating While Services Are Running
-
-If you want to calibrate a tap while the reader services are running:
-
-```bash
-# Stop all ADC reader services
-sudo systemctl stop adc-reader-1.service adc-reader-2.service adc-reader-3.service
-
-# Run calibration
-./calibrate.py
-
-# Restart services when done
-sudo systemctl start adc-reader-1.service adc-reader-2.service adc-reader-3.service
-```
-
-Or stop just the specific service for the ADC you want to calibrate:
-
-```bash
-# Stop only the service for ADC at 0x48 (config 1)
-sudo systemctl stop adc-reader-1.service
-
-# Calibrate taps on that ADC
-./calibrate.py --channel tap3
-
-# Restart when done
-sudo systemctl start adc-reader-1.service
-```
-
-### Test Files (ads1115/ directory)
-
-The test scripts in the `ads1115/` directory do **NOT** implement locking for simplicity. If you run them while services are active, you may get incorrect readings. Stop the services first if you need to run diagnostics.
+The `beertap_calibration_core` module imports hardware libraries lazily, so
+it is safe to `import beertap_calibration_core` on a non-Pi development
+machine — hardware calls only happen when actually invoked.
 
 ---
 
 ## Troubleshooting
 
-1. **Permission errors on I2C**: Add user to i2c group:
-   ```bash
-   sudo usermod -a -G i2c $USER
-   ```
+| Symptom | Fix |
+|---------|-----|
+| Permission error on I2C | `sudo usermod -a -G i2c $USER` |
+| "I2C device in use" during calibration | Stop the reader services first |
+| No data on pipe | Verify ADC is connected: `i2cdetect -y 1` |
+| Service not starting | Check logs: `sudo journalctl -u adc-reader-1.service -n 50` |
+| Web UI can't start/stop services | Install `sudoers.d/birdbath-adc` (see above) |
 
-2. **Named pipe already exists**: The programs will use existing pipes. To recreate:
-   ```bash
-   rm /tmp/adc_pipe_main
-   ```
+---
 
-3. **Multiple writers conflict**: The system uses file locking (fcntl) to ensure atomic writes when multiple ADC readers write to the same pipe. Each write is guaranteed to be complete and not interleaved with other writers.
-
-4. **No data on pipes**: Check that the ADC reader is running and the I2C devices are connected properly:
-   ```bash
-   i2cdetect -y 1
-   ```
-
-5. **Service not starting**: Check logs for errors:
-   ```bash
-   sudo journalctl -u adc-reader-1.service -n 50
-   ```
-
-## License
-
-This project is part of the Haven BirdBath system.
+This code is part of the Haven BirdBath system.
