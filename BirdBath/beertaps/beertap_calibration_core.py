@@ -38,7 +38,7 @@ class ChannelInfo:
 
     def __init__(self, name: str, config_file: str, channel_index: int,
                  adc_address: int, adc_gain: int,
-                 positive_pin: str, negative_pin: str,
+                 positive_pin: int, negative_pin: int,
                  calibration: dict):
         self.name = name
         self.config_file = config_file
@@ -181,8 +181,10 @@ def _open_adc_channel(info: ChannelInfo):
     i2c = busio.I2C(board.SCL, board.SDA)
     ads = ADS.ADS1115(i2c, address=info.adc_address)
     ads.gain = info.adc_gain
-    pos = getattr(ADS, info.positive_pin)
-    neg = getattr(ADS, info.negative_pin)
+    print("Attempting to get info on the positive and negative pins")
+    pos = info.positive_pin
+    neg = info.negative_pin
+    print("Got info on the positive and negative pins")
     return AnalogIn(ads, pos, neg)
 
 

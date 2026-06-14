@@ -1,6 +1,6 @@
 [Unit]
 Description=BirdBath Controller (pattern runner + web UI)
-After=network.target adc-reader-1.service adc-reader-2.service adc-reader-3.service
+After=multi-user.target
 Wants=adc-reader-1.service adc-reader-2.service adc-reader-3.service
 
 [Service]

@@ -4,17 +4,17 @@
   "channels": [
     {
       "name": "tap3",
-      "positive_pin": "P0",
-      "negative_pin": "P1",
+      "positive_pin": 0,
+      "negative_pin": 1,
       "calibration": {
-        "min_voltage": -3.300875,
-        "max_voltage": -0.000125
+        "min_voltage": -2.2843750000000003,
+        "max_voltage": -0.76325
       }
     },
     {
       "name": "tap4",
-      "positive_pin": "P2",
-      "negative_pin": "P3",
+      "positive_pin": 2,
+      "negative_pin": 3,
       "calibration": {
         "min_voltage": -3.300625,
         "max_voltage": -0.000125

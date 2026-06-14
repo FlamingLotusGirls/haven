@@ -186,8 +186,8 @@ class ADCReader:
                 self.channels = []
                 for ch_config in self.config['channels']:
                     # Get positive and negative pins
-                    pos_pin = getattr(ADS, ch_config['positive_pin'])
-                    neg_pin = getattr(ADS, ch_config['negative_pin'])
+                    pos_pin = ch_config['positive_pin']
+                    neg_pin = ch_config['negative_pin']
 
                     # Create AnalogIn object
                     channel = AnalogIn(self.ads, pos_pin, neg_pin)

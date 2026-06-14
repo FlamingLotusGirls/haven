@@ -24,8 +24,8 @@ def test_ads1115_simple():
         ads.gain = 1
 
         # Create channel A0
-        channel1 = AnalogIn(ads, ADS.P0, ADS.P1)
-        channel2 = AnalogIn(ads, ADS.P2, ADS.P3)
+        channel1 = AnalogIn(ads, 0, 1)
+        channel2 = AnalogIn(ads, 2, 3)
 
         print("ADS1115 Test - Address 0x49, Channel A0 - A1 differential")
         print("Gain: ±2.048V (optimized for 0-3.3V)")
