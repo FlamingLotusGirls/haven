@@ -91,7 +91,7 @@ def test_ads1115_communication(address):
 
         # Try to read from channel 0
         from adafruit_ads1x15.analog_in import AnalogIn
-        chan = AnalogIn(ads, ADS.P0)
+        chan = AnalogIn(ads, 0)
 
         voltage = chan.voltage
         print(f"✓ Successfully read voltage from A0: {voltage:.3f}V")
